@@ -1,0 +1,30 @@
+{
+ "PhaseA/lift_success": 0.0,
+ "PhaseA/lift_duration_s": 0.0,
+ "PhaseA/sequence_success": 0.0,
+ "PhaseA/live_contact_006": 0.000859375,
+ "PhaseA/object_mpjpe_mm": 2.113217594673236,
+ "Stage/physical_contact": 0.00028645833333333333,
+ "Metric/hand_to_obj_dist": 0.6244239673515161,
+ "Metric/hand_to_obj_under_005_frac": 0.00036458333333333335,
+ "_peak_lift_success": 0.0,
+ "_final_lift_success": 0.0,
+ "_checkpoint": "/home/jiarui/sweep_ckpts_r2/OF_00_apple_eat_1_SPHERE/model_7310.pt",
+ "_num_envs": 64,
+ "_steps": 600,
+ "_forced_start_frame": null,
+ "_rsi_start_frames_seen": [
+  0,
+  2,
+  3,
+  4,
+  5,
+  6,
+  8,
+  9,
+  10,
+  12,
+  13,
+  14
+ ]
+}
