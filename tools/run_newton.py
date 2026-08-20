@@ -65,23 +65,38 @@ solver = SolverMuJoCo(nmodel, enable_multiccd=True, update_data_interval=0,
 control = nmodel.control()
 
 _ref_mj = mujoco.MjModel.from_xml_path(A.xml)
-for holder in (solver.mj_model, getattr(solver, "mjw_model", None)):
-  if holder is None:
-    continue
-  dd = getattr(holder, "dof_damping", None)
-  if dd is not None:
-    arr = dd.numpy() if hasattr(dd, "numpy") else np.asarray(dd)
-    new = _ref_mj.dof_damping.astype(arr.dtype).reshape(arr.shape)
-    dd.assign(new) if hasattr(dd, "assign") else dd.__setitem__(slice(None), new)
-  # timestep is NOT set on the warp model: Newton writes it from the dt passed to solver.step()
-  # every step, and assigning a float here replaces the warp array it expects to call .fill_() on.
-  if holder is solver.mj_model:
-    holder.opt.timestep = float(_ref_mj.opt.timestep)
-planes = [i for i in range(solver.mj_model.ngeom) if int(solver.mj_model.geom_type[i]) == 0]
-if planes:
-  src = [j for j in range(_ref_mj.ngeom) if int(_ref_mj.geom_type[j]) == 0][0]
-  for i in planes:
-    solver.mj_model.geom_size[i] = _ref_mj.geom_size[src]
+
+# Newton reconstructs an MjModel from its own Model rather than compiling the MJCF, and that
+# reconstruction mislabels which bodies are "simple": apple/apple and table/table -- the two free
+# bodies -- come back with body_simple=0, and the apple's six free dofs get dof_simplenum=0 instead
+# of MuJoCo's 6,5,4,3,2,1. That changes nC (the size of MuJoCo's compressed mass-matrix layout) from
+# 1087 to 1102, so the two engines solve with different sparse structures for the SAME tree.
+#
+# The effect is precisely what the divergence looked like: smooth dynamics agreed to 1e-5 while
+# qfrc_constraint differed by 2e-3 from the first free-dynamics step. It is also invisible to every
+# check that compares the compiled models -- they agree on nM, on the tree, on every per-body field.
+#
+# dof_damping is the other field Newton's conversion drops (free-joint damping specifically), and it
+# has to be re-applied AFTER put_model, since put_model copies from the CPU model.
+# Patching body_simple/dof_simplenum on the reconstructed model does not help: nC and the index
+# arrays that go with it (M_rowadr, M_colind, mapM2M) are computed by MuJoCo's compiler and stored on
+# the MjModel, so put_model copies the stale nC straight through. The derived structure has to come
+# from a compiled model.
+#
+# Newton's solver still does everything it does: control application, collision, the step. Only the
+# MjModel handed to it is MuJoCo's compilation of the same MJCF rather than Newton's reconstruction
+# of it -- and the two were verified identical in tree topology, body/joint/actuator counts and
+# order, so this substitutes a correctly-derived model, not a different robot.
+import mujoco_warp as _mjw
+_before = (int(solver.mjw_model.nC), int(solver.mj_model.nmocap))
+solver.mj_model = _ref_mj
+solver.mjw_model = _mjw.put_model(_ref_mj)
+solver.mjw_data = _mjw.put_data(_ref_mj, mujoco.MjData(_ref_mj),
+                                nworld=1, nconmax=256, njmax=2048)
+print(f"warp model rebuilt from the compiled MJCF: nC {_before[0]} -> {int(solver.mjw_model.nC)}, "
+      f"nmocap {_before[1]} -> {int(_ref_mj.nmocap)}")
+assert int(solver.mjw_model.nC) == int(_ref_mj.nC)
+
 print(f"newton model: nq={solver.mj_model.nq} nv={solver.mj_model.nv} nu={solver.mj_model.nu} "
       f"ngeom={solver.mj_model.ngeom}")
 
@@ -138,7 +153,7 @@ print("policy loaded (mjlab env is for construction only and is never stepped)")
 from newton_bridge import NewtonEnv
 
 nenv = NewtonEnv(solver.mj_model, solver.mjw_data, num_envs=1, device="cuda:0",
-                 control=control, rename_from=_ref_mj, physics_dt=DT, decimation=DECIMATION,
+                 control=control, rename_from=None, physics_dt=DT, decimation=DECIMATION,
                  solver=solver)
 print(f"bridge: robot joints={len(nenv.scene['robot'].joint_names)} "
       f"bodies={len(nenv.scene['robot'].body_names)} entities={sorted(nenv.scene)}")
@@ -186,6 +201,36 @@ state_in, state_out = nmodel.state(), nmodel.state()
 
 from tensordict import TensorDict
 
+# The residual policy wrapper records its per-step state by setting attributes on the env it was
+# CONSTRUCTED with -- rl.py's _set_residual_action_stats does `env = self.env.unwrapped` -- and that
+# is the mjlab env, because the runner needs one to resolve observation and action dimensions.
+#
+# Three observation groups read those attributes back: tracker_action, last_residual and astra_obs.
+# On the Newton env they were never set, so mdp.py silently took its fallback path (teacher_action
+# instead of the tracker's actual output) and those three groups were wrong by ~4.2 while every other
+# group agreed to 1e-4. Nothing raised; the policy simply acted on a different world.
+#
+# The values themselves are correct -- the policy was fed Newton's observations to produce them --
+# so they only need to be moved onto the env the feature builders read.
+_RESIDUAL_STATS_ATTRS = (
+  "_residual_last_action_mean", "_residual_last_astra_action_pkl", "_residual_last_base_action",
+  "_residual_last_decoder_body_delta", "_residual_last_final_action",
+  "_residual_last_raw_residual_action", "_residual_last_residual_action",
+  "_residual_last_token_delta",
+)
+
+
+def _sync_residual_stats() -> int:
+  src = mjenv.unwrapped
+  n = 0
+  for name in _RESIDUAL_STATS_ATTRS:
+    v = getattr(src, name, None)
+    if v is not None:
+      setattr(nenv, name, v)
+      n += 1
+  return n
+
+
 def _obs_dict():
   # mjlab hands the policy a TensorDict, not a plain dict (see evaluate_astra_body_only.py).
   out = {}
@@ -197,7 +242,7 @@ def _obs_dict():
   return TensorDict(out, batch_size=[nenv.num_envs])
 
 obj = nenv.scene["apple"]
-qpos_log, rows = [], []
+qpos_log, mocap_log, rows = [], [], []
 z0 = None
 peak = {"rise": -99.0, "min_h2o": 9.9, "contact": 0.0}
 
@@ -209,6 +254,10 @@ for k in range(A.steps):
   obs = _obs_dict()
   with torch.inference_mode():
     action = policy(obs)
+  n_sync = _sync_residual_stats()
+  if k == 0:
+    print(f"  residual-stats attributes synced onto the Newton env: {n_sync}/"
+          f"{len(_RESIDUAL_STATS_ATTRS)}")
   amgr.advance(action)          # keeps last_final_action / last_residual live, as mjlab does
   action_term.process_actions(action)
 
@@ -246,6 +295,10 @@ for k in range(A.steps):
     ncon = -1
   if A.dump_qpos:
     qpos_log.append(wp.to_torch(solver.mjw_data.qpos)[0].detach().cpu().numpy().copy())
+    # The table is a mocap body, so its pose lives outside qpos. Without it the render puts the
+    # table at the origin and the apple appears to float.
+    mocap_log.append((wp.to_torch(solver.mjw_data.mocap_pos)[0].detach().cpu().numpy().copy(),
+                      wp.to_torch(solver.mjw_data.mocap_quat)[0].detach().cpu().numpy().copy()))
   frame = int(rmdp._tracking_frame(nenv, int(amdp._ref(str(nenv.device))["n_frames"]))[0])
   rows.append(dict(step=k, frame=frame, obj_z=z, rise_cm=rise, h2o=h2o, ncon=ncon))
   if k % A.every == 0 or k == A.steps - 1:
@@ -257,5 +310,7 @@ print(f"min fingertip-object distance = {peak['min_h2o']:.3f} m   (mjlab 0.032-0
 
 if A.dump_qpos:
   np.savez_compressed(A.dump_qpos, qpos=np.stack(qpos_log),
+                      mocap_pos=np.stack([m[0] for m in mocap_log]),
+                      mocap_quat=np.stack([m[1] for m in mocap_log]),
                       rows=json.dumps(rows))
   print(f"wrote {A.dump_qpos}  ({len(qpos_log)} frames of qpos for rendering)")

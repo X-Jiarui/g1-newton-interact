@@ -79,3 +79,39 @@ integrator: parent has 0 (default), child has 3, keeping parent value
 WARNING Thu Aug 20 23:12:32 2026: Attach conflict when attaching 'g1_29dof_with_hands_scene' to 'mjlab scene', policy is 'warning'
 integrator: parent has 0 (default), child has 3, keeping parent value
 
+WARNING Fri Aug 21 00:02:39 2026: Attach conflict when attaching 'g1_29dof_with_hands_scene' to 'mjlab scene', policy is 'warning'
+integrator: parent has 0 (default), child has 3, keeping parent value
+
+WARNING Fri Aug 21 00:06:28 2026: Attach conflict when attaching 'g1_29dof_with_hands_scene' to 'mjlab scene', policy is 'warning'
+integrator: parent has 0 (default), child has 3, keeping parent value
+
+WARNING Fri Aug 21 00:08:04 2026: Attach conflict when attaching 'g1_29dof_with_hands_scene' to 'mjlab scene', policy is 'warning'
+integrator: parent has 0 (default), child has 3, keeping parent value
+
+WARNING Fri Aug 21 00:09:44 2026: Attach conflict when attaching 'g1_29dof_with_hands_scene' to 'mjlab scene', policy is 'warning'
+integrator: parent has 0 (default), child has 3, keeping parent value
+
+WARNING Fri Aug 21 00:10:24 2026: Attach conflict when attaching 'g1_29dof_with_hands_scene' to 'mjlab scene', policy is 'warning'
+integrator: parent has 0 (default), child has 3, keeping parent value
+
+WARNING Fri Aug 21 00:22:31 2026: Attach conflict when attaching 'g1_29dof_with_hands_scene' to 'mjlab scene', policy is 'warning'
+integrator: parent has 0 (default), child has 3, keeping parent value
+
+WARNING Fri Aug 21 00:28:15 2026: Attach conflict when attaching 'g1_29dof_with_hands_scene' to 'mjlab scene', policy is 'warning'
+integrator: parent has 0 (default), child has 3, keeping parent value
+
+WARNING Fri Aug 21 00:39:31 2026: Attach conflict when attaching 'g1_29dof_with_hands_scene' to 'mjlab scene', policy is 'warning'
+integrator: parent has 0 (default), child has 3, keeping parent value
+
+WARNING Fri Aug 21 00:44:53 2026: Attach conflict when attaching 'g1_29dof_with_hands_scene' to 'mjlab scene', policy is 'warning'
+integrator: parent has 0 (default), child has 3, keeping parent value
+
+WARNING Fri Aug 21 00:49:28 2026: Attach conflict when attaching 'g1_29dof_with_hands_scene' to 'mjlab scene', policy is 'warning'
+integrator: parent has 0 (default), child has 3, keeping parent value
+
+WARNING Fri Aug 21 00:54:52 2026: Attach conflict when attaching 'g1_29dof_with_hands_scene' to 'mjlab scene', policy is 'warning'
+integrator: parent has 0 (default), child has 3, keeping parent value
+
+WARNING Fri Aug 21 01:00:09 2026: Attach conflict when attaching 'g1_29dof_with_hands_scene' to 'mjlab scene', policy is 'warning'
+integrator: parent has 0 (default), child has 3, keeping parent value
+

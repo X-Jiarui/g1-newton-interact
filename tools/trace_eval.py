@@ -24,6 +24,7 @@ ap.add_argument("--no-terminations", action="store_true",
                 help="what record_policy_video.sh/view_run.sh use: let the episode run the whole "
                      "clip instead of resetting on a fall")
 ap.add_argument("--force-start-frame", type=int, default=None)
+ap.add_argument("--dump-qpos", default=None, help="npz of per-step qpos + mocap, for rendering")
 A = ap.parse_args()
 
 # mjlab targets mujoco_warp 3.8 and sets options 3.9.1 removed. Newton 1.5 pins 3.11, so the shim
@@ -77,6 +78,7 @@ policy = _maybe_wrap_residual_action_stats_policy(TASK, runner, policy)
 from mjlab.tasks.apple_eat import object_pool as _pool
 _obj = _pool.active(u)
 _z0 = None
+_qlog, _mlog = [], []
 env.reset()
 obs = wrapped.get_observations(); obs = obs[0] if isinstance(obs, tuple) else obs
 print(f"\n{'step':>5} {'ep_len':>8} {'obj_z':>8} {'dz_cm':>8} {'h2o_m':>8} {'contact':>8} "
@@ -98,6 +100,10 @@ for k in range(A.steps):
   peak["contact"] = max(peak["contact"], g("Stage/physical_contact") if log.get("Stage/physical_contact") is not None else 0.0)
   if log.get("Metric/hand_to_obj_dist") is not None:
     peak["min_h2o"] = min(peak["min_h2o"], g("Metric/hand_to_obj_dist"))
+  if A.dump_qpos:
+    _qlog.append(u.sim.data.qpos[0].detach().float().cpu().numpy().copy())
+    _mlog.append((u.sim.data.mocap_pos[0].detach().float().cpu().numpy().copy(),
+                  u.sim.data.mocap_quat[0].detach().float().cpu().numpy().copy()))
   z = float(_obj.data.root_link_pos_w[:, 2].mean())
   if _z0 is None:
     _z0 = z
@@ -108,6 +114,11 @@ for k in range(A.steps):
           f"{g('PhaseA/lift_success'):7.3f} {resets_total:7d}")
 print("-" * 68)
 print(f"max object rise = {peak.get('max_dz_cm', float('nan')):.2f} cm  (lift threshold is 3 cm)")
+if A.dump_qpos:
+  np.savez_compressed(A.dump_qpos, qpos=np.stack(_qlog),
+                      mocap_pos=np.stack([m[0] for m in _mlog]),
+                      mocap_quat=np.stack([m[1] for m in _mlog]))
+  print(f"wrote {A.dump_qpos} ({len(_qlog)} frames)")
 print(f"peak lift_success={peak['lift']:.3f}  peak physical_contact={peak['contact']:.3f}  "
       f"min hand_to_obj={peak['min_h2o']:.3f} m  total env-resets={resets_total}")
 env.close()
