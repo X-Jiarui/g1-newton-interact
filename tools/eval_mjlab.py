@@ -17,7 +17,7 @@ the number rather than left implicit -- the same checkpoint scores differently u
 windows, and a bare percentage is not comparable to anything.
 """
 from __future__ import annotations
-import argparse, json, os
+import argparse, sys, json, os
 from collections import defaultdict
 from dataclasses import asdict
 from pathlib import Path
@@ -30,6 +30,18 @@ ap.add_argument("--steps", type=int, default=600)
 ap.add_argument("--force-start-frame", type=int, default=None)
 ap.add_argument("--out", default=None)
 A = ap.parse_args()
+
+# mjlab targets mujoco_warp 3.8 and sets options 3.9.1 removed. Newton 1.5 pins 3.11, so the shim
+# goes in before any mjlab Simulation is built. It patches the new library, never mjlab: mjlab is the
+# baseline, and editing it would mean the reference and the port stopped running identical code.
+sys.path.insert(0, os.path.expanduser("~/projects/g1-newton-interact/src"))
+try:
+  import mjw_compat as _mjw_compat
+  _patched = _mjw_compat.apply()
+  if _patched:
+    print(f"[compat] tolerating removed mujoco_warp options: {_patched}")
+except Exception as _e:
+  print(f"[compat] shim unavailable ({type(_e).__name__}: {_e})")
 
 import mjlab.tasks  # noqa: F401
 from mjlab.envs import ManagerBasedRlEnv

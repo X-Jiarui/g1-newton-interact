@@ -116,18 +116,9 @@ for _holder, _label in ((solver.mj_model, "mj_model"), (getattr(solver, "mjw_mod
 # Newton drives dt from the simulation loop rather than the model, so the converted model keeps
 # MuJoCo's default 0.002 while mjlab runs at 0.005. Both are set: the model so anything reading it
 # agrees with mjlab, and the loop must still be stepped at the same dt.
-for _h in (solver.mj_model, getattr(solver, "mjw_model", None)):
-  _o = getattr(_h, "opt", None)
-  if _o is None:
-    continue
-  try:
-    _o.timestep = _ref.opt.timestep
-  except Exception:
-    _ts = getattr(_o, "timestep", None)
-    if hasattr(_ts, "assign"):
-      import numpy as _np2
-      _ts.assign(_np2.full(_ts.shape, _ref.opt.timestep, dtype=_ts.numpy().dtype))
-print(f"set timestep to {_ref.opt.timestep} on the converted model(s)")
+solver.mj_model.opt.timestep = float(_ref.opt.timestep)
+print(f"set timestep to {_ref.opt.timestep} on the CPU model "
+      "(the warp model's timestep is written by Newton from the dt passed to step())")
 
 # FIX 4 -- ground plane extent. mjlab's planes carry size (0, 0, 0.01); a zero half-extent means an
 # infinite plane. Newton substitutes a finite 5 x 5. MuJoCo itself collides against the infinite
