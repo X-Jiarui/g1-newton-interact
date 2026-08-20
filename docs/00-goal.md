@@ -124,7 +124,7 @@ From Newton's own docs and importer source, the items that apply to this asset:
 ## Stages
 
 1. ~~Measure the mjlab baseline: model, orderings, PD, what reaches ctrl.~~ **done**
-2. Import mjlab's MJCF into Newton; dump via `save_to_mjcf`; compile; diff fact-sheets; fix deltas
+2. ~~Import mjlab MJCF into Newton; diff fact-sheets; fix deltas.~~ **done, see docs/01-model-parity.md**
    until the model comparison is clean.
 3. Measure the version noise floor (same MJCF, MuJoCo 3.8 vs 3.11).
 4. Port the observation assembly, reusing mjlab's own builders through an adapter rather than

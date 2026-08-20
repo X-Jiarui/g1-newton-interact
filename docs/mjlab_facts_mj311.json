@@ -16507,10 +16507,10 @@
   "enableflags": 0
  },
  "_source": {
-  "side": "mjlab_exported_xml",
+  "side": "mjlab_xml_under_mj311",
   "xml": "/home/jiarui/projects/g1-newton-interact/assets/mjlab_scene/scene.xml"
  },
  "_versions": {
-  "mujoco": "3.8.1"
+  "mujoco": "3.11.0"
  }
 }

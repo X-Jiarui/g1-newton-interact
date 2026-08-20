@@ -5,8 +5,8 @@
   "nu": 138,
   "njnt": 71,
   "nbody": 92,
-  "ngeom": 226,
-  "nmesh": 145
+  "ngeom": 81,
+  "nmesh": 65
  },
  "joint_order": [
   "robot/floating_base_joint",
@@ -82,144 +82,144 @@
   "apple/apple_joint"
  ],
  "actuator_order": [
-  "robot/xml_motor_unused_left_hip_pitch_joint",
-  "robot/xml_motor_unused_left_hip_roll_joint",
-  "robot/xml_motor_unused_left_hip_yaw_joint",
-  "robot/xml_motor_unused_left_knee_joint",
-  "robot/xml_motor_unused_left_ankle_pitch_joint",
-  "robot/xml_motor_unused_left_ankle_roll_joint",
-  "robot/xml_motor_unused_right_hip_pitch_joint",
-  "robot/xml_motor_unused_right_hip_roll_joint",
-  "robot/xml_motor_unused_right_hip_yaw_joint",
-  "robot/xml_motor_unused_right_knee_joint",
-  "robot/xml_motor_unused_right_ankle_pitch_joint",
-  "robot/xml_motor_unused_right_ankle_roll_joint",
-  "robot/xml_motor_unused_waist_yaw_joint",
-  "robot/xml_motor_unused_waist_roll_joint",
-  "robot/xml_motor_unused_waist_pitch_joint",
-  "robot/xml_motor_unused_left_shoulder_pitch_joint",
-  "robot/xml_motor_unused_left_shoulder_roll_joint",
-  "robot/xml_motor_unused_left_shoulder_yaw_joint",
-  "robot/xml_motor_unused_left_elbow_joint",
-  "robot/xml_motor_unused_left_wrist_roll_joint",
-  "robot/xml_motor_unused_left_wrist_pitch_joint",
-  "robot/xml_motor_unused_left_wrist_yaw_joint",
-  "robot/xml_motor_unused_right_shoulder_pitch_joint",
-  "robot/xml_motor_unused_right_shoulder_roll_joint",
-  "robot/xml_motor_unused_right_shoulder_yaw_joint",
-  "robot/xml_motor_unused_right_elbow_joint",
-  "robot/xml_motor_unused_right_wrist_roll_joint",
-  "robot/xml_motor_unused_right_wrist_pitch_joint",
-  "robot/xml_motor_unused_right_wrist_yaw_joint",
-  "robot/xml_motor_unused_right_finger1_joint1_actuator",
-  "robot/xml_motor_unused_right_finger1_joint2_actuator",
-  "robot/xml_motor_unused_right_finger1_joint3_actuator",
-  "robot/xml_motor_unused_right_finger1_joint4_actuator",
-  "robot/xml_motor_unused_right_finger2_joint1_actuator",
-  "robot/xml_motor_unused_right_finger2_joint2_actuator",
-  "robot/xml_motor_unused_right_finger2_joint3_actuator",
-  "robot/xml_motor_unused_right_finger2_joint4_actuator",
-  "robot/xml_motor_unused_right_finger3_joint1_actuator",
-  "robot/xml_motor_unused_right_finger3_joint2_actuator",
-  "robot/xml_motor_unused_right_finger3_joint3_actuator",
-  "robot/xml_motor_unused_right_finger3_joint4_actuator",
-  "robot/xml_motor_unused_right_finger4_joint1_actuator",
-  "robot/xml_motor_unused_right_finger4_joint2_actuator",
-  "robot/xml_motor_unused_right_finger4_joint3_actuator",
-  "robot/xml_motor_unused_right_finger4_joint4_actuator",
-  "robot/xml_motor_unused_right_finger5_joint1_actuator",
-  "robot/xml_motor_unused_right_finger5_joint2_actuator",
-  "robot/xml_motor_unused_right_finger5_joint3_actuator",
-  "robot/xml_motor_unused_right_finger5_joint4_actuator",
-  "robot/xml_motor_unused_left_finger1_joint1_actuator",
-  "robot/xml_motor_unused_left_finger1_joint2_actuator",
-  "robot/xml_motor_unused_left_finger1_joint3_actuator",
-  "robot/xml_motor_unused_left_finger1_joint4_actuator",
-  "robot/xml_motor_unused_left_finger2_joint1_actuator",
-  "robot/xml_motor_unused_left_finger2_joint2_actuator",
-  "robot/xml_motor_unused_left_finger2_joint3_actuator",
-  "robot/xml_motor_unused_left_finger2_joint4_actuator",
-  "robot/xml_motor_unused_left_finger3_joint1_actuator",
-  "robot/xml_motor_unused_left_finger3_joint2_actuator",
-  "robot/xml_motor_unused_left_finger3_joint3_actuator",
-  "robot/xml_motor_unused_left_finger3_joint4_actuator",
-  "robot/xml_motor_unused_left_finger4_joint1_actuator",
-  "robot/xml_motor_unused_left_finger4_joint2_actuator",
-  "robot/xml_motor_unused_left_finger4_joint3_actuator",
-  "robot/xml_motor_unused_left_finger4_joint4_actuator",
-  "robot/xml_motor_unused_left_finger5_joint1_actuator",
-  "robot/xml_motor_unused_left_finger5_joint2_actuator",
-  "robot/xml_motor_unused_left_finger5_joint3_actuator",
-  "robot/xml_motor_unused_left_finger5_joint4_actuator",
-  "robot/left_hip_pitch_joint",
-  "robot/left_hip_yaw_joint",
-  "robot/right_hip_pitch_joint",
-  "robot/right_hip_yaw_joint",
-  "robot/waist_yaw_joint",
-  "robot/left_hip_roll_joint",
-  "robot/left_knee_joint",
-  "robot/right_hip_roll_joint",
-  "robot/right_knee_joint",
-  "robot/left_ankle_pitch_joint",
-  "robot/left_ankle_roll_joint",
-  "robot/right_ankle_pitch_joint",
-  "robot/right_ankle_roll_joint",
-  "robot/waist_roll_joint",
-  "robot/waist_pitch_joint",
-  "robot/left_shoulder_pitch_joint",
-  "robot/left_shoulder_roll_joint",
-  "robot/left_shoulder_yaw_joint",
-  "robot/left_elbow_joint",
-  "robot/left_wrist_roll_joint",
-  "robot/right_shoulder_pitch_joint",
-  "robot/right_shoulder_roll_joint",
-  "robot/right_shoulder_yaw_joint",
-  "robot/right_elbow_joint",
-  "robot/right_wrist_roll_joint",
-  "robot/left_wrist_pitch_joint",
-  "robot/left_wrist_yaw_joint",
-  "robot/right_wrist_pitch_joint",
-  "robot/right_wrist_yaw_joint",
-  "robot/left_finger1_joint1",
-  "robot/left_finger1_joint2",
-  "robot/left_finger1_joint3",
-  "robot/left_finger1_joint4",
-  "robot/left_finger2_joint1",
-  "robot/left_finger2_joint2",
-  "robot/left_finger2_joint3",
-  "robot/left_finger2_joint4",
-  "robot/left_finger3_joint1",
-  "robot/left_finger3_joint2",
-  "robot/left_finger3_joint3",
-  "robot/left_finger3_joint4",
-  "robot/left_finger4_joint1",
-  "robot/left_finger4_joint2",
-  "robot/left_finger4_joint3",
-  "robot/left_finger4_joint4",
-  "robot/left_finger5_joint1",
-  "robot/left_finger5_joint2",
-  "robot/left_finger5_joint3",
-  "robot/left_finger5_joint4",
-  "robot/right_finger1_joint1",
-  "robot/right_finger1_joint2",
-  "robot/right_finger1_joint3",
-  "robot/right_finger1_joint4",
-  "robot/right_finger2_joint1",
-  "robot/right_finger2_joint2",
-  "robot/right_finger2_joint3",
-  "robot/right_finger2_joint4",
-  "robot/right_finger3_joint1",
-  "robot/right_finger3_joint2",
-  "robot/right_finger3_joint3",
-  "robot/right_finger3_joint4",
-  "robot/right_finger4_joint1",
-  "robot/right_finger4_joint2",
-  "robot/right_finger4_joint3",
-  "robot/right_finger4_joint4",
-  "robot/right_finger5_joint1",
-  "robot/right_finger5_joint2",
-  "robot/right_finger5_joint3",
-  "robot/right_finger5_joint4"
+  "act@robot/left_hip_pitch_joint",
+  "act@robot/left_hip_roll_joint",
+  "act@robot/left_hip_yaw_joint",
+  "act@robot/left_knee_joint",
+  "act@robot/left_ankle_pitch_joint",
+  "act@robot/left_ankle_roll_joint",
+  "act@robot/right_hip_pitch_joint",
+  "act@robot/right_hip_roll_joint",
+  "act@robot/right_hip_yaw_joint",
+  "act@robot/right_knee_joint",
+  "act@robot/right_ankle_pitch_joint",
+  "act@robot/right_ankle_roll_joint",
+  "act@robot/waist_yaw_joint",
+  "act@robot/waist_roll_joint",
+  "act@robot/waist_pitch_joint",
+  "act@robot/left_shoulder_pitch_joint",
+  "act@robot/left_shoulder_roll_joint",
+  "act@robot/left_shoulder_yaw_joint",
+  "act@robot/left_elbow_joint",
+  "act@robot/left_wrist_roll_joint",
+  "act@robot/left_wrist_pitch_joint",
+  "act@robot/left_wrist_yaw_joint",
+  "act@robot/right_shoulder_pitch_joint",
+  "act@robot/right_shoulder_roll_joint",
+  "act@robot/right_shoulder_yaw_joint",
+  "act@robot/right_elbow_joint",
+  "act@robot/right_wrist_roll_joint",
+  "act@robot/right_wrist_pitch_joint",
+  "act@robot/right_wrist_yaw_joint",
+  "act@robot/right_finger1_joint1",
+  "act@robot/right_finger1_joint2",
+  "act@robot/right_finger1_joint3",
+  "act@robot/right_finger1_joint4",
+  "act@robot/right_finger2_joint1",
+  "act@robot/right_finger2_joint2",
+  "act@robot/right_finger2_joint3",
+  "act@robot/right_finger2_joint4",
+  "act@robot/right_finger3_joint1",
+  "act@robot/right_finger3_joint2",
+  "act@robot/right_finger3_joint3",
+  "act@robot/right_finger3_joint4",
+  "act@robot/right_finger4_joint1",
+  "act@robot/right_finger4_joint2",
+  "act@robot/right_finger4_joint3",
+  "act@robot/right_finger4_joint4",
+  "act@robot/right_finger5_joint1",
+  "act@robot/right_finger5_joint2",
+  "act@robot/right_finger5_joint3",
+  "act@robot/right_finger5_joint4",
+  "act@robot/left_finger1_joint1",
+  "act@robot/left_finger1_joint2",
+  "act@robot/left_finger1_joint3",
+  "act@robot/left_finger1_joint4",
+  "act@robot/left_finger2_joint1",
+  "act@robot/left_finger2_joint2",
+  "act@robot/left_finger2_joint3",
+  "act@robot/left_finger2_joint4",
+  "act@robot/left_finger3_joint1",
+  "act@robot/left_finger3_joint2",
+  "act@robot/left_finger3_joint3",
+  "act@robot/left_finger3_joint4",
+  "act@robot/left_finger4_joint1",
+  "act@robot/left_finger4_joint2",
+  "act@robot/left_finger4_joint3",
+  "act@robot/left_finger4_joint4",
+  "act@robot/left_finger5_joint1",
+  "act@robot/left_finger5_joint2",
+  "act@robot/left_finger5_joint3",
+  "act@robot/left_finger5_joint4",
+  "act@robot/left_hip_pitch_joint#1",
+  "act@robot/left_hip_yaw_joint#2",
+  "act@robot/right_hip_pitch_joint#3",
+  "act@robot/right_hip_yaw_joint#4",
+  "act@robot/waist_yaw_joint#5",
+  "act@robot/left_hip_roll_joint#6",
+  "act@robot/left_knee_joint#7",
+  "act@robot/right_hip_roll_joint#8",
+  "act@robot/right_knee_joint#9",
+  "act@robot/left_ankle_pitch_joint#10",
+  "act@robot/left_ankle_roll_joint#11",
+  "act@robot/right_ankle_pitch_joint#12",
+  "act@robot/right_ankle_roll_joint#13",
+  "act@robot/waist_roll_joint#14",
+  "act@robot/waist_pitch_joint#15",
+  "act@robot/left_shoulder_pitch_joint#16",
+  "act@robot/left_shoulder_roll_joint#17",
+  "act@robot/left_shoulder_yaw_joint#18",
+  "act@robot/left_elbow_joint#19",
+  "act@robot/left_wrist_roll_joint#20",
+  "act@robot/right_shoulder_pitch_joint#21",
+  "act@robot/right_shoulder_roll_joint#22",
+  "act@robot/right_shoulder_yaw_joint#23",
+  "act@robot/right_elbow_joint#24",
+  "act@robot/right_wrist_roll_joint#25",
+  "act@robot/left_wrist_pitch_joint#26",
+  "act@robot/left_wrist_yaw_joint#27",
+  "act@robot/right_wrist_pitch_joint#28",
+  "act@robot/right_wrist_yaw_joint#29",
+  "act@robot/left_finger1_joint1#30",
+  "act@robot/left_finger1_joint2#31",
+  "act@robot/left_finger1_joint3#32",
+  "act@robot/left_finger1_joint4#33",
+  "act@robot/left_finger2_joint1#34",
+  "act@robot/left_finger2_joint2#35",
+  "act@robot/left_finger2_joint3#36",
+  "act@robot/left_finger2_joint4#37",
+  "act@robot/left_finger3_joint1#38",
+  "act@robot/left_finger3_joint2#39",
+  "act@robot/left_finger3_joint3#40",
+  "act@robot/left_finger3_joint4#41",
+  "act@robot/left_finger4_joint1#42",
+  "act@robot/left_finger4_joint2#43",
+  "act@robot/left_finger4_joint3#44",
+  "act@robot/left_finger4_joint4#45",
+  "act@robot/left_finger5_joint1#46",
+  "act@robot/left_finger5_joint2#47",
+  "act@robot/left_finger5_joint3#48",
+  "act@robot/left_finger5_joint4#49",
+  "act@robot/right_finger1_joint1#50",
+  "act@robot/right_finger1_joint2#51",
+  "act@robot/right_finger1_joint3#52",
+  "act@robot/right_finger1_joint4#53",
+  "act@robot/right_finger2_joint1#54",
+  "act@robot/right_finger2_joint2#55",
+  "act@robot/right_finger2_joint3#56",
+  "act@robot/right_finger2_joint4#57",
+  "act@robot/right_finger3_joint1#58",
+  "act@robot/right_finger3_joint2#59",
+  "act@robot/right_finger3_joint3#60",
+  "act@robot/right_finger3_joint4#61",
+  "act@robot/right_finger4_joint1#62",
+  "act@robot/right_finger4_joint2#63",
+  "act@robot/right_finger4_joint3#64",
+  "act@robot/right_finger4_joint4#65",
+  "act@robot/right_finger5_joint1#66",
+  "act@robot/right_finger5_joint2#67",
+  "act@robot/right_finger5_joint3#68",
+  "act@robot/right_finger5_joint4#69"
  ],
  "joints": {
   "robot/floating_base_joint": {
@@ -1354,13 +1354,13 @@
     0.0
    ],
    "armature": 0.0,
-   "damping": 0.05,
+   "damping": 0.0,
    "frictionloss": 0.0,
    "stiffness": 0.0
   }
  },
  "actuators": {
-  "robot/xml_motor_unused_left_hip_pitch_joint": {
+  "act@robot/left_hip_pitch_joint": {
    "index": 0,
    "trntype": 0,
    "target": "robot/left_hip_pitch_joint",
@@ -1394,7 +1394,7 @@
    "kp": 1.0,
    "kv": -1.0
   },
-  "robot/xml_motor_unused_left_hip_roll_joint": {
+  "act@robot/left_hip_roll_joint": {
    "index": 1,
    "trntype": 0,
    "target": "robot/left_hip_roll_joint",
@@ -1428,7 +1428,7 @@
    "kp": 1.0,
    "kv": -1.0
   },
-  "robot/xml_motor_unused_left_hip_yaw_joint": {
+  "act@robot/left_hip_yaw_joint": {
    "index": 2,
    "trntype": 0,
    "target": "robot/left_hip_yaw_joint",
@@ -1462,7 +1462,7 @@
    "kp": 1.0,
    "kv": -1.0
   },
-  "robot/xml_motor_unused_left_knee_joint": {
+  "act@robot/left_knee_joint": {
    "index": 3,
    "trntype": 0,
    "target": "robot/left_knee_joint",
@@ -1496,7 +1496,7 @@
    "kp": 1.0,
    "kv": -1.0
   },
-  "robot/xml_motor_unused_left_ankle_pitch_joint": {
+  "act@robot/left_ankle_pitch_joint": {
    "index": 4,
    "trntype": 0,
    "target": "robot/left_ankle_pitch_joint",
@@ -1530,7 +1530,7 @@
    "kp": 1.0,
    "kv": -1.0
   },
-  "robot/xml_motor_unused_left_ankle_roll_joint": {
+  "act@robot/left_ankle_roll_joint": {
    "index": 5,
    "trntype": 0,
    "target": "robot/left_ankle_roll_joint",
@@ -1564,7 +1564,7 @@
    "kp": 1.0,
    "kv": -1.0
   },
-  "robot/xml_motor_unused_right_hip_pitch_joint": {
+  "act@robot/right_hip_pitch_joint": {
    "index": 6,
    "trntype": 0,
    "target": "robot/right_hip_pitch_joint",
@@ -1598,7 +1598,7 @@
    "kp": 1.0,
    "kv": -1.0
   },
-  "robot/xml_motor_unused_right_hip_roll_joint": {
+  "act@robot/right_hip_roll_joint": {
    "index": 7,
    "trntype": 0,
    "target": "robot/right_hip_roll_joint",
@@ -1632,7 +1632,7 @@
    "kp": 1.0,
    "kv": -1.0
   },
-  "robot/xml_motor_unused_right_hip_yaw_joint": {
+  "act@robot/right_hip_yaw_joint": {
    "index": 8,
    "trntype": 0,
    "target": "robot/right_hip_yaw_joint",
@@ -1666,7 +1666,7 @@
    "kp": 1.0,
    "kv": -1.0
   },
-  "robot/xml_motor_unused_right_knee_joint": {
+  "act@robot/right_knee_joint": {
    "index": 9,
    "trntype": 0,
    "target": "robot/right_knee_joint",
@@ -1700,7 +1700,7 @@
    "kp": 1.0,
    "kv": -1.0
   },
-  "robot/xml_motor_unused_right_ankle_pitch_joint": {
+  "act@robot/right_ankle_pitch_joint": {
    "index": 10,
    "trntype": 0,
    "target": "robot/right_ankle_pitch_joint",
@@ -1734,7 +1734,7 @@
    "kp": 1.0,
    "kv": -1.0
   },
-  "robot/xml_motor_unused_right_ankle_roll_joint": {
+  "act@robot/right_ankle_roll_joint": {
    "index": 11,
    "trntype": 0,
    "target": "robot/right_ankle_roll_joint",
@@ -1768,7 +1768,7 @@
    "kp": 1.0,
    "kv": -1.0
   },
-  "robot/xml_motor_unused_waist_yaw_joint": {
+  "act@robot/waist_yaw_joint": {
    "index": 12,
    "trntype": 0,
    "target": "robot/waist_yaw_joint",
@@ -1802,7 +1802,7 @@
    "kp": 1.0,
    "kv": -1.0
   },
-  "robot/xml_motor_unused_waist_roll_joint": {
+  "act@robot/waist_roll_joint": {
    "index": 13,
    "trntype": 0,
    "target": "robot/waist_roll_joint",
@@ -1836,7 +1836,7 @@
    "kp": 1.0,
    "kv": -1.0
   },
-  "robot/xml_motor_unused_waist_pitch_joint": {
+  "act@robot/waist_pitch_joint": {
    "index": 14,
    "trntype": 0,
    "target": "robot/waist_pitch_joint",
@@ -1870,7 +1870,7 @@
    "kp": 1.0,
    "kv": -1.0
   },
-  "robot/xml_motor_unused_left_shoulder_pitch_joint": {
+  "act@robot/left_shoulder_pitch_joint": {
    "index": 15,
    "trntype": 0,
    "target": "robot/left_shoulder_pitch_joint",
@@ -1904,7 +1904,7 @@
    "kp": 1.0,
    "kv": -1.0
   },
-  "robot/xml_motor_unused_left_shoulder_roll_joint": {
+  "act@robot/left_shoulder_roll_joint": {
    "index": 16,
    "trntype": 0,
    "target": "robot/left_shoulder_roll_joint",
@@ -1938,7 +1938,7 @@
    "kp": 1.0,
    "kv": -1.0
   },
-  "robot/xml_motor_unused_left_shoulder_yaw_joint": {
+  "act@robot/left_shoulder_yaw_joint": {
    "index": 17,
    "trntype": 0,
    "target": "robot/left_shoulder_yaw_joint",
@@ -1972,7 +1972,7 @@
    "kp": 1.0,
    "kv": -1.0
   },
-  "robot/xml_motor_unused_left_elbow_joint": {
+  "act@robot/left_elbow_joint": {
    "index": 18,
    "trntype": 0,
    "target": "robot/left_elbow_joint",
@@ -2006,7 +2006,7 @@
    "kp": 1.0,
    "kv": -1.0
   },
-  "robot/xml_motor_unused_left_wrist_roll_joint": {
+  "act@robot/left_wrist_roll_joint": {
    "index": 19,
    "trntype": 0,
    "target": "robot/left_wrist_roll_joint",
@@ -2040,7 +2040,7 @@
    "kp": 1.0,
    "kv": -1.0
   },
-  "robot/xml_motor_unused_left_wrist_pitch_joint": {
+  "act@robot/left_wrist_pitch_joint": {
    "index": 20,
    "trntype": 0,
    "target": "robot/left_wrist_pitch_joint",
@@ -2074,7 +2074,7 @@
    "kp": 1.0,
    "kv": -1.0
   },
-  "robot/xml_motor_unused_left_wrist_yaw_joint": {
+  "act@robot/left_wrist_yaw_joint": {
    "index": 21,
    "trntype": 0,
    "target": "robot/left_wrist_yaw_joint",
@@ -2108,7 +2108,7 @@
    "kp": 1.0,
    "kv": -1.0
   },
-  "robot/xml_motor_unused_right_shoulder_pitch_joint": {
+  "act@robot/right_shoulder_pitch_joint": {
    "index": 22,
    "trntype": 0,
    "target": "robot/right_shoulder_pitch_joint",
@@ -2142,7 +2142,7 @@
    "kp": 1.0,
    "kv": -1.0
   },
-  "robot/xml_motor_unused_right_shoulder_roll_joint": {
+  "act@robot/right_shoulder_roll_joint": {
    "index": 23,
    "trntype": 0,
    "target": "robot/right_shoulder_roll_joint",
@@ -2176,7 +2176,7 @@
    "kp": 1.0,
    "kv": -1.0
   },
-  "robot/xml_motor_unused_right_shoulder_yaw_joint": {
+  "act@robot/right_shoulder_yaw_joint": {
    "index": 24,
    "trntype": 0,
    "target": "robot/right_shoulder_yaw_joint",
@@ -2210,7 +2210,7 @@
    "kp": 1.0,
    "kv": -1.0
   },
-  "robot/xml_motor_unused_right_elbow_joint": {
+  "act@robot/right_elbow_joint": {
    "index": 25,
    "trntype": 0,
    "target": "robot/right_elbow_joint",
@@ -2244,7 +2244,7 @@
    "kp": 1.0,
    "kv": -1.0
   },
-  "robot/xml_motor_unused_right_wrist_roll_joint": {
+  "act@robot/right_wrist_roll_joint": {
    "index": 26,
    "trntype": 0,
    "target": "robot/right_wrist_roll_joint",
@@ -2278,7 +2278,7 @@
    "kp": 1.0,
    "kv": -1.0
   },
-  "robot/xml_motor_unused_right_wrist_pitch_joint": {
+  "act@robot/right_wrist_pitch_joint": {
    "index": 27,
    "trntype": 0,
    "target": "robot/right_wrist_pitch_joint",
@@ -2312,7 +2312,7 @@
    "kp": 1.0,
    "kv": -1.0
   },
-  "robot/xml_motor_unused_right_wrist_yaw_joint": {
+  "act@robot/right_wrist_yaw_joint": {
    "index": 28,
    "trntype": 0,
    "target": "robot/right_wrist_yaw_joint",
@@ -2346,7 +2346,7 @@
    "kp": 1.0,
    "kv": -1.0
   },
-  "robot/xml_motor_unused_right_finger1_joint1_actuator": {
+  "act@robot/right_finger1_joint1": {
    "index": 29,
    "trntype": 0,
    "target": "robot/right_finger1_joint1",
@@ -2380,7 +2380,7 @@
    "kp": 0.408447,
    "kv": 0.020882
   },
-  "robot/xml_motor_unused_right_finger1_joint2_actuator": {
+  "act@robot/right_finger1_joint2": {
    "index": 30,
    "trntype": 0,
    "target": "robot/right_finger1_joint2",
@@ -2414,7 +2414,7 @@
    "kp": 0.68586,
    "kv": 0.0306109
   },
-  "robot/xml_motor_unused_right_finger1_joint3_actuator": {
+  "act@robot/right_finger1_joint3": {
    "index": 31,
    "trntype": 0,
    "target": "robot/right_finger1_joint3",
@@ -2448,7 +2448,7 @@
    "kp": 0.239111,
    "kv": 0.0101815
   },
-  "robot/xml_motor_unused_right_finger1_joint4_actuator": {
+  "act@robot/right_finger1_joint4": {
    "index": 32,
    "trntype": 0,
    "target": "robot/right_finger1_joint4",
@@ -2482,7 +2482,7 @@
    "kp": 0.207361,
    "kv": 0.00909699
   },
-  "robot/xml_motor_unused_right_finger2_joint1_actuator": {
+  "act@robot/right_finger2_joint1": {
    "index": 33,
    "trntype": 0,
    "target": "robot/right_finger2_joint1",
@@ -2516,7 +2516,7 @@
    "kp": 0.373522,
    "kv": 0.0188227
   },
-  "robot/xml_motor_unused_right_finger2_joint2_actuator": {
+  "act@robot/right_finger2_joint2": {
    "index": 34,
    "trntype": 0,
    "target": "robot/right_finger2_joint2",
@@ -2550,7 +2550,7 @@
    "kp": 0.455924,
    "kv": 0.0197982
   },
-  "robot/xml_motor_unused_right_finger2_joint3_actuator": {
+  "act@robot/right_finger2_joint3": {
    "index": 35,
    "trntype": 0,
    "target": "robot/right_finger2_joint3",
@@ -2584,7 +2584,7 @@
    "kp": 0.243684,
    "kv": 0.010477
   },
-  "robot/xml_motor_unused_right_finger2_joint4_actuator": {
+  "act@robot/right_finger2_joint4": {
    "index": 36,
    "trntype": 0,
    "target": "robot/right_finger2_joint4",
@@ -2618,7 +2618,7 @@
    "kp": 0.18027,
    "kv": 0.00824021
   },
-  "robot/xml_motor_unused_right_finger3_joint1_actuator": {
+  "act@robot/right_finger3_joint1": {
    "index": 37,
    "trntype": 0,
    "target": "robot/right_finger3_joint1",
@@ -2652,7 +2652,7 @@
    "kp": 0.368709,
    "kv": 0.0184862
   },
-  "robot/xml_motor_unused_right_finger3_joint2_actuator": {
+  "act@robot/right_finger3_joint2": {
    "index": 38,
    "trntype": 0,
    "target": "robot/right_finger3_joint2",
@@ -2686,7 +2686,7 @@
    "kp": 0.416425,
    "kv": 0.0180329
   },
-  "robot/xml_motor_unused_right_finger3_joint3_actuator": {
+  "act@robot/right_finger3_joint3": {
    "index": 39,
    "trntype": 0,
    "target": "robot/right_finger3_joint3",
@@ -2720,7 +2720,7 @@
    "kp": 0.222186,
    "kv": 0.0095922
   },
-  "robot/xml_motor_unused_right_finger3_joint4_actuator": {
+  "act@robot/right_finger3_joint4": {
    "index": 40,
    "trntype": 0,
    "target": "robot/right_finger3_joint4",
@@ -2754,7 +2754,7 @@
    "kp": 0.194276,
    "kv": 0.00915299
   },
-  "robot/xml_motor_unused_right_finger4_joint1_actuator": {
+  "act@robot/right_finger4_joint1": {
    "index": 41,
    "trntype": 0,
    "target": "robot/right_finger4_joint1",
@@ -2788,7 +2788,7 @@
    "kp": 0.357182,
    "kv": 0.0183766
   },
-  "robot/xml_motor_unused_right_finger4_joint2_actuator": {
+  "act@robot/right_finger4_joint2": {
    "index": 42,
    "trntype": 0,
    "target": "robot/right_finger4_joint2",
@@ -2822,7 +2822,7 @@
    "kp": 0.429773,
    "kv": 0.018677
   },
-  "robot/xml_motor_unused_right_finger4_joint3_actuator": {
+  "act@robot/right_finger4_joint3": {
    "index": 43,
    "trntype": 0,
    "target": "robot/right_finger4_joint3",
@@ -2856,7 +2856,7 @@
    "kp": 0.249302,
    "kv": 0.0105951
   },
-  "robot/xml_motor_unused_right_finger4_joint4_actuator": {
+  "act@robot/right_finger4_joint4": {
    "index": 44,
    "trntype": 0,
    "target": "robot/right_finger4_joint4",
@@ -2890,7 +2890,7 @@
    "kp": 0.228503,
    "kv": 0.0099176
   },
-  "robot/xml_motor_unused_right_finger5_joint1_actuator": {
+  "act@robot/right_finger5_joint1": {
    "index": 45,
    "trntype": 0,
    "target": "robot/right_finger5_joint1",
@@ -2924,7 +2924,7 @@
    "kp": 0.365533,
    "kv": 0.018617
   },
-  "robot/xml_motor_unused_right_finger5_joint2_actuator": {
+  "act@robot/right_finger5_joint2": {
    "index": 46,
    "trntype": 0,
    "target": "robot/right_finger5_joint2",
@@ -2958,7 +2958,7 @@
    "kp": 0.413931,
    "kv": 0.0187322
   },
-  "robot/xml_motor_unused_right_finger5_joint3_actuator": {
+  "act@robot/right_finger5_joint3": {
    "index": 47,
    "trntype": 0,
    "target": "robot/right_finger5_joint3",
@@ -2992,7 +2992,7 @@
    "kp": 0.227294,
    "kv": 0.00951005
   },
-  "robot/xml_motor_unused_right_finger5_joint4_actuator": {
+  "act@robot/right_finger5_joint4": {
    "index": 48,
    "trntype": 0,
    "target": "robot/right_finger5_joint4",
@@ -3026,7 +3026,7 @@
    "kp": 0.196472,
    "kv": 0.0090173
   },
-  "robot/xml_motor_unused_left_finger1_joint1_actuator": {
+  "act@robot/left_finger1_joint1": {
    "index": 49,
    "trntype": 0,
    "target": "robot/left_finger1_joint1",
@@ -3060,7 +3060,7 @@
    "kp": 0.408447,
    "kv": 0.020882
   },
-  "robot/xml_motor_unused_left_finger1_joint2_actuator": {
+  "act@robot/left_finger1_joint2": {
    "index": 50,
    "trntype": 0,
    "target": "robot/left_finger1_joint2",
@@ -3094,7 +3094,7 @@
    "kp": 0.68586,
    "kv": 0.0306109
   },
-  "robot/xml_motor_unused_left_finger1_joint3_actuator": {
+  "act@robot/left_finger1_joint3": {
    "index": 51,
    "trntype": 0,
    "target": "robot/left_finger1_joint3",
@@ -3128,7 +3128,7 @@
    "kp": 0.239111,
    "kv": 0.0101815
   },
-  "robot/xml_motor_unused_left_finger1_joint4_actuator": {
+  "act@robot/left_finger1_joint4": {
    "index": 52,
    "trntype": 0,
    "target": "robot/left_finger1_joint4",
@@ -3162,7 +3162,7 @@
    "kp": 0.207361,
    "kv": 0.00909699
   },
-  "robot/xml_motor_unused_left_finger2_joint1_actuator": {
+  "act@robot/left_finger2_joint1": {
    "index": 53,
    "trntype": 0,
    "target": "robot/left_finger2_joint1",
@@ -3196,7 +3196,7 @@
    "kp": 0.373522,
    "kv": 0.0188227
   },
-  "robot/xml_motor_unused_left_finger2_joint2_actuator": {
+  "act@robot/left_finger2_joint2": {
    "index": 54,
    "trntype": 0,
    "target": "robot/left_finger2_joint2",
@@ -3230,7 +3230,7 @@
    "kp": 0.455924,
    "kv": 0.0197982
   },
-  "robot/xml_motor_unused_left_finger2_joint3_actuator": {
+  "act@robot/left_finger2_joint3": {
    "index": 55,
    "trntype": 0,
    "target": "robot/left_finger2_joint3",
@@ -3264,7 +3264,7 @@
    "kp": 0.243684,
    "kv": 0.010477
   },
-  "robot/xml_motor_unused_left_finger2_joint4_actuator": {
+  "act@robot/left_finger2_joint4": {
    "index": 56,
    "trntype": 0,
    "target": "robot/left_finger2_joint4",
@@ -3298,7 +3298,7 @@
    "kp": 0.18027,
    "kv": 0.00824021
   },
-  "robot/xml_motor_unused_left_finger3_joint1_actuator": {
+  "act@robot/left_finger3_joint1": {
    "index": 57,
    "trntype": 0,
    "target": "robot/left_finger3_joint1",
@@ -3332,7 +3332,7 @@
    "kp": 0.368709,
    "kv": 0.0184862
   },
-  "robot/xml_motor_unused_left_finger3_joint2_actuator": {
+  "act@robot/left_finger3_joint2": {
    "index": 58,
    "trntype": 0,
    "target": "robot/left_finger3_joint2",
@@ -3366,7 +3366,7 @@
    "kp": 0.416425,
    "kv": 0.0180329
   },
-  "robot/xml_motor_unused_left_finger3_joint3_actuator": {
+  "act@robot/left_finger3_joint3": {
    "index": 59,
    "trntype": 0,
    "target": "robot/left_finger3_joint3",
@@ -3400,7 +3400,7 @@
    "kp": 0.222186,
    "kv": 0.0095922
   },
-  "robot/xml_motor_unused_left_finger3_joint4_actuator": {
+  "act@robot/left_finger3_joint4": {
    "index": 60,
    "trntype": 0,
    "target": "robot/left_finger3_joint4",
@@ -3434,7 +3434,7 @@
    "kp": 0.194276,
    "kv": 0.00915299
   },
-  "robot/xml_motor_unused_left_finger4_joint1_actuator": {
+  "act@robot/left_finger4_joint1": {
    "index": 61,
    "trntype": 0,
    "target": "robot/left_finger4_joint1",
@@ -3468,7 +3468,7 @@
    "kp": 0.357182,
    "kv": 0.0183766
   },
-  "robot/xml_motor_unused_left_finger4_joint2_actuator": {
+  "act@robot/left_finger4_joint2": {
    "index": 62,
    "trntype": 0,
    "target": "robot/left_finger4_joint2",
@@ -3502,7 +3502,7 @@
    "kp": 0.429773,
    "kv": 0.018677
   },
-  "robot/xml_motor_unused_left_finger4_joint3_actuator": {
+  "act@robot/left_finger4_joint3": {
    "index": 63,
    "trntype": 0,
    "target": "robot/left_finger4_joint3",
@@ -3536,7 +3536,7 @@
    "kp": 0.249302,
    "kv": 0.0105951
   },
-  "robot/xml_motor_unused_left_finger4_joint4_actuator": {
+  "act@robot/left_finger4_joint4": {
    "index": 64,
    "trntype": 0,
    "target": "robot/left_finger4_joint4",
@@ -3570,7 +3570,7 @@
    "kp": 0.228503,
    "kv": 0.0099176
   },
-  "robot/xml_motor_unused_left_finger5_joint1_actuator": {
+  "act@robot/left_finger5_joint1": {
    "index": 65,
    "trntype": 0,
    "target": "robot/left_finger5_joint1",
@@ -3604,7 +3604,7 @@
    "kp": 0.365533,
    "kv": 0.018617
   },
-  "robot/xml_motor_unused_left_finger5_joint2_actuator": {
+  "act@robot/left_finger5_joint2": {
    "index": 66,
    "trntype": 0,
    "target": "robot/left_finger5_joint2",
@@ -3638,7 +3638,7 @@
    "kp": 0.413931,
    "kv": 0.0187322
   },
-  "robot/xml_motor_unused_left_finger5_joint3_actuator": {
+  "act@robot/left_finger5_joint3": {
    "index": 67,
    "trntype": 0,
    "target": "robot/left_finger5_joint3",
@@ -3672,7 +3672,7 @@
    "kp": 0.227294,
    "kv": 0.00951005
   },
-  "robot/xml_motor_unused_left_finger5_joint4_actuator": {
+  "act@robot/left_finger5_joint4": {
    "index": 68,
    "trntype": 0,
    "target": "robot/left_finger5_joint4",
@@ -3706,7 +3706,7 @@
    "kp": 0.196472,
    "kv": 0.0090173
   },
-  "robot/left_hip_pitch_joint": {
+  "act@robot/left_hip_pitch_joint#1": {
    "index": 69,
    "trntype": 0,
    "target": "robot/left_hip_pitch_joint",
@@ -3740,7 +3740,7 @@
    "kp": 40.1792,
    "kv": 2.55789
   },
-  "robot/left_hip_yaw_joint": {
+  "act@robot/left_hip_yaw_joint#2": {
    "index": 70,
    "trntype": 0,
    "target": "robot/left_hip_yaw_joint",
@@ -3774,7 +3774,7 @@
    "kp": 40.1792,
    "kv": 2.55789
   },
-  "robot/right_hip_pitch_joint": {
+  "act@robot/right_hip_pitch_joint#3": {
    "index": 71,
    "trntype": 0,
    "target": "robot/right_hip_pitch_joint",
@@ -3808,7 +3808,7 @@
    "kp": 40.1792,
    "kv": 2.55789
   },
-  "robot/right_hip_yaw_joint": {
+  "act@robot/right_hip_yaw_joint#4": {
    "index": 72,
    "trntype": 0,
    "target": "robot/right_hip_yaw_joint",
@@ -3842,7 +3842,7 @@
    "kp": 40.1792,
    "kv": 2.55789
   },
-  "robot/waist_yaw_joint": {
+  "act@robot/waist_yaw_joint#5": {
    "index": 73,
    "trntype": 0,
    "target": "robot/waist_yaw_joint",
@@ -3876,7 +3876,7 @@
    "kp": 40.1792,
    "kv": 2.55789
   },
-  "robot/left_hip_roll_joint": {
+  "act@robot/left_hip_roll_joint#6": {
    "index": 74,
    "trntype": 0,
    "target": "robot/left_hip_roll_joint",
@@ -3910,7 +3910,7 @@
    "kp": 99.0984,
    "kv": 6.3088
   },
-  "robot/left_knee_joint": {
+  "act@robot/left_knee_joint#7": {
    "index": 75,
    "trntype": 0,
    "target": "robot/left_knee_joint",
@@ -3944,7 +3944,7 @@
    "kp": 99.0984,
    "kv": 6.3088
   },
-  "robot/right_hip_roll_joint": {
+  "act@robot/right_hip_roll_joint#8": {
    "index": 76,
    "trntype": 0,
    "target": "robot/right_hip_roll_joint",
@@ -3978,7 +3978,7 @@
    "kp": 99.0984,
    "kv": 6.3088
   },
-  "robot/right_knee_joint": {
+  "act@robot/right_knee_joint#9": {
    "index": 77,
    "trntype": 0,
    "target": "robot/right_knee_joint",
@@ -4012,7 +4012,7 @@
    "kp": 99.0984,
    "kv": 6.3088
   },
-  "robot/left_ankle_pitch_joint": {
+  "act@robot/left_ankle_pitch_joint#10": {
    "index": 78,
    "trntype": 0,
    "target": "robot/left_ankle_pitch_joint",
@@ -4046,7 +4046,7 @@
    "kp": 28.5012,
    "kv": 1.81445
   },
-  "robot/left_ankle_roll_joint": {
+  "act@robot/left_ankle_roll_joint#11": {
    "index": 79,
    "trntype": 0,
    "target": "robot/left_ankle_roll_joint",
@@ -4080,7 +4080,7 @@
    "kp": 28.5012,
    "kv": 1.81445
   },
-  "robot/right_ankle_pitch_joint": {
+  "act@robot/right_ankle_pitch_joint#12": {
    "index": 80,
    "trntype": 0,
    "target": "robot/right_ankle_pitch_joint",
@@ -4114,7 +4114,7 @@
    "kp": 28.5012,
    "kv": 1.81445
   },
-  "robot/right_ankle_roll_joint": {
+  "act@robot/right_ankle_roll_joint#13": {
    "index": 81,
    "trntype": 0,
    "target": "robot/right_ankle_roll_joint",
@@ -4148,7 +4148,7 @@
    "kp": 28.5012,
    "kv": 1.81445
   },
-  "robot/waist_roll_joint": {
+  "act@robot/waist_roll_joint#14": {
    "index": 82,
    "trntype": 0,
    "target": "robot/waist_roll_joint",
@@ -4182,7 +4182,7 @@
    "kp": 28.5012,
    "kv": 1.81445
   },
-  "robot/waist_pitch_joint": {
+  "act@robot/waist_pitch_joint#15": {
    "index": 83,
    "trntype": 0,
    "target": "robot/waist_pitch_joint",
@@ -4216,7 +4216,7 @@
    "kp": 28.5012,
    "kv": 1.81445
   },
-  "robot/left_shoulder_pitch_joint": {
+  "act@robot/left_shoulder_pitch_joint#16": {
    "index": 84,
    "trntype": 0,
    "target": "robot/left_shoulder_pitch_joint",
@@ -4250,7 +4250,7 @@
    "kp": 14.2506,
    "kv": 0.907223
   },
-  "robot/left_shoulder_roll_joint": {
+  "act@robot/left_shoulder_roll_joint#17": {
    "index": 85,
    "trntype": 0,
    "target": "robot/left_shoulder_roll_joint",
@@ -4284,7 +4284,7 @@
    "kp": 14.2506,
    "kv": 0.907223
   },
-  "robot/left_shoulder_yaw_joint": {
+  "act@robot/left_shoulder_yaw_joint#18": {
    "index": 86,
    "trntype": 0,
    "target": "robot/left_shoulder_yaw_joint",
@@ -4318,7 +4318,7 @@
    "kp": 14.2506,
    "kv": 0.907223
   },
-  "robot/left_elbow_joint": {
+  "act@robot/left_elbow_joint#19": {
    "index": 87,
    "trntype": 0,
    "target": "robot/left_elbow_joint",
@@ -4352,7 +4352,7 @@
    "kp": 14.2506,
    "kv": 0.907223
   },
-  "robot/left_wrist_roll_joint": {
+  "act@robot/left_wrist_roll_joint#20": {
    "index": 88,
    "trntype": 0,
    "target": "robot/left_wrist_roll_joint",
@@ -4386,7 +4386,7 @@
    "kp": 14.2506,
    "kv": 0.907223
   },
-  "robot/right_shoulder_pitch_joint": {
+  "act@robot/right_shoulder_pitch_joint#21": {
    "index": 89,
    "trntype": 0,
    "target": "robot/right_shoulder_pitch_joint",
@@ -4420,7 +4420,7 @@
    "kp": 14.2506,
    "kv": 0.907223
   },
-  "robot/right_shoulder_roll_joint": {
+  "act@robot/right_shoulder_roll_joint#22": {
    "index": 90,
    "trntype": 0,
    "target": "robot/right_shoulder_roll_joint",
@@ -4454,7 +4454,7 @@
    "kp": 14.2506,
    "kv": 0.907223
   },
-  "robot/right_shoulder_yaw_joint": {
+  "act@robot/right_shoulder_yaw_joint#23": {
    "index": 91,
    "trntype": 0,
    "target": "robot/right_shoulder_yaw_joint",
@@ -4488,7 +4488,7 @@
    "kp": 14.2506,
    "kv": 0.907223
   },
-  "robot/right_elbow_joint": {
+  "act@robot/right_elbow_joint#24": {
    "index": 92,
    "trntype": 0,
    "target": "robot/right_elbow_joint",
@@ -4522,7 +4522,7 @@
    "kp": 14.2506,
    "kv": 0.907223
   },
-  "robot/right_wrist_roll_joint": {
+  "act@robot/right_wrist_roll_joint#25": {
    "index": 93,
    "trntype": 0,
    "target": "robot/right_wrist_roll_joint",
@@ -4556,7 +4556,7 @@
    "kp": 14.2506,
    "kv": 0.907223
   },
-  "robot/left_wrist_pitch_joint": {
+  "act@robot/left_wrist_pitch_joint#26": {
    "index": 94,
    "trntype": 0,
    "target": "robot/left_wrist_pitch_joint",
@@ -4590,7 +4590,7 @@
    "kp": 16.7783,
    "kv": 1.06814
   },
-  "robot/left_wrist_yaw_joint": {
+  "act@robot/left_wrist_yaw_joint#27": {
    "index": 95,
    "trntype": 0,
    "target": "robot/left_wrist_yaw_joint",
@@ -4624,7 +4624,7 @@
    "kp": 16.7783,
    "kv": 1.06814
   },
-  "robot/right_wrist_pitch_joint": {
+  "act@robot/right_wrist_pitch_joint#28": {
    "index": 96,
    "trntype": 0,
    "target": "robot/right_wrist_pitch_joint",
@@ -4658,7 +4658,7 @@
    "kp": 16.7783,
    "kv": 1.06814
   },
-  "robot/right_wrist_yaw_joint": {
+  "act@robot/right_wrist_yaw_joint#29": {
    "index": 97,
    "trntype": 0,
    "target": "robot/right_wrist_yaw_joint",
@@ -4692,7 +4692,7 @@
    "kp": 16.7783,
    "kv": 1.06814
   },
-  "robot/left_finger1_joint1": {
+  "act@robot/left_finger1_joint1#30": {
    "index": 98,
    "trntype": 0,
    "target": "robot/left_finger1_joint1",
@@ -4726,7 +4726,7 @@
    "kp": 300.0,
    "kv": 8.0
   },
-  "robot/left_finger1_joint2": {
+  "act@robot/left_finger1_joint2#31": {
    "index": 99,
    "trntype": 0,
    "target": "robot/left_finger1_joint2",
@@ -4760,7 +4760,7 @@
    "kp": 300.0,
    "kv": 8.0
   },
-  "robot/left_finger1_joint3": {
+  "act@robot/left_finger1_joint3#32": {
    "index": 100,
    "trntype": 0,
    "target": "robot/left_finger1_joint3",
@@ -4794,7 +4794,7 @@
    "kp": 300.0,
    "kv": 8.0
   },
-  "robot/left_finger1_joint4": {
+  "act@robot/left_finger1_joint4#33": {
    "index": 101,
    "trntype": 0,
    "target": "robot/left_finger1_joint4",
@@ -4828,7 +4828,7 @@
    "kp": 300.0,
    "kv": 8.0
   },
-  "robot/left_finger2_joint1": {
+  "act@robot/left_finger2_joint1#34": {
    "index": 102,
    "trntype": 0,
    "target": "robot/left_finger2_joint1",
@@ -4862,7 +4862,7 @@
    "kp": 300.0,
    "kv": 8.0
   },
-  "robot/left_finger2_joint2": {
+  "act@robot/left_finger2_joint2#35": {
    "index": 103,
    "trntype": 0,
    "target": "robot/left_finger2_joint2",
@@ -4896,7 +4896,7 @@
    "kp": 300.0,
    "kv": 8.0
   },
-  "robot/left_finger2_joint3": {
+  "act@robot/left_finger2_joint3#36": {
    "index": 104,
    "trntype": 0,
    "target": "robot/left_finger2_joint3",
@@ -4930,7 +4930,7 @@
    "kp": 300.0,
    "kv": 8.0
   },
-  "robot/left_finger2_joint4": {
+  "act@robot/left_finger2_joint4#37": {
    "index": 105,
    "trntype": 0,
    "target": "robot/left_finger2_joint4",
@@ -4964,7 +4964,7 @@
    "kp": 300.0,
    "kv": 8.0
   },
-  "robot/left_finger3_joint1": {
+  "act@robot/left_finger3_joint1#38": {
    "index": 106,
    "trntype": 0,
    "target": "robot/left_finger3_joint1",
@@ -4998,7 +4998,7 @@
    "kp": 300.0,
    "kv": 8.0
   },
-  "robot/left_finger3_joint2": {
+  "act@robot/left_finger3_joint2#39": {
    "index": 107,
    "trntype": 0,
    "target": "robot/left_finger3_joint2",
@@ -5032,7 +5032,7 @@
    "kp": 300.0,
    "kv": 8.0
   },
-  "robot/left_finger3_joint3": {
+  "act@robot/left_finger3_joint3#40": {
    "index": 108,
    "trntype": 0,
    "target": "robot/left_finger3_joint3",
@@ -5066,7 +5066,7 @@
    "kp": 300.0,
    "kv": 8.0
   },
-  "robot/left_finger3_joint4": {
+  "act@robot/left_finger3_joint4#41": {
    "index": 109,
    "trntype": 0,
    "target": "robot/left_finger3_joint4",
@@ -5100,7 +5100,7 @@
    "kp": 300.0,
    "kv": 8.0
   },
-  "robot/left_finger4_joint1": {
+  "act@robot/left_finger4_joint1#42": {
    "index": 110,
    "trntype": 0,
    "target": "robot/left_finger4_joint1",
@@ -5134,7 +5134,7 @@
    "kp": 300.0,
    "kv": 8.0
   },
-  "robot/left_finger4_joint2": {
+  "act@robot/left_finger4_joint2#43": {
    "index": 111,
    "trntype": 0,
    "target": "robot/left_finger4_joint2",
@@ -5168,7 +5168,7 @@
    "kp": 300.0,
    "kv": 8.0
   },
-  "robot/left_finger4_joint3": {
+  "act@robot/left_finger4_joint3#44": {
    "index": 112,
    "trntype": 0,
    "target": "robot/left_finger4_joint3",
@@ -5202,7 +5202,7 @@
    "kp": 300.0,
    "kv": 8.0
   },
-  "robot/left_finger4_joint4": {
+  "act@robot/left_finger4_joint4#45": {
    "index": 113,
    "trntype": 0,
    "target": "robot/left_finger4_joint4",
@@ -5236,7 +5236,7 @@
    "kp": 300.0,
    "kv": 8.0
   },
-  "robot/left_finger5_joint1": {
+  "act@robot/left_finger5_joint1#46": {
    "index": 114,
    "trntype": 0,
    "target": "robot/left_finger5_joint1",
@@ -5270,7 +5270,7 @@
    "kp": 300.0,
    "kv": 8.0
   },
-  "robot/left_finger5_joint2": {
+  "act@robot/left_finger5_joint2#47": {
    "index": 115,
    "trntype": 0,
    "target": "robot/left_finger5_joint2",
@@ -5304,7 +5304,7 @@
    "kp": 300.0,
    "kv": 8.0
   },
-  "robot/left_finger5_joint3": {
+  "act@robot/left_finger5_joint3#48": {
    "index": 116,
    "trntype": 0,
    "target": "robot/left_finger5_joint3",
@@ -5338,7 +5338,7 @@
    "kp": 300.0,
    "kv": 8.0
   },
-  "robot/left_finger5_joint4": {
+  "act@robot/left_finger5_joint4#49": {
    "index": 117,
    "trntype": 0,
    "target": "robot/left_finger5_joint4",
@@ -5372,7 +5372,7 @@
    "kp": 300.0,
    "kv": 8.0
   },
-  "robot/right_finger1_joint1": {
+  "act@robot/right_finger1_joint1#50": {
    "index": 118,
    "trntype": 0,
    "target": "robot/right_finger1_joint1",
@@ -5406,7 +5406,7 @@
    "kp": 300.0,
    "kv": 8.0
   },
-  "robot/right_finger1_joint2": {
+  "act@robot/right_finger1_joint2#51": {
    "index": 119,
    "trntype": 0,
    "target": "robot/right_finger1_joint2",
@@ -5440,7 +5440,7 @@
    "kp": 300.0,
    "kv": 8.0
   },
-  "robot/right_finger1_joint3": {
+  "act@robot/right_finger1_joint3#52": {
    "index": 120,
    "trntype": 0,
    "target": "robot/right_finger1_joint3",
@@ -5474,7 +5474,7 @@
    "kp": 300.0,
    "kv": 8.0
   },
-  "robot/right_finger1_joint4": {
+  "act@robot/right_finger1_joint4#53": {
    "index": 121,
    "trntype": 0,
    "target": "robot/right_finger1_joint4",
@@ -5508,7 +5508,7 @@
    "kp": 300.0,
    "kv": 8.0
   },
-  "robot/right_finger2_joint1": {
+  "act@robot/right_finger2_joint1#54": {
    "index": 122,
    "trntype": 0,
    "target": "robot/right_finger2_joint1",
@@ -5542,7 +5542,7 @@
    "kp": 300.0,
    "kv": 8.0
   },
-  "robot/right_finger2_joint2": {
+  "act@robot/right_finger2_joint2#55": {
    "index": 123,
    "trntype": 0,
    "target": "robot/right_finger2_joint2",
@@ -5576,7 +5576,7 @@
    "kp": 300.0,
    "kv": 8.0
   },
-  "robot/right_finger2_joint3": {
+  "act@robot/right_finger2_joint3#56": {
    "index": 124,
    "trntype": 0,
    "target": "robot/right_finger2_joint3",
@@ -5610,7 +5610,7 @@
    "kp": 300.0,
    "kv": 8.0
   },
-  "robot/right_finger2_joint4": {
+  "act@robot/right_finger2_joint4#57": {
    "index": 125,
    "trntype": 0,
    "target": "robot/right_finger2_joint4",
@@ -5644,7 +5644,7 @@
    "kp": 300.0,
    "kv": 8.0
   },
-  "robot/right_finger3_joint1": {
+  "act@robot/right_finger3_joint1#58": {
    "index": 126,
    "trntype": 0,
    "target": "robot/right_finger3_joint1",
@@ -5678,7 +5678,7 @@
    "kp": 300.0,
    "kv": 8.0
   },
-  "robot/right_finger3_joint2": {
+  "act@robot/right_finger3_joint2#59": {
    "index": 127,
    "trntype": 0,
    "target": "robot/right_finger3_joint2",
@@ -5712,7 +5712,7 @@
    "kp": 300.0,
    "kv": 8.0
   },
-  "robot/right_finger3_joint3": {
+  "act@robot/right_finger3_joint3#60": {
    "index": 128,
    "trntype": 0,
    "target": "robot/right_finger3_joint3",
@@ -5746,7 +5746,7 @@
    "kp": 300.0,
    "kv": 8.0
   },
-  "robot/right_finger3_joint4": {
+  "act@robot/right_finger3_joint4#61": {
    "index": 129,
    "trntype": 0,
    "target": "robot/right_finger3_joint4",
@@ -5780,7 +5780,7 @@
    "kp": 300.0,
    "kv": 8.0
   },
-  "robot/right_finger4_joint1": {
+  "act@robot/right_finger4_joint1#62": {
    "index": 130,
    "trntype": 0,
    "target": "robot/right_finger4_joint1",
@@ -5814,7 +5814,7 @@
    "kp": 300.0,
    "kv": 8.0
   },
-  "robot/right_finger4_joint2": {
+  "act@robot/right_finger4_joint2#63": {
    "index": 131,
    "trntype": 0,
    "target": "robot/right_finger4_joint2",
@@ -5848,7 +5848,7 @@
    "kp": 300.0,
    "kv": 8.0
   },
-  "robot/right_finger4_joint3": {
+  "act@robot/right_finger4_joint3#64": {
    "index": 132,
    "trntype": 0,
    "target": "robot/right_finger4_joint3",
@@ -5882,7 +5882,7 @@
    "kp": 300.0,
    "kv": 8.0
   },
-  "robot/right_finger4_joint4": {
+  "act@robot/right_finger4_joint4#65": {
    "index": 133,
    "trntype": 0,
    "target": "robot/right_finger4_joint4",
@@ -5916,7 +5916,7 @@
    "kp": 300.0,
    "kv": 8.0
   },
-  "robot/right_finger5_joint1": {
+  "act@robot/right_finger5_joint1#66": {
    "index": 134,
    "trntype": 0,
    "target": "robot/right_finger5_joint1",
@@ -5950,7 +5950,7 @@
    "kp": 300.0,
    "kv": 8.0
   },
-  "robot/right_finger5_joint2": {
+  "act@robot/right_finger5_joint2#67": {
    "index": 135,
    "trntype": 0,
    "target": "robot/right_finger5_joint2",
@@ -5984,7 +5984,7 @@
    "kp": 300.0,
    "kv": 8.0
   },
-  "robot/right_finger5_joint3": {
+  "act@robot/right_finger5_joint3#68": {
    "index": 136,
    "trntype": 0,
    "target": "robot/right_finger5_joint3",
@@ -6018,7 +6018,7 @@
    "kp": 300.0,
    "kv": 8.0
   },
-  "robot/right_finger5_joint4": {
+  "act@robot/right_finger5_joint4#69": {
    "index": 137,
    "trntype": 0,
    "target": "robot/right_finger5_joint4",
@@ -6054,7 +6054,7 @@
   }
  },
  "geoms": {
-  "robot/floor": {
+  "geom@world|t0|s(5.0, 5.0, 5.0)|p(0.0, 0.0, 0.0)": {
    "index": 0,
    "type": 0,
    "body": "world",
@@ -6082,9 +6082,9 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.0,
-    0.0,
-    0.01
+    5.0,
+    5.0,
+    5.0
    ],
    "pos": [
     0.0,
@@ -6092,7 +6092,7 @@
     0.0
    ]
   },
-  "terrain": {
+  "geom@world|t0|s(5.0, 5.0, 5.0)|p(0.0, 0.0, 0.0)#1": {
    "index": 1,
    "type": 0,
    "body": "world",
@@ -6120,9 +6120,9 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.0,
-    0.0,
-    0.01
+    5.0,
+    5.0,
+    5.0
    ],
    "pos": [
     0.0,
@@ -6130,13 +6130,13 @@
     0.0
    ]
   },
-  "terrain_grid_x_0": {
+  "geom@robot/pelvis|t7|s(0.067829, 0.073386, 0.060768)|p(0.000687, 2.4e-05, -0.078594)": {
    "index": 2,
-   "type": 6,
-   "body": "terrain_grid",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
+   "type": 7,
+   "body": "robot/pelvis",
+   "group": 3,
+   "contype": 1,
+   "conaffinity": 1,
    "condim": 3,
    "priority": 0,
    "solref": [
@@ -6158,23 +6158,23 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.005,
-    12.0,
-    0.0005
+    0.06782889530775986,
+    0.07338576822582812,
+    0.06076770485759742
    ],
    "pos": [
-    -12.0,
-    0.0,
-    0.001
+    0.0006870398156412269,
+    2.4017432844469533e-05,
+    -0.07859362220864897
    ]
   },
-  "terrain_grid_y_0": {
+  "geom@robot/left_hip_pitch_link|t7|s(0.03934, 0.051963, 0.075932)|p(-0.000867, 0.047111, -0.026296)": {
    "index": 3,
-   "type": 6,
-   "body": "terrain_grid",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
+   "type": 7,
+   "body": "robot/left_hip_pitch_link",
+   "group": 3,
+   "contype": 1,
+   "conaffinity": 1,
    "condim": 3,
    "priority": 0,
    "solref": [
@@ -6196,23 +6196,23 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    12.0,
-    0.005,
-    0.0005
+    0.03933986646548392,
+    0.05196333669625805,
+    0.07593231351553803
    ],
    "pos": [
-    0.0,
-    -12.0,
-    0.001
+    -0.0008665536229671706,
+    0.04711094864670584,
+    -0.026296126748933384
    ]
   },
-  "terrain_grid_x_1": {
+  "geom@robot/left_hip_roll_link|t7|s(0.05857, 0.049082, 0.106899)|p(0.035674, -0.000364, -0.067714)": {
    "index": 4,
-   "type": 6,
-   "body": "terrain_grid",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
+   "type": 7,
+   "body": "robot/left_hip_roll_link",
+   "group": 3,
+   "contype": 1,
+   "conaffinity": 1,
    "condim": 3,
    "priority": 0,
    "solref": [
@@ -6234,23 +6234,23 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.005,
-    12.0,
-    0.0005
+    0.05856962332131718,
+    0.04908168526826209,
+    0.10689875638791035
    ],
    "pos": [
-    -11.0,
-    0.0,
-    0.001
+    0.03567397763594104,
+    -0.00036361027040377955,
+    -0.06771371710082019
    ]
   },
-  "terrain_grid_y_1": {
+  "geom@robot/left_hip_yaw_link|t7|s(0.04468, 0.059946, 0.146433)|p(-0.030698, -0.003158, -0.092639)": {
    "index": 5,
-   "type": 6,
-   "body": "terrain_grid",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
+   "type": 7,
+   "body": "robot/left_hip_yaw_link",
+   "group": 3,
+   "contype": 1,
+   "conaffinity": 1,
    "condim": 3,
    "priority": 0,
    "solref": [
@@ -6272,23 +6272,23 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    12.0,
-    0.005,
-    0.0005
+    0.044679779983323314,
+    0.059945867873579604,
+    0.1464333225053302
    ],
    "pos": [
-    0.0,
-    -11.0,
-    0.001
+    -0.03069823833154706,
+    -0.003157515538117001,
+    -0.09263916054691336
    ]
   },
-  "terrain_grid_x_2": {
+  "geom@robot/left_knee_link|t7|s(0.047702, 0.05719, 0.192782)|p(0.01229, 0.002729, -0.122752)": {
    "index": 6,
-   "type": 6,
-   "body": "terrain_grid",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
+   "type": 7,
+   "body": "robot/left_knee_link",
+   "group": 3,
+   "contype": 1,
+   "conaffinity": 1,
    "condim": 3,
    "priority": 0,
    "solref": [
@@ -6310,23 +6310,23 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.005,
-    12.0,
-    0.0005
+    0.04770210387752821,
+    0.05718981412208246,
+    0.19278242392198788
    ],
    "pos": [
-    -10.0,
-    0.0,
-    0.001
+    0.012290412837058355,
+    0.0027294421536867754,
+    -0.1227521131144038
    ]
   },
-  "terrain_grid_y_2": {
+  "geom@robot/left_ankle_pitch_link|t7|s(0.006501, 0.01795, 0.023788)|p(-0.004106, 5.9e-05, -0.008574)": {
    "index": 7,
-   "type": 6,
-   "body": "terrain_grid",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
+   "type": 7,
+   "body": "robot/left_ankle_pitch_link",
+   "group": 3,
+   "contype": 1,
+   "conaffinity": 1,
    "condim": 3,
    "priority": 0,
    "solref": [
@@ -6348,25 +6348,25 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    12.0,
-    0.005,
-    0.0005
+    0.006501067771366461,
+    0.01795047236050578,
+    0.023788302881568697
    ],
    "pos": [
-    0.0,
-    -10.0,
-    0.001
+    -0.004106200322794071,
+    5.8877623430107626e-05,
+    -0.008573512559823165
    ]
   },
-  "terrain_grid_x_3": {
+  "geom@robot/left_ankle_roll_link|t2|s(0.005, 0.0, 0.0)|p(-0.05, 0.025, -0.03)": {
    "index": 8,
-   "type": 6,
-   "body": "terrain_grid",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
+   "type": 2,
+   "body": "robot/left_ankle_roll_link",
+   "group": 3,
+   "contype": 1,
+   "conaffinity": 1,
    "condim": 3,
-   "priority": 0,
+   "priority": 1,
    "solref": [
     0.02,
     1.0
@@ -6379,7 +6379,7 @@
     2.0
    ],
    "friction": [
-    1.0,
+    0.6,
     0.005,
     0.0001
    ],
@@ -6387,24 +6387,24 @@
    "gap": 0.0,
    "size": [
     0.005,
-    12.0,
-    0.0005
+    0.0,
+    0.0
    ],
    "pos": [
-    -9.0,
-    0.0,
-    0.001
+    -0.05,
+    0.025,
+    -0.03
    ]
   },
-  "terrain_grid_y_3": {
+  "geom@robot/left_ankle_roll_link|t2|s(0.005, 0.0, 0.0)|p(-0.05, -0.025, -0.03)": {
    "index": 9,
-   "type": 6,
-   "body": "terrain_grid",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
+   "type": 2,
+   "body": "robot/left_ankle_roll_link",
+   "group": 3,
+   "contype": 1,
+   "conaffinity": 1,
    "condim": 3,
-   "priority": 0,
+   "priority": 1,
    "solref": [
     0.02,
     1.0
@@ -6417,32 +6417,32 @@
     2.0
    ],
    "friction": [
-    1.0,
+    0.6,
     0.005,
     0.0001
    ],
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    12.0,
     0.005,
-    0.0005
+    0.0,
+    0.0
    ],
    "pos": [
-    0.0,
-    -9.0,
-    0.001
+    -0.05,
+    -0.025,
+    -0.03
    ]
   },
-  "terrain_grid_x_4": {
+  "geom@robot/left_ankle_roll_link|t2|s(0.005, 0.0, 0.0)|p(0.12, 0.03, -0.03)": {
    "index": 10,
-   "type": 6,
-   "body": "terrain_grid",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
+   "type": 2,
+   "body": "robot/left_ankle_roll_link",
+   "group": 3,
+   "contype": 1,
+   "conaffinity": 1,
    "condim": 3,
-   "priority": 0,
+   "priority": 1,
    "solref": [
     0.02,
     1.0
@@ -6455,7 +6455,7 @@
     2.0
    ],
    "friction": [
-    1.0,
+    0.6,
     0.005,
     0.0001
    ],
@@ -6463,24 +6463,24 @@
    "gap": 0.0,
    "size": [
     0.005,
-    12.0,
-    0.0005
+    0.0,
+    0.0
    ],
    "pos": [
-    -8.0,
-    0.0,
-    0.001
+    0.12,
+    0.03,
+    -0.03
    ]
   },
-  "terrain_grid_y_4": {
+  "geom@robot/left_ankle_roll_link|t2|s(0.005, 0.0, 0.0)|p(0.12, -0.03, -0.03)": {
    "index": 11,
-   "type": 6,
-   "body": "terrain_grid",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
+   "type": 2,
+   "body": "robot/left_ankle_roll_link",
+   "group": 3,
+   "contype": 1,
+   "conaffinity": 1,
    "condim": 3,
-   "priority": 0,
+   "priority": 1,
    "solref": [
     0.02,
     1.0
@@ -6493,30 +6493,30 @@
     2.0
    ],
    "friction": [
-    1.0,
+    0.6,
     0.005,
     0.0001
    ],
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    12.0,
     0.005,
-    0.0005
+    0.0,
+    0.0
    ],
    "pos": [
-    0.0,
-    -8.0,
-    0.001
+    0.12,
+    -0.03,
+    -0.03
    ]
   },
-  "terrain_grid_x_5": {
+  "geom@robot/right_hip_pitch_link|t7|s(0.03934, 0.051964, 0.075932)|p(-0.000866, -0.04711, -0.026297)": {
    "index": 12,
-   "type": 6,
-   "body": "terrain_grid",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
+   "type": 7,
+   "body": "robot/right_hip_pitch_link",
+   "group": 3,
+   "contype": 1,
+   "conaffinity": 1,
    "condim": 3,
    "priority": 0,
    "solref": [
@@ -6538,23 +6538,23 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.005,
-    12.0,
-    0.0005
+    0.039340464628374615,
+    0.051963631431242684,
+    0.07593220479808914
    ],
    "pos": [
-    -7.0,
-    0.0,
-    0.001
+    -0.0008664659746034098,
+    -0.04711004817458578,
+    -0.02629661719409336
    ]
   },
-  "terrain_grid_y_5": {
+  "geom@robot/right_hip_roll_link|t7|s(0.05857, 0.049079, 0.106898)|p(0.035674, 0.000362, -0.067713)": {
    "index": 13,
-   "type": 6,
-   "body": "terrain_grid",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
+   "type": 7,
+   "body": "robot/right_hip_roll_link",
+   "group": 3,
+   "contype": 1,
+   "conaffinity": 1,
    "condim": 3,
    "priority": 0,
    "solref": [
@@ -6576,23 +6576,23 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    12.0,
-    0.005,
-    0.0005
+    0.05856959484292669,
+    0.04907889025845939,
+    0.10689798477367911
    ],
    "pos": [
-    0.0,
-    -7.0,
-    0.001
+    0.035673805746904236,
+    0.000361689158543678,
+    -0.06771294082971874
    ]
   },
-  "terrain_grid_x_6": {
+  "geom@robot/right_hip_yaw_link|t7|s(0.044678, 0.059945, 0.146432)|p(-0.0307, 0.003159, -0.09264)": {
    "index": 14,
-   "type": 6,
-   "body": "terrain_grid",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
+   "type": 7,
+   "body": "robot/right_hip_yaw_link",
+   "group": 3,
+   "contype": 1,
+   "conaffinity": 1,
    "condim": 3,
    "priority": 0,
    "solref": [
@@ -6614,23 +6614,23 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.005,
-    12.0,
-    0.0005
+    0.044677836376759254,
+    0.05994507135278591,
+    0.14643222341764836
    ],
    "pos": [
-    -6.0,
-    0.0,
-    0.001
+    -0.030699644274626688,
+    0.003158723401998131,
+    -0.09263953489766659
    ]
   },
-  "terrain_grid_y_6": {
+  "geom@robot/right_knee_link|t7|s(0.047705, 0.057191, 0.19278)|p(0.012291, -0.002728, -0.122755)": {
    "index": 15,
-   "type": 6,
-   "body": "terrain_grid",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
+   "type": 7,
+   "body": "robot/right_knee_link",
+   "group": 3,
+   "contype": 1,
+   "conaffinity": 1,
    "condim": 3,
    "priority": 0,
    "solref": [
@@ -6652,23 +6652,23 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    12.0,
-    0.005,
-    0.0005
+    0.04770455669878804,
+    0.05719105799350032,
+    0.19277976460997498
    ],
    "pos": [
-    0.0,
-    -6.0,
-    0.001
+    0.012290843287111684,
+    -0.0027284196889391095,
+    -0.12275463881083519
    ]
   },
-  "terrain_grid_x_7": {
+  "geom@robot/right_ankle_pitch_link|t7|s(0.006501, 0.017951, 0.023788)|p(-0.004107, -5.9e-05, -0.008573)": {
    "index": 16,
-   "type": 6,
-   "body": "terrain_grid",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
+   "type": 7,
+   "body": "robot/right_ankle_pitch_link",
+   "group": 3,
+   "contype": 1,
+   "conaffinity": 1,
    "condim": 3,
    "priority": 0,
    "solref": [
@@ -6690,25 +6690,25 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.005,
-    12.0,
-    0.0005
+    0.006501268056343991,
+    0.017950785156664262,
+    0.023787573646113273
    ],
    "pos": [
-    -5.0,
-    0.0,
-    0.001
+    -0.004106596995318435,
+    -5.9077908407639255e-05,
+    -0.008573030051327089
    ]
   },
-  "terrain_grid_y_7": {
+  "geom@robot/right_ankle_roll_link|t2|s(0.005, 0.0, 0.0)|p(-0.05, 0.025, -0.03)": {
    "index": 17,
-   "type": 6,
-   "body": "terrain_grid",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
+   "type": 2,
+   "body": "robot/right_ankle_roll_link",
+   "group": 3,
+   "contype": 1,
+   "conaffinity": 1,
    "condim": 3,
-   "priority": 0,
+   "priority": 1,
    "solref": [
     0.02,
     1.0
@@ -6721,32 +6721,32 @@
     2.0
    ],
    "friction": [
-    1.0,
+    0.6,
     0.005,
     0.0001
    ],
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    12.0,
     0.005,
-    0.0005
+    0.0,
+    0.0
    ],
    "pos": [
-    0.0,
-    -5.0,
-    0.001
+    -0.05,
+    0.025,
+    -0.03
    ]
   },
-  "terrain_grid_x_8": {
+  "geom@robot/right_ankle_roll_link|t2|s(0.005, 0.0, 0.0)|p(-0.05, -0.025, -0.03)": {
    "index": 18,
-   "type": 6,
-   "body": "terrain_grid",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
+   "type": 2,
+   "body": "robot/right_ankle_roll_link",
+   "group": 3,
+   "contype": 1,
+   "conaffinity": 1,
    "condim": 3,
-   "priority": 0,
+   "priority": 1,
    "solref": [
     0.02,
     1.0
@@ -6759,7 +6759,7 @@
     2.0
    ],
    "friction": [
-    1.0,
+    0.6,
     0.005,
     0.0001
    ],
@@ -6767,24 +6767,24 @@
    "gap": 0.0,
    "size": [
     0.005,
-    12.0,
-    0.0005
+    0.0,
+    0.0
    ],
    "pos": [
-    -4.0,
-    0.0,
-    0.001
+    -0.05,
+    -0.025,
+    -0.03
    ]
   },
-  "terrain_grid_y_8": {
+  "geom@robot/right_ankle_roll_link|t2|s(0.005, 0.0, 0.0)|p(0.12, 0.03, -0.03)": {
    "index": 19,
-   "type": 6,
-   "body": "terrain_grid",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
+   "type": 2,
+   "body": "robot/right_ankle_roll_link",
+   "group": 3,
+   "contype": 1,
+   "conaffinity": 1,
    "condim": 3,
-   "priority": 0,
+   "priority": 1,
    "solref": [
     0.02,
     1.0
@@ -6797,32 +6797,32 @@
     2.0
    ],
    "friction": [
-    1.0,
+    0.6,
     0.005,
     0.0001
    ],
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    12.0,
     0.005,
-    0.0005
+    0.0,
+    0.0
    ],
    "pos": [
-    0.0,
-    -4.0,
-    0.001
+    0.12,
+    0.03,
+    -0.03
    ]
   },
-  "terrain_grid_x_9": {
+  "geom@robot/right_ankle_roll_link|t2|s(0.005, 0.0, 0.0)|p(0.12, -0.03, -0.03)": {
    "index": 20,
-   "type": 6,
-   "body": "terrain_grid",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
+   "type": 2,
+   "body": "robot/right_ankle_roll_link",
+   "group": 3,
+   "contype": 1,
+   "conaffinity": 1,
    "condim": 3,
-   "priority": 0,
+   "priority": 1,
    "solref": [
     0.02,
     1.0
@@ -6835,7 +6835,7 @@
     2.0
    ],
    "friction": [
-    1.0,
+    0.6,
     0.005,
     0.0001
    ],
@@ -6843,22 +6843,22 @@
    "gap": 0.0,
    "size": [
     0.005,
-    12.0,
-    0.0005
+    0.0,
+    0.0
    ],
    "pos": [
-    -3.0,
-    0.0,
-    0.001
+    0.12,
+    -0.03,
+    -0.03
    ]
   },
-  "terrain_grid_y_9": {
+  "geom@robot/torso_link|t7|s(0.078481, 0.109552, 0.164374)|p(0.00486, 0.00211, 0.147513)": {
    "index": 21,
-   "type": 6,
-   "body": "terrain_grid",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
+   "type": 7,
+   "body": "robot/torso_link",
+   "group": 3,
+   "contype": 1,
+   "conaffinity": 1,
    "condim": 3,
    "priority": 0,
    "solref": [
@@ -6880,23 +6880,23 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    12.0,
-    0.005,
-    0.0005
+    0.07848132575782096,
+    0.10955173191299464,
+    0.16437364396676435
    ],
    "pos": [
-    0.0,
-    -3.0,
-    0.001
+    0.004859771624793235,
+    0.0021098229690159885,
+    0.14751265225971283
    ]
   },
-  "terrain_grid_x_10": {
+  "geom@robot/torso_link|t7|s(0.072002, 0.077801, 0.10658)|p(0.007651, 2.5e-05, 0.385132)": {
    "index": 22,
-   "type": 6,
-   "body": "terrain_grid",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
+   "type": 7,
+   "body": "robot/torso_link",
+   "group": 3,
+   "contype": 1,
+   "conaffinity": 1,
    "condim": 3,
    "priority": 0,
    "solref": [
@@ -6918,2678 +6918,18 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.005,
-    12.0,
-    0.0005
+    0.07200181021489643,
+    0.07780114686476618,
+    0.10657955182622925
    ],
    "pos": [
-    -2.0,
-    0.0,
-    0.001
+    0.007650921707273049,
+    2.4825026469196894e-05,
+    0.3851317988396421
    ]
   },
-  "terrain_grid_y_10": {
+  "geom@robot/left_shoulder_pitch_link|t5|s(0.03, 0.025, 0.0)|p(0.0, 0.04, -0.01)": {
    "index": 23,
-   "type": 6,
-   "body": "terrain_grid",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    12.0,
-    0.005,
-    0.0005
-   ],
-   "pos": [
-    0.0,
-    -2.0,
-    0.001
-   ]
-  },
-  "terrain_grid_x_11": {
-   "index": 24,
-   "type": 6,
-   "body": "terrain_grid",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.005,
-    12.0,
-    0.0005
-   ],
-   "pos": [
-    -1.0,
-    0.0,
-    0.001
-   ]
-  },
-  "terrain_grid_y_11": {
-   "index": 25,
-   "type": 6,
-   "body": "terrain_grid",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    12.0,
-    0.005,
-    0.0005
-   ],
-   "pos": [
-    0.0,
-    -1.0,
-    0.001
-   ]
-  },
-  "terrain_grid_x_12": {
-   "index": 26,
-   "type": 6,
-   "body": "terrain_grid",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.005,
-    12.0,
-    0.0005
-   ],
-   "pos": [
-    0.0,
-    0.0,
-    0.001
-   ]
-  },
-  "terrain_grid_y_12": {
-   "index": 27,
-   "type": 6,
-   "body": "terrain_grid",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    12.0,
-    0.005,
-    0.0005
-   ],
-   "pos": [
-    0.0,
-    0.0,
-    0.001
-   ]
-  },
-  "terrain_grid_x_13": {
-   "index": 28,
-   "type": 6,
-   "body": "terrain_grid",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.005,
-    12.0,
-    0.0005
-   ],
-   "pos": [
-    1.0,
-    0.0,
-    0.001
-   ]
-  },
-  "terrain_grid_y_13": {
-   "index": 29,
-   "type": 6,
-   "body": "terrain_grid",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    12.0,
-    0.005,
-    0.0005
-   ],
-   "pos": [
-    0.0,
-    1.0,
-    0.001
-   ]
-  },
-  "terrain_grid_x_14": {
-   "index": 30,
-   "type": 6,
-   "body": "terrain_grid",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.005,
-    12.0,
-    0.0005
-   ],
-   "pos": [
-    2.0,
-    0.0,
-    0.001
-   ]
-  },
-  "terrain_grid_y_14": {
-   "index": 31,
-   "type": 6,
-   "body": "terrain_grid",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    12.0,
-    0.005,
-    0.0005
-   ],
-   "pos": [
-    0.0,
-    2.0,
-    0.001
-   ]
-  },
-  "terrain_grid_x_15": {
-   "index": 32,
-   "type": 6,
-   "body": "terrain_grid",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.005,
-    12.0,
-    0.0005
-   ],
-   "pos": [
-    3.0,
-    0.0,
-    0.001
-   ]
-  },
-  "terrain_grid_y_15": {
-   "index": 33,
-   "type": 6,
-   "body": "terrain_grid",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    12.0,
-    0.005,
-    0.0005
-   ],
-   "pos": [
-    0.0,
-    3.0,
-    0.001
-   ]
-  },
-  "terrain_grid_x_16": {
-   "index": 34,
-   "type": 6,
-   "body": "terrain_grid",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.005,
-    12.0,
-    0.0005
-   ],
-   "pos": [
-    4.0,
-    0.0,
-    0.001
-   ]
-  },
-  "terrain_grid_y_16": {
-   "index": 35,
-   "type": 6,
-   "body": "terrain_grid",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    12.0,
-    0.005,
-    0.0005
-   ],
-   "pos": [
-    0.0,
-    4.0,
-    0.001
-   ]
-  },
-  "terrain_grid_x_17": {
-   "index": 36,
-   "type": 6,
-   "body": "terrain_grid",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.005,
-    12.0,
-    0.0005
-   ],
-   "pos": [
-    5.0,
-    0.0,
-    0.001
-   ]
-  },
-  "terrain_grid_y_17": {
-   "index": 37,
-   "type": 6,
-   "body": "terrain_grid",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    12.0,
-    0.005,
-    0.0005
-   ],
-   "pos": [
-    0.0,
-    5.0,
-    0.001
-   ]
-  },
-  "terrain_grid_x_18": {
-   "index": 38,
-   "type": 6,
-   "body": "terrain_grid",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.005,
-    12.0,
-    0.0005
-   ],
-   "pos": [
-    6.0,
-    0.0,
-    0.001
-   ]
-  },
-  "terrain_grid_y_18": {
-   "index": 39,
-   "type": 6,
-   "body": "terrain_grid",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    12.0,
-    0.005,
-    0.0005
-   ],
-   "pos": [
-    0.0,
-    6.0,
-    0.001
-   ]
-  },
-  "terrain_grid_x_19": {
-   "index": 40,
-   "type": 6,
-   "body": "terrain_grid",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.005,
-    12.0,
-    0.0005
-   ],
-   "pos": [
-    7.0,
-    0.0,
-    0.001
-   ]
-  },
-  "terrain_grid_y_19": {
-   "index": 41,
-   "type": 6,
-   "body": "terrain_grid",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    12.0,
-    0.005,
-    0.0005
-   ],
-   "pos": [
-    0.0,
-    7.0,
-    0.001
-   ]
-  },
-  "terrain_grid_x_20": {
-   "index": 42,
-   "type": 6,
-   "body": "terrain_grid",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.005,
-    12.0,
-    0.0005
-   ],
-   "pos": [
-    8.0,
-    0.0,
-    0.001
-   ]
-  },
-  "terrain_grid_y_20": {
-   "index": 43,
-   "type": 6,
-   "body": "terrain_grid",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    12.0,
-    0.005,
-    0.0005
-   ],
-   "pos": [
-    0.0,
-    8.0,
-    0.001
-   ]
-  },
-  "terrain_grid_x_21": {
-   "index": 44,
-   "type": 6,
-   "body": "terrain_grid",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.005,
-    12.0,
-    0.0005
-   ],
-   "pos": [
-    9.0,
-    0.0,
-    0.001
-   ]
-  },
-  "terrain_grid_y_21": {
-   "index": 45,
-   "type": 6,
-   "body": "terrain_grid",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    12.0,
-    0.005,
-    0.0005
-   ],
-   "pos": [
-    0.0,
-    9.0,
-    0.001
-   ]
-  },
-  "terrain_grid_x_22": {
-   "index": 46,
-   "type": 6,
-   "body": "terrain_grid",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.005,
-    12.0,
-    0.0005
-   ],
-   "pos": [
-    10.0,
-    0.0,
-    0.001
-   ]
-  },
-  "terrain_grid_y_22": {
-   "index": 47,
-   "type": 6,
-   "body": "terrain_grid",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    12.0,
-    0.005,
-    0.0005
-   ],
-   "pos": [
-    0.0,
-    10.0,
-    0.001
-   ]
-  },
-  "terrain_grid_x_23": {
-   "index": 48,
-   "type": 6,
-   "body": "terrain_grid",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.005,
-    12.0,
-    0.0005
-   ],
-   "pos": [
-    11.0,
-    0.0,
-    0.001
-   ]
-  },
-  "terrain_grid_y_23": {
-   "index": 49,
-   "type": 6,
-   "body": "terrain_grid",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    12.0,
-    0.005,
-    0.0005
-   ],
-   "pos": [
-    0.0,
-    11.0,
-    0.001
-   ]
-  },
-  "terrain_grid_x_24": {
-   "index": 50,
-   "type": 6,
-   "body": "terrain_grid",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.005,
-    12.0,
-    0.0005
-   ],
-   "pos": [
-    12.0,
-    0.0,
-    0.001
-   ]
-  },
-  "terrain_grid_y_24": {
-   "index": 51,
-   "type": 6,
-   "body": "terrain_grid",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    12.0,
-    0.005,
-    0.0005
-   ],
-   "pos": [
-    0.0,
-    12.0,
-    0.001
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_52>": {
-   "index": 52,
-   "type": 7,
-   "body": "robot/pelvis",
-   "group": 2,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.048750873474537326,
-    0.06446217070998465,
-    0.07888335742981017
-   ],
-   "pos": [
-    -1.9529809540945105e-07,
-    -9.171826830955297e-07,
-    -0.07637656182566167
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_53>": {
-   "index": 53,
-   "type": 7,
-   "body": "robot/pelvis",
-   "group": 2,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.06782894043644766,
-    0.0733855953844725,
-    0.06076766890244119
-   ],
-   "pos": [
-    0.0006870395627471365,
-    2.401819341082137e-05,
-    -0.07859361570716923
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_54>": {
-   "index": 54,
-   "type": 7,
-   "body": "robot/pelvis",
-   "group": 3,
-   "contype": 1,
-   "conaffinity": 1,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.06782894043644766,
-    0.0733855953844725,
-    0.06076766890244119
-   ],
-   "pos": [
-    0.0006870395627471365,
-    2.401819341082137e-05,
-    -0.07859361570716923
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_55>": {
-   "index": 55,
-   "type": 7,
-   "body": "robot/left_hip_pitch_link",
-   "group": 2,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.03933990673535084,
-    0.05196331678488224,
-    0.07593229340948726
-   ],
-   "pos": [
-    -0.0008665585378783539,
-    0.04711095469219488,
-    -0.02629613521299048
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_56>": {
-   "index": 56,
-   "type": 7,
-   "body": "robot/left_hip_pitch_link",
-   "group": 3,
-   "contype": 1,
-   "conaffinity": 1,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.03933990673535084,
-    0.05196331678488224,
-    0.07593229340948726
-   ],
-   "pos": [
-    -0.0008665585378783539,
-    0.04711095469219488,
-    -0.02629613521299048
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_57>": {
-   "index": 57,
-   "type": 7,
-   "body": "robot/left_hip_roll_link",
-   "group": 2,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.05856962938089527,
-    0.04908167211454836,
-    0.1068987445079944
-   ],
-   "pos": [
-    0.03567396132978256,
-    -0.00036361950676388214,
-    -0.06771372727135536
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_58>": {
-   "index": 58,
-   "type": 7,
-   "body": "robot/left_hip_roll_link",
-   "group": 3,
-   "contype": 1,
-   "conaffinity": 1,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.05856962938089527,
-    0.04908167211454836,
-    0.1068987445079944
-   ],
-   "pos": [
-    0.03567396132978256,
-    -0.00036361950676388214,
-    -0.06771372727135536
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_59>": {
-   "index": 59,
-   "type": 7,
-   "body": "robot/left_hip_yaw_link",
-   "group": 2,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.04467976829172957,
-    0.05994589625391779,
-    0.14643369141144041
-   ],
-   "pos": [
-    -0.030698236099282915,
-    -0.0031575123714920315,
-    -0.09263915858615535
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_60>": {
-   "index": 60,
-   "type": 7,
-   "body": "robot/left_hip_yaw_link",
-   "group": 3,
-   "contype": 1,
-   "conaffinity": 1,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.04467976829172957,
-    0.05994589625391779,
-    0.14643369141144041
-   ],
-   "pos": [
-    -0.030698236099282915,
-    -0.0031575123714920315,
-    -0.09263915858615535
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_61>": {
-   "index": 61,
-   "type": 7,
-   "body": "robot/left_knee_link",
-   "group": 2,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.047702094423964565,
-    0.05718984642446587,
-    0.1927822019327025
-   ],
-   "pos": [
-    0.01229041176367447,
-    0.0027294407845290226,
-    -0.12275210014016037
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_62>": {
-   "index": 62,
-   "type": 7,
-   "body": "robot/left_knee_link",
-   "group": 3,
-   "contype": 1,
-   "conaffinity": 1,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.047702094423964565,
-    0.05718984642446587,
-    0.1927822019327025
-   ],
-   "pos": [
-    0.01229041176367447,
-    0.0027294407845290226,
-    -0.12275210014016037
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_63>": {
-   "index": 63,
-   "type": 7,
-   "body": "robot/left_ankle_pitch_link",
-   "group": 2,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.006501062332446817,
-    0.017950470704919473,
-    0.02378830545899051
-   ],
-   "pos": [
-    -0.004106198395375143,
-    5.887730678462465e-05,
-    -0.008573513698468344
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_64>": {
-   "index": 64,
-   "type": 7,
-   "body": "robot/left_ankle_pitch_link",
-   "group": 3,
-   "contype": 1,
-   "conaffinity": 1,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.006501062332446817,
-    0.017950470704919473,
-    0.02378830545899051
-   ],
-   "pos": [
-    -0.004106198395375143,
-    5.887730678462465e-05,
-    -0.008573513698468344
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_65>": {
-   "index": 65,
-   "type": 7,
-   "body": "robot/left_ankle_roll_link",
-   "group": 2,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.03863906045599862,
-    0.03783927626124407,
-    0.11717886395655677
-   ],
-   "pos": [
-    0.02646435804254272,
-    7.351326310042785e-05,
-    -0.014106210048355583
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_66>": {
-   "index": 66,
-   "type": 2,
-   "body": "robot/left_ankle_roll_link",
-   "group": 3,
-   "contype": 1,
-   "conaffinity": 1,
-   "condim": 3,
-   "priority": 1,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    0.6,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.005,
-    0.0,
-    0.0
-   ],
-   "pos": [
-    -0.05,
-    0.025,
-    -0.03
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_67>": {
-   "index": 67,
-   "type": 2,
-   "body": "robot/left_ankle_roll_link",
-   "group": 3,
-   "contype": 1,
-   "conaffinity": 1,
-   "condim": 3,
-   "priority": 1,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    0.6,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.005,
-    0.0,
-    0.0
-   ],
-   "pos": [
-    -0.05,
-    -0.025,
-    -0.03
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_68>": {
-   "index": 68,
-   "type": 2,
-   "body": "robot/left_ankle_roll_link",
-   "group": 3,
-   "contype": 1,
-   "conaffinity": 1,
-   "condim": 3,
-   "priority": 1,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    0.6,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.005,
-    0.0,
-    0.0
-   ],
-   "pos": [
-    0.12,
-    0.03,
-    -0.03
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_69>": {
-   "index": 69,
-   "type": 2,
-   "body": "robot/left_ankle_roll_link",
-   "group": 3,
-   "contype": 1,
-   "conaffinity": 1,
-   "condim": 3,
-   "priority": 1,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    0.6,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.005,
-    0.0,
-    0.0
-   ],
-   "pos": [
-    0.12,
-    -0.03,
-    -0.03
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_70>": {
-   "index": 70,
-   "type": 7,
-   "body": "robot/right_hip_pitch_link",
-   "group": 2,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.0393405076650778,
-    0.05196361056402586,
-    0.0759321825264857
-   ],
-   "pos": [
-    -0.0008664703489512744,
-    -0.04711005033357466,
-    -0.026296623163099924
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_71>": {
-   "index": 71,
-   "type": 7,
-   "body": "robot/right_hip_pitch_link",
-   "group": 3,
-   "contype": 1,
-   "conaffinity": 1,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.0393405076650778,
-    0.05196361056402586,
-    0.0759321825264857
-   ],
-   "pos": [
-    -0.0008664703489512744,
-    -0.04711005033357466,
-    -0.026296623163099924
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_72>": {
-   "index": 72,
-   "type": 7,
-   "body": "robot/right_hip_roll_link",
-   "group": 2,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.05856959939952354,
-    0.049078879150233214,
-    0.10689797706780121
-   ],
-   "pos": [
-    0.03567378883256972,
-    0.0003616971847909951,
-    -0.06771295458931689
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_73>": {
-   "index": 73,
-   "type": 7,
-   "body": "robot/right_hip_roll_link",
-   "group": 3,
-   "contype": 1,
-   "conaffinity": 1,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.05856959939952354,
-    0.049078879150233214,
-    0.10689797706780121
-   ],
-   "pos": [
-    0.03567378883256972,
-    0.0003616971847909951,
-    -0.06771295458931689
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_74>": {
-   "index": 74,
-   "type": 7,
-   "body": "robot/right_hip_yaw_link",
-   "group": 2,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.04467782449949221,
-    0.059945091793372624,
-    0.1464325744860261
-   ],
-   "pos": [
-    -0.030699656369028997,
-    0.003158722541324976,
-    -0.09263954567921404
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_75>": {
-   "index": 75,
-   "type": 7,
-   "body": "robot/right_hip_yaw_link",
-   "group": 3,
-   "contype": 1,
-   "conaffinity": 1,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.04467782449949221,
-    0.059945091793372624,
-    0.1464325744860261
-   ],
-   "pos": [
-    -0.030699656369028997,
-    0.003158722541324976,
-    -0.09263954567921404
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_76>": {
-   "index": 76,
-   "type": 7,
-   "body": "robot/right_knee_link",
-   "group": 2,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.04770454380632618,
-    0.05719109346475999,
-    0.19277953930776565
-   ],
-   "pos": [
-    0.012290840839311904,
-    -0.0027284185571872224,
-    -0.12275462830238623
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_77>": {
-   "index": 77,
-   "type": 7,
-   "body": "robot/right_knee_link",
-   "group": 3,
-   "contype": 1,
-   "conaffinity": 1,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.04770454380632618,
-    0.05719109346475999,
-    0.19277953930776565
-   ],
-   "pos": [
-    0.012290840839311904,
-    -0.0027284185571872224,
-    -0.12275462830238623
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_78>": {
-   "index": 78,
-   "type": 7,
-   "body": "robot/right_ankle_pitch_link",
-   "group": 2,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.00650126275920316,
-    0.01795078376510955,
-    0.023787577152969808
-   ],
-   "pos": [
-    -0.0041065949955294695,
-    -5.9077733540970835e-05,
-    -0.00857303102905033
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_79>": {
-   "index": 79,
-   "type": 7,
-   "body": "robot/right_ankle_pitch_link",
-   "group": 3,
-   "contype": 1,
-   "conaffinity": 1,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.00650126275920316,
-    0.01795078376510955,
-    0.023787577152969808
-   ],
-   "pos": [
-    -0.0041065949955294695,
-    -5.9077733540970835e-05,
-    -0.00857303102905033
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_80>": {
-   "index": 80,
-   "type": 7,
-   "body": "robot/right_ankle_roll_link",
-   "group": 2,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.03863891193000699,
-    0.03783605173514678,
-    0.11717378231508603
-   ],
-   "pos": [
-    0.026469481697172777,
-    -7.266444317600382e-05,
-    -0.014106435744604889
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_81>": {
-   "index": 81,
-   "type": 2,
-   "body": "robot/right_ankle_roll_link",
-   "group": 3,
-   "contype": 1,
-   "conaffinity": 1,
-   "condim": 3,
-   "priority": 1,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    0.6,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.005,
-    0.0,
-    0.0
-   ],
-   "pos": [
-    -0.05,
-    0.025,
-    -0.03
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_82>": {
-   "index": 82,
-   "type": 2,
-   "body": "robot/right_ankle_roll_link",
-   "group": 3,
-   "contype": 1,
-   "conaffinity": 1,
-   "condim": 3,
-   "priority": 1,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    0.6,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.005,
-    0.0,
-    0.0
-   ],
-   "pos": [
-    -0.05,
-    -0.025,
-    -0.03
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_83>": {
-   "index": 83,
-   "type": 2,
-   "body": "robot/right_ankle_roll_link",
-   "group": 3,
-   "contype": 1,
-   "conaffinity": 1,
-   "condim": 3,
-   "priority": 1,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    0.6,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.005,
-    0.0,
-    0.0
-   ],
-   "pos": [
-    0.12,
-    0.03,
-    -0.03
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_84>": {
-   "index": 84,
-   "type": 2,
-   "body": "robot/right_ankle_roll_link",
-   "group": 3,
-   "contype": 1,
-   "conaffinity": 1,
-   "condim": 3,
-   "priority": 1,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    0.6,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.005,
-    0.0,
-    0.0
-   ],
-   "pos": [
-    0.12,
-    -0.03,
-    -0.03
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_85>": {
-   "index": 85,
-   "type": 7,
-   "body": "robot/waist_yaw_link",
-   "group": 2,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.04094832863313963,
-    0.042494020860732735,
-    0.04746168307149228
-   ],
-   "pos": [
-    0.0038216219768146043,
-    -3.0689794448813196e-05,
-    0.015615160711480435
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_86>": {
-   "index": 86,
-   "type": 7,
-   "body": "robot/waist_roll_link",
-   "group": 2,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.010002025157821668,
-    0.011993407965009572,
-    0.017000762933002202
-   ],
-   "pos": [
-    1.872641278022571e-10,
-    1.310712222928039e-07,
-    -2.381154591196088e-10
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_87>": {
-   "index": 87,
-   "type": 7,
-   "body": "robot/torso_link",
-   "group": 2,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.07848131604959117,
-    0.10955184210441278,
-    0.16437405646930697
-   ],
-   "pos": [
-    0.004859769271982111,
-    0.002109824788911099,
-    0.14751263696604375
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_88>": {
-   "index": 88,
-   "type": 7,
-   "body": "robot/torso_link",
-   "group": 3,
-   "contype": 1,
-   "conaffinity": 1,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.07848131604959117,
-    0.10955184210441278,
-    0.16437405646930697
-   ],
-   "pos": [
-    0.004859769271982111,
-    0.002109824788911099,
-    0.14751263696604375
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_89>": {
-   "index": 89,
-   "type": 7,
-   "body": "robot/torso_link",
-   "group": 2,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.014744601562371883,
-    0.0800769583211478,
-    0.07852277770781835
-   ],
-   "pos": [
-    0.0030190916936811904,
-    0.0011127782956188072,
-    0.22746039917874727
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_90>": {
-   "index": 90,
-   "type": 7,
-   "body": "robot/torso_link",
-   "group": 2,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.07200180472325785,
-    0.07780115191714371,
-    0.10657961522680029
-   ],
-   "pos": [
-    0.007650942311808313,
-    2.4814250502793286e-05,
-    0.3851317963124549
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_91>": {
-   "index": 91,
-   "type": 7,
-   "body": "robot/torso_link",
-   "group": 3,
-   "contype": 1,
-   "conaffinity": 1,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.07200180472325785,
-    0.07780115191714371,
-    0.10657961522680029
-   ],
-   "pos": [
-    0.007650942311808313,
-    2.4814250502793286e-05,
-    0.3851317963124549
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_92>": {
-   "index": 92,
-   "type": 7,
-   "body": "robot/left_shoulder_pitch_link",
-   "group": 2,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.03960789161825496,
-    0.03278298709534793,
-    0.0570371013381971
-   ],
-   "pos": [
-    -2.524160950152245e-05,
-    0.03454218177570185,
-    -0.008909194000553549
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_93>": {
-   "index": 93,
    "type": 5,
    "body": "robot/left_shoulder_pitch_link",
    "group": 3,
@@ -9626,46 +6966,8 @@
     -0.01
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_94>": {
-   "index": 94,
-   "type": 7,
-   "body": "robot/left_shoulder_roll_link",
-   "group": 2,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.037680907948668116,
-    0.04087722069354931,
-    0.07146865602112785
-   ],
-   "pos": [
-    3.078866230346007e-05,
-    0.007747256915819465,
-    -0.03750622953852636
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_95>": {
-   "index": 95,
+  "geom@robot/left_shoulder_roll_link|t5|s(0.03, 0.015, 0.0)|p(-0.004, 0.006, -0.053)": {
+   "index": 24,
    "type": 5,
    "body": "robot/left_shoulder_roll_link",
    "group": 3,
@@ -9702,46 +7004,8 @@
     -0.053
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_96>": {
-   "index": 96,
-   "type": 7,
-   "body": "robot/left_shoulder_yaw_link",
-   "group": 2,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.03749777975869982,
-    0.04317351574210839,
-    0.08793232028504863
-   ],
-   "pos": [
-    0.008049665594003904,
-    -0.00420180564637434,
-    -0.048209927243695244
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_97>": {
-   "index": 97,
+  "geom@robot/left_shoulder_yaw_link|t7|s(0.037498, 0.043174, 0.087932)|p(0.00805, -0.004202, -0.04821)": {
+   "index": 25,
    "type": 7,
    "body": "robot/left_shoulder_yaw_link",
    "group": 3,
@@ -9768,56 +7032,18 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.03749777975869982,
-    0.04317351574210839,
-    0.08793232028504863
+    0.03749779469111364,
+    0.04317354176209934,
+    0.08793224645490136
    ],
    "pos": [
-    0.008049665594003904,
-    -0.00420180564637434,
-    -0.048209927243695244
+    0.008049650501489935,
+    -0.004201801376206661,
+    -0.04820989807171067
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_98>": {
-   "index": 98,
-   "type": 7,
-   "body": "robot/left_elbow_link",
-   "group": 2,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.03916565137230176,
-    0.036663195413545964,
-    0.08508509588816798
-   ],
-   "pos": [
-    0.053574244613676256,
-    0.008583805643290808,
-    -0.008537761350154273
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_99>": {
-   "index": 99,
+  "geom@robot/left_elbow_link|t7|s(0.039166, 0.036663, 0.085085)|p(0.053574, 0.008584, -0.008538)": {
+   "index": 26,
    "type": 7,
    "body": "robot/left_elbow_link",
    "group": 3,
@@ -9844,56 +7070,18 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.03916565137230176,
-    0.036663195413545964,
-    0.08508509588816798
+    0.03916561986509237,
+    0.03666314473627421,
+    0.08508510814878789
    ],
    "pos": [
-    0.053574244613676256,
-    0.008583805643290808,
-    -0.008537761350154273
+    0.05357423971795574,
+    0.008583803844273288,
+    -0.008537766318527212
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_100>": {
-   "index": 100,
-   "type": 7,
-   "body": "robot/left_wrist_roll_link",
-   "group": 2,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.030003017900639216,
-    0.03811245675682164,
-    0.03104121818315674
-   ],
-   "pos": [
-    0.018657984394854582,
-    5.9793423268075494e-06,
-    -1.5958652824487767e-07
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_101>": {
-   "index": 101,
+  "geom@robot/left_wrist_roll_link|t7|s(0.030003, 0.038112, 0.031041)|p(0.018658, 6e-06, -0.0)": {
+   "index": 27,
    "type": 7,
    "body": "robot/left_wrist_roll_link",
    "group": 3,
@@ -9920,56 +7108,18 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.030003017900639216,
-    0.03811245675682164,
-    0.03104121818315674
+    0.03000303791848176,
+    0.038112421239941324,
+    0.03104124055666326
    ],
    "pos": [
-    0.018657984394854582,
-    5.9793423268075494e-06,
-    -1.5958652824487767e-07
+    0.018657993283078045,
+    5.976418675022851e-06,
+    -1.5975569395657394e-07
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_102>": {
-   "index": 102,
-   "type": 7,
-   "body": "robot/left_wrist_pitch_link",
-   "group": 2,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.03289195852043946,
-    0.03287431259878393,
-    0.05187041908954562
-   ],
-   "pos": [
-    0.02300019707036519,
-    -0.0005173613094355222,
-    -0.000518381947122207
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_103>": {
-   "index": 103,
+  "geom@robot/left_wrist_pitch_link|t7|s(0.032892, 0.032874, 0.05187)|p(0.023, -0.000517, -0.000518)": {
+   "index": 28,
    "type": 7,
    "body": "robot/left_wrist_pitch_link",
    "group": 3,
@@ -9996,56 +7146,18 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.03289195852043946,
-    0.03287431259878393,
-    0.05187041908954562
+    0.03289167367707532,
+    0.032874013734952974,
+    0.05187046072887447
    ],
    "pos": [
-    0.02300019707036519,
-    -0.0005173613094355222,
-    -0.000518381947122207
+    0.023000195205413205,
+    -0.0005173630127224681,
+    -0.0005183838360862867
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_104>": {
-   "index": 104,
-   "type": 7,
-   "body": "robot/left_wrist_yaw_link",
-   "group": 2,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.02808902444514875,
-    0.039546509676416715,
-    0.031050178505069644
-   ],
-   "pos": [
-    0.020643364729886877,
-    0.0009027484895771055,
-    2.863405704168882e-06
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_105>": {
-   "index": 105,
+  "geom@robot/left_wrist_yaw_link|t7|s(0.028089, 0.039546, 0.03105)|p(0.020643, 0.000903, 3e-06)": {
+   "index": 29,
    "type": 7,
    "body": "robot/left_wrist_yaw_link",
    "group": 3,
@@ -10072,56 +7184,18 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.02808902444514875,
-    0.039546509676416715,
-    0.031050178505069644
+    0.028089024402606917,
+    0.03954644390758175,
+    0.03105017603192461
    ],
    "pos": [
-    0.020643364729886877,
-    0.0009027484895771055,
-    2.863405704168882e-06
+    0.02064335505426972,
+    0.0009027468386739472,
+    2.85660947352345e-06
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_106>": {
-   "index": 106,
-   "type": 7,
-   "body": "robot/left_palm_link",
-   "group": 1,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.01646878465035467,
-    0.04821886685942077,
-    0.0601333337756178
-   ],
-   "pos": [
-    -0.0027836882586544875,
-    -0.00046314811417813,
-    0.038443494923994154
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_107>": {
-   "index": 107,
+  "geom@robot/left_palm_link|t7|s(0.016469, 0.048219, 0.060133)|p(-0.002784, -0.000463, 0.038444)": {
+   "index": 30,
    "type": 7,
    "body": "robot/left_palm_link",
    "group": 0,
@@ -10148,132 +7222,18 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.01646878465035467,
-    0.04821886685942077,
-    0.0601333337756178
+    0.016468806819517665,
+    0.048218814277288,
+    0.06013329713828297
    ],
    "pos": [
-    -0.0027836882586544875,
-    -0.00046314811417813,
-    0.038443494923994154
+    -0.0027836883982431675,
+    -0.0004631456973515715,
+    0.038443502119141985
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_108>": {
-   "index": 108,
-   "type": 7,
-   "body": "robot/left_finger1_link1",
-   "group": 1,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.007847598278240648,
-    0.009666458363748454,
-    0.014125494281157468
-   ],
-   "pos": [
-    -0.0021831445488842,
-    0.001850594830328726,
-    0.007685887851951089
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_109>": {
-   "index": 109,
-   "type": 7,
-   "body": "robot/left_finger1_link1",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.007847598278240648,
-    0.009666458363748454,
-    0.014125494281157468
-   ],
-   "pos": [
-    -0.0021831445488842,
-    0.001850594830328726,
-    0.007685887851951089
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_110>": {
-   "index": 110,
-   "type": 7,
-   "body": "robot/left_finger1_link2",
-   "group": 1,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.0077885601414876575,
-    0.007668275065690361,
-    0.022253532831040805
-   ],
-   "pos": [
-    0.0010971164564625474,
-    2.3855464290607165e-05,
-    0.01660268647315061
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_111>": {
-   "index": 111,
+  "geom@robot/left_finger1_link2|t7|s(0.007789, 0.007668, 0.022254)|p(0.001097, 2.4e-05, 0.016603)": {
+   "index": 31,
    "type": 7,
    "body": "robot/left_finger1_link2",
    "group": 0,
@@ -10300,56 +7260,18 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.0077885601414876575,
-    0.007668275065690361,
-    0.022253532831040805
+    0.007788560928090592,
+    0.007668277539318608,
+    0.022253557716535657
    ],
    "pos": [
-    0.0010971164564625474,
-    2.3855464290607165e-05,
-    0.01660268647315061
+    0.0010971175336709229,
+    2.3854625908584523e-05,
+    0.01660268846093423
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_112>": {
-   "index": 112,
-   "type": 7,
-   "body": "robot/left_finger1_link3",
-   "group": 1,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.007643664798932568,
-    0.007636252653132997,
-    0.019314209599931007
-   ],
-   "pos": [
-    -0.0010165125136053815,
-    7.191215569317271e-05,
-    0.014087844397687004
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_113>": {
-   "index": 113,
+  "geom@robot/left_finger1_link3|t7|s(0.007644, 0.007636, 0.019314)|p(-0.001017, 7.2e-05, 0.014088)": {
+   "index": 32,
    "type": 7,
    "body": "robot/left_finger1_link3",
    "group": 0,
@@ -10376,56 +7298,18 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.007643664798932568,
-    0.007636252653132997,
-    0.019314209599931007
+    0.007643665446409592,
+    0.007636252091059803,
+    0.019314210951969352
    ],
    "pos": [
-    -0.0010165125136053815,
-    7.191215569317271e-05,
-    0.014087844397687004
+    -0.0010165115576329677,
+    7.191222885651322e-05,
+    0.014087846713067863
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_114>": {
-   "index": 114,
-   "type": 7,
-   "body": "robot/left_finger1_link4",
-   "group": 1,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.00766774637551648,
-    0.007634992165409411,
-    0.01319389828932143
-   ],
-   "pos": [
-    -0.0011580329298653614,
-    0.00026914262438055653,
-    0.007978315907540015
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_115>": {
-   "index": 115,
+  "geom@robot/left_finger1_link4|t7|s(0.007668, 0.007635, 0.013194)|p(-0.001158, 0.000269, 0.007978)": {
+   "index": 33,
    "type": 7,
    "body": "robot/left_finger1_link4",
    "group": 0,
@@ -10452,56 +7336,18 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.00766774637551648,
-    0.007634992165409411,
-    0.01319389828932143
+    0.0076677463906864845,
+    0.007634991997785295,
+    0.01319390371134984
    ],
    "pos": [
-    -0.0011580329298653614,
-    0.00026914262438055653,
-    0.007978315907540015
+    -0.00115803267008077,
+    0.0002691426846423259,
+    0.007978316704284118
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_116>": {
-   "index": 116,
-   "type": 7,
-   "body": "robot/left_finger1_link4",
-   "group": 1,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.00892936122468036,
-    0.007517110893805989,
-    0.0094052582356463
-   ],
-   "pos": [
-    -0.001220356104031502,
-    0.0002176826842822949,
-    0.024115256610060552
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_117>": {
-   "index": 117,
+  "geom@robot/left_finger1_link4|t7|s(0.008929, 0.007517, 0.009405)|p(-0.00122, 0.000218, 0.024115)": {
+   "index": 34,
    "type": 7,
    "body": "robot/left_finger1_link4",
    "group": 0,
@@ -10528,132 +7374,18 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.00892936122468036,
-    0.007517110893805989,
-    0.0094052582356463
+    0.008929363881885437,
+    0.0075171071034850516,
+    0.009405259855000266
    ],
    "pos": [
-    -0.001220356104031502,
-    0.0002176826842822949,
-    0.024115256610060552
+    -0.0012203559034031967,
+    0.0002176827493129332,
+    0.024115256380450825
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_118>": {
-   "index": 118,
-   "type": 7,
-   "body": "robot/left_finger2_link1",
-   "group": 1,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.004110306748976304,
-    0.007000019686069093,
-    0.009436160417471083
-   ],
-   "pos": [
-    -0.0019420912459865562,
-    -2.0401324830102303e-08,
-    -3.368048446064176e-05
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_119>": {
-   "index": 119,
-   "type": 7,
-   "body": "robot/left_finger2_link1",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.004110306748976304,
-    0.007000019686069093,
-    0.009436160417471083
-   ],
-   "pos": [
-    -0.0019420912459865562,
-    -2.0401324830102303e-08,
-    -3.368048446064176e-05
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_120>": {
-   "index": 120,
-   "type": 7,
-   "body": "robot/left_finger2_link2",
-   "group": 1,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.0075042878301960336,
-    0.00821836381244619,
-    0.02759535507206557
-   ],
-   "pos": [
-    -4.287997834097168e-06,
-    0.006075836153461403,
-    0.02125148576817152
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_121>": {
-   "index": 121,
+  "geom@robot/left_finger2_link2|t7|s(0.007504, 0.008218, 0.027595)|p(-4e-06, 0.006076, 0.021251)": {
+   "index": 35,
    "type": 7,
    "body": "robot/left_finger2_link2",
    "group": 0,
@@ -10680,56 +7412,18 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.0075042878301960336,
-    0.00821836381244619,
-    0.02759535507206557
+    0.007504287687067125,
+    0.008218360327882002,
+    0.027595377941145298
    ],
    "pos": [
-    -4.287997834097168e-06,
-    0.006075836153461403,
-    0.02125148576817152
+    -4.2878547051883695e-06,
+    0.006075834238128073,
+    0.02125148520550565
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_122>": {
-   "index": 122,
-   "type": 7,
-   "body": "robot/left_finger2_link3",
-   "group": 1,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.0077116647034980775,
-    0.008384143090021246,
-    0.020142580497868406
-   ],
-   "pos": [
-    -0.0010103433243386657,
-    -0.0002453365255738438,
-    0.014568388057409015
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_123>": {
-   "index": 123,
+  "geom@robot/left_finger2_link3|t7|s(0.007712, 0.008384, 0.020143)|p(-0.00101, -0.000245, 0.014568)": {
+   "index": 36,
    "type": 7,
    "body": "robot/left_finger2_link3",
    "group": 0,
@@ -10756,56 +7450,18 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.0077116647034980775,
-    0.008384143090021246,
-    0.020142580497868406
+    0.007711663195082473,
+    0.008384142500478989,
+    0.02014253291828755
    ],
    "pos": [
-    -0.0010103433243386657,
-    -0.0002453365255738438,
-    0.014568388057409015
+    -0.001010342621002283,
+    -0.0002453368351192778,
+    0.01456838729591094
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_124>": {
-   "index": 124,
-   "type": 7,
-   "body": "robot/left_finger2_link4",
-   "group": 1,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.008271020892619921,
-    0.01011794533115145,
-    0.009082684690160202
-   ],
-   "pos": [
-    -0.0008730868628668701,
-    0.00035500130279655565,
-    0.004789573866033256
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_125>": {
-   "index": 125,
+  "geom@robot/left_finger2_link4|t7|s(0.008271, 0.010118, 0.009083)|p(-0.000873, 0.000355, 0.00479)": {
+   "index": 37,
    "type": 7,
    "body": "robot/left_finger2_link4",
    "group": 0,
@@ -10832,56 +7488,18 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.008271020892619921,
-    0.01011794533115145,
-    0.009082684690160202
+    0.008271020379600478,
+    0.010117944544414361,
+    0.009082684849835553
    ],
    "pos": [
-    -0.0008730868628668701,
-    0.00035500130279655565,
-    0.004789573866033256
+    -0.000873086409866729,
+    0.000355001464648707,
+    0.0047895741691334655
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_126>": {
-   "index": 126,
-   "type": 7,
-   "body": "robot/left_finger2_link4",
-   "group": 1,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.00824407132363164,
-    0.007503828692195152,
-    0.011145210774792177
-   ],
-   "pos": [
-    -0.0012555681267685396,
-    0.0002148943688964592,
-    0.018081143011283683
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_127>": {
-   "index": 127,
+  "geom@robot/left_finger2_link4|t7|s(0.008244, 0.007504, 0.011145)|p(-0.001256, 0.000215, 0.018081)": {
+   "index": 38,
    "type": 7,
    "body": "robot/left_finger2_link4",
    "group": 0,
@@ -10908,132 +7526,18 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.00824407132363164,
-    0.007503828692195152,
-    0.011145210774792177
+    0.00824406763205603,
+    0.007503825487361834,
+    0.011145211803203567
    ],
    "pos": [
-    -0.0012555681267685396,
-    0.0002148943688964592,
-    0.018081143011283683
+    -0.0012555684927305346,
+    0.00021489442369215293,
+    0.018081143190894683
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_128>": {
-   "index": 128,
-   "type": 7,
-   "body": "robot/left_finger3_link1",
-   "group": 1,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.00411030678708397,
-    0.007000019687929989,
-    0.009436160578098804
-   ],
-   "pos": [
-    -0.0019420908098274111,
-    -2.0868847013868825e-08,
-    -3.3680559874230164e-05
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_129>": {
-   "index": 129,
-   "type": 7,
-   "body": "robot/left_finger3_link1",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.00411030678708397,
-    0.007000019687929989,
-    0.009436160578098804
-   ],
-   "pos": [
-    -0.0019420908098274111,
-    -2.0868847013868825e-08,
-    -3.3680559874230164e-05
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_130>": {
-   "index": 130,
-   "type": 7,
-   "body": "robot/left_finger3_link2",
-   "group": 1,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.007504288023277042,
-    0.008218363887786014,
-    0.027595355044118766
-   ],
-   "pos": [
-    -4.287259592530899e-06,
-    0.006075836104297437,
-    0.021251485794673595
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_131>": {
-   "index": 131,
+  "geom@robot/left_finger3_link2|t7|s(0.007504, 0.008218, 0.027595)|p(-4e-06, 0.006076, 0.021251)": {
+   "index": 39,
    "type": 7,
    "body": "robot/left_finger3_link2",
    "group": 0,
@@ -11060,56 +7564,18 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.007504288023277042,
-    0.008218363887786014,
-    0.027595355044118766
+    0.007504287559223521,
+    0.008218360273157456,
+    0.027595377658057238
    ],
    "pos": [
-    -4.287259592530899e-06,
-    0.006075836104297437,
-    0.021251485794673595
+    -4.287726861584006e-06,
+    0.006075834205567169,
+    0.021251485488597954
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_132>": {
-   "index": 132,
-   "type": 7,
-   "body": "robot/left_finger3_link3",
-   "group": 1,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.007711664703497358,
-    0.008384143090024738,
-    0.020142580497855316
-   ],
-   "pos": [
-    -0.0010103433243407775,
-    -0.0002453365255741842,
-    0.014568388057422063
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_133>": {
-   "index": 133,
+  "geom@robot/left_finger3_link3|t7|s(0.007712, 0.008384, 0.020143)|p(-0.00101, -0.000245, 0.014568)": {
+   "index": 40,
    "type": 7,
    "body": "robot/left_finger3_link3",
    "group": 0,
@@ -11136,56 +7602,18 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.007711664703497358,
-    0.008384143090024738,
-    0.020142580497855316
+    0.007711663195081877,
+    0.008384142500481518,
+    0.020142532918275054
    ],
    "pos": [
-    -0.0010103433243407775,
-    -0.0002453365255741842,
-    0.014568388057422063
+    -0.0010103426210042207,
+    -0.000245336835119459,
+    0.014568387295923399
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_134>": {
-   "index": 134,
-   "type": 7,
-   "body": "robot/left_finger3_link4",
-   "group": 1,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.00827102088975312,
-    0.010117945318969632,
-    0.009082684671339358
-   ],
-   "pos": [
-    -0.0008730868493781249,
-    0.0003550013041856569,
-    0.0047895738668033375
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_135>": {
-   "index": 135,
+  "geom@robot/left_finger3_link4|t7|s(0.008271, 0.010118, 0.009083)|p(-0.000873, 0.000355, 0.00479)": {
+   "index": 41,
    "type": 7,
    "body": "robot/left_finger3_link4",
    "group": 0,
@@ -11212,56 +7640,18 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.00827102088975312,
-    0.010117945318969632,
-    0.009082684671339358
+    0.008271020378793651,
+    0.010117944518472118,
+    0.009082684827848934
    ],
    "pos": [
-    -0.0008730868493781249,
-    0.0003550013041856569,
-    0.0047895738668033375
+    -0.0008730864110909197,
+    0.00035500145333504574,
+    0.0047895741735651115
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_136>": {
-   "index": 136,
-   "type": 7,
-   "body": "robot/left_finger3_link4",
-   "group": 1,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.008234222515504278,
-    0.007505839837411882,
-    0.011145299382748072
-   ],
-   "pos": [
-    -0.0012539072575899768,
-    0.0002021473465750239,
-    0.018081143016232655
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_137>": {
-   "index": 137,
+  "geom@robot/left_finger3_link4|t7|s(0.008234, 0.007506, 0.011145)|p(-0.001254, 0.000202, 0.018081)": {
+   "index": 42,
    "type": 7,
    "body": "robot/left_finger3_link4",
    "group": 0,
@@ -11288,132 +7678,18 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.008234222515504278,
-    0.007505839837411882,
-    0.011145299382748072
+    0.008234224730431752,
+    0.007505835206785333,
+    0.011145299552976475
    ],
    "pos": [
-    -0.0012539072575899768,
-    0.0002021473465750239,
-    0.018081143016232655
+    -0.001253907204351792,
+    0.00020214737256134643,
+    0.01808114296008896
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_138>": {
-   "index": 138,
-   "type": 7,
-   "body": "robot/left_finger4_link1",
-   "group": 1,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.004110307600383387,
-    0.007000006954403893,
-    0.009436163377644531
-   ],
-   "pos": [
-    -0.0019420893505458503,
-    -8.600982205133104e-09,
-    -3.367796082067028e-05
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_139>": {
-   "index": 139,
-   "type": 7,
-   "body": "robot/left_finger4_link1",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.004110307600383387,
-    0.007000006954403893,
-    0.009436163377644531
-   ],
-   "pos": [
-    -0.0019420893505458503,
-    -8.600982205133104e-09,
-    -3.367796082067028e-05
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_140>": {
-   "index": 140,
-   "type": 7,
-   "body": "robot/left_finger4_link2",
-   "group": 1,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.007504287815976988,
-    0.008218363816528018,
-    0.027595355063970407
-   ],
-   "pos": [
-    -4.28751795376418e-06,
-    0.00607583615376853,
-    0.02125148577618659
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_141>": {
-   "index": 141,
+  "geom@robot/left_finger4_link2|t7|s(0.007504, 0.008218, 0.027595)|p(-4e-06, 0.006076, 0.021251)": {
+   "index": 43,
    "type": 7,
    "body": "robot/left_finger4_link2",
    "group": 0,
@@ -11440,56 +7716,18 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.007504287815976988,
-    0.008218363816528018,
-    0.027595355063970407
+    0.007504287610803231,
+    0.008218360316527727,
+    0.027595377847776166
    ],
    "pos": [
-    -4.28751795376418e-06,
-    0.00607583615376853,
-    0.02125148577618659
+    -4.287778441294801e-06,
+    0.006075834234799903,
+    0.02125148529908517
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_142>": {
-   "index": 142,
-   "type": 7,
-   "body": "robot/left_finger4_link3",
-   "group": 1,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.007711664703498078,
-    0.008384143090021246,
-    0.0201425804978684
-   ],
-   "pos": [
-    -0.0010103433243386665,
-    -0.0002453365255738435,
-    0.014568388057409025
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_143>": {
-   "index": 143,
+  "geom@robot/left_finger4_link3|t7|s(0.007712, 0.008384, 0.020143)|p(-0.00101, -0.000245, 0.014568)": {
+   "index": 44,
    "type": 7,
    "body": "robot/left_finger4_link3",
    "group": 0,
@@ -11516,56 +7754,18 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.007711664703498078,
-    0.008384143090021246,
-    0.0201425804978684
+    0.0077116631950824716,
+    0.008384142500478989,
+    0.020142532918287572
    ],
    "pos": [
-    -0.0010103433243386665,
-    -0.0002453365255738435,
-    0.014568388057409025
+    -0.001010342621002282,
+    -0.0002453368351192772,
+    0.01456838729591092
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_144>": {
-   "index": 144,
-   "type": 7,
-   "body": "robot/left_finger4_link4",
-   "group": 1,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.008271020889688748,
-    0.010117945328720915,
-    0.009082684683713583
-   ],
-   "pos": [
-    -0.0008730868499840256,
-    0.0003550013047623401,
-    0.004789573865473227
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_145>": {
-   "index": 145,
+  "geom@robot/left_finger4_link4|t7|s(0.008271, 0.010118, 0.009083)|p(-0.000873, 0.000355, 0.00479)": {
+   "index": 45,
    "type": 7,
    "body": "robot/left_finger4_link4",
    "group": 0,
@@ -11592,56 +7792,18 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.008271020889688748,
-    0.010117945328720915,
-    0.009082684683713583
+    0.00827102037959718,
+    0.010117944544546849,
+    0.00908268484998335
    ],
    "pos": [
-    -0.0008730868499840256,
-    0.0003550013047623401,
-    0.004789573865473227
+    -0.000873086409864285,
+    0.00035500146467437875,
+    0.004789574169115195
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_146>": {
-   "index": 146,
-   "type": 7,
-   "body": "robot/left_finger4_link4",
-   "group": 1,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.008235700361188597,
-    0.007514734844905818,
-    0.011145026661547156
-   ],
-   "pos": [
-    -0.0012533911080979093,
-    0.00019627951261540772,
-    0.018081143021688076
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_147>": {
-   "index": 147,
+  "geom@robot/left_finger4_link4|t7|s(0.008236, 0.007515, 0.011145)|p(-0.001253, 0.000196, 0.018081)": {
+   "index": 46,
    "type": 7,
    "body": "robot/left_finger4_link4",
    "group": 0,
@@ -11668,132 +7830,18 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.008235700361188597,
-    0.007514734844905818,
-    0.011145026661547156
+    0.008235702515971756,
+    0.007514732864221974,
+    0.011145027616319256
    ],
    "pos": [
-    -0.0012533911080979093,
-    0.00019627951261540772,
-    0.018081143021688076
+    -0.0012533911509827172,
+    0.00019627986023799948,
+    0.018081142920579538
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_148>": {
-   "index": 148,
-   "type": 7,
-   "body": "robot/left_finger5_link1",
-   "group": 1,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.004110307478332343,
-    0.007000006947457817,
-    0.009436163448328323
-   ],
-   "pos": [
-    -0.001942089171682579,
-    -9.059697415784149e-09,
-    -3.367807573828515e-05
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_149>": {
-   "index": 149,
-   "type": 7,
-   "body": "robot/left_finger5_link1",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.004110307478332343,
-    0.007000006947457817,
-    0.009436163448328323
-   ],
-   "pos": [
-    -0.001942089171682579,
-    -9.059697415784149e-09,
-    -3.367807573828515e-05
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_150>": {
-   "index": 150,
-   "type": 7,
-   "body": "robot/left_finger5_link2",
-   "group": 1,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.0075040452349828665,
-    0.008217498408263118,
-    0.027594279598124535
-   ],
-   "pos": [
-    -4.044471298355528e-06,
-    0.006075294235442382,
-    0.02125255658292496
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_151>": {
-   "index": 151,
+  "geom@robot/left_finger5_link2|t7|s(0.007504, 0.008217, 0.027594)|p(-4e-06, 0.006075, 0.021253)": {
+   "index": 47,
    "type": 7,
    "body": "robot/left_finger5_link2",
    "group": 0,
@@ -11820,56 +7868,18 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.0075040452349828665,
-    0.008217498408263118,
-    0.027594279598124535
+    0.007504044648716015,
+    0.008217494546609225,
+    0.027594302066584506
    ],
    "pos": [
-    -4.044471298355528e-06,
-    0.006075294235442382,
-    0.02125255658292496
+    -4.0448163540780325e-06,
+    0.006075292180902116,
+    0.021252556420838807
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_152>": {
-   "index": 152,
-   "type": 7,
-   "body": "robot/left_finger5_link3",
-   "group": 1,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.007711664642179606,
-    0.008384143095159379,
-    0.020142583030369178
-   ],
-   "pos": [
-    -0.0010103432456298183,
-    -0.000245336519084332,
-    0.014568389246245683
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_153>": {
-   "index": 153,
+  "geom@robot/left_finger5_link3|t7|s(0.007712, 0.008384, 0.020143)|p(-0.00101, -0.000245, 0.014568)": {
+   "index": 48,
    "type": 7,
    "body": "robot/left_finger5_link3",
    "group": 0,
@@ -11896,56 +7906,18 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.007711664642179606,
-    0.008384143095159379,
-    0.020142583030369178
+    0.007711663228444152,
+    0.008384142507362394,
+    0.02014263215056392
    ],
    "pos": [
-    -0.0010103432456298183,
-    -0.000245336519084332,
-    0.014568389246245683
+    -0.0010103426544565653,
+    -0.0002453368407876385,
+    0.014568388542459815
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_154>": {
-   "index": 154,
-   "type": 7,
-   "body": "robot/left_finger5_link4",
-   "group": 1,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.00827102088968875,
-    0.01011794532872092,
-    0.009082684683713588
-   ],
-   "pos": [
-    -0.0008730868499840257,
-    0.0003550013047623418,
-    0.004789573865473224
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_155>": {
-   "index": 155,
+  "geom@robot/left_finger5_link4|t7|s(0.008271, 0.010118, 0.009083)|p(-0.000873, 0.000355, 0.00479)": {
+   "index": 49,
    "type": 7,
    "body": "robot/left_finger5_link4",
    "group": 0,
@@ -11972,56 +7944,18 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.00827102088968875,
-    0.01011794532872092,
-    0.009082684683713588
+    0.00827102037959718,
+    0.010117944544546849,
+    0.009082684849983352
    ],
    "pos": [
-    -0.0008730868499840257,
-    0.0003550013047623418,
-    0.004789573865473224
+    -0.000873086409864285,
+    0.00035500146467438016,
+    0.004789574169115191
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_156>": {
-   "index": 156,
-   "type": 7,
-   "body": "robot/left_finger5_link4",
-   "group": 1,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.008237406996691825,
-    0.007505149368396834,
-    0.011145301590166868
-   ],
-   "pos": [
-    -0.001253916535629108,
-    0.00020180674707944734,
-    0.01808114301289643
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_157>": {
-   "index": 157,
+  "geom@robot/left_finger5_link4|t7|s(0.008237, 0.007505, 0.011145)|p(-0.001254, 0.000202, 0.018081)": {
+   "index": 50,
    "type": 7,
    "body": "robot/left_finger5_link4",
    "group": 0,
@@ -12048,56 +7982,18 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.008237406996691825,
-    0.007505149368396834,
-    0.011145301590166868
+    0.008237411648229186,
+    0.007505149745054098,
+    0.01114530181636354
    ],
    "pos": [
-    -0.001253916535629108,
-    0.00020180674707944734,
-    0.01808114301289643
+    -0.0012539163628260894,
+    0.0002018066580754241,
+    0.018081143086640765
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_158>": {
-   "index": 158,
-   "type": 7,
-   "body": "robot/right_shoulder_pitch_link",
-   "group": 2,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.039608753917672546,
-    0.03279728609253592,
-    0.05703611190792765
-   ],
-   "pos": [
-    -2.4137104255368755e-05,
-    -0.0345432594895927,
-    -0.008909147962374762
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_159>": {
-   "index": 159,
+  "geom@robot/right_shoulder_pitch_link|t5|s(0.03, 0.025, 0.0)|p(0.0, -0.04, -0.01)": {
+   "index": 51,
    "type": 5,
    "body": "robot/right_shoulder_pitch_link",
    "group": 3,
@@ -12134,46 +8030,8 @@
     -0.01
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_160>": {
-   "index": 160,
-   "type": 7,
-   "body": "robot/right_shoulder_roll_link",
-   "group": 2,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.03767740847290414,
-    0.040877952122464645,
-    0.07146744160832695
-   ],
-   "pos": [
-    3.0647723212395196e-05,
-    -0.007746894558775755,
-    -0.03750597545142516
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_161>": {
-   "index": 161,
+  "geom@robot/right_shoulder_roll_link|t5|s(0.03, 0.015, 0.0)|p(-0.004, -0.006, -0.053)": {
+   "index": 52,
    "type": 5,
    "body": "robot/right_shoulder_roll_link",
    "group": 3,
@@ -12210,46 +8068,8 @@
     -0.053
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_162>": {
-   "index": 162,
-   "type": 7,
-   "body": "robot/right_shoulder_yaw_link",
-   "group": 2,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.03749643937274193,
-    0.043175452104045706,
-    0.08793277396408505
-   ],
-   "pos": [
-    0.00804956885105232,
-    0.00420282487216018,
-    -0.04821007683406935
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_163>": {
-   "index": 163,
+  "geom@robot/right_shoulder_yaw_link|t7|s(0.037496, 0.043175, 0.087933)|p(0.00805, 0.004203, -0.04821)": {
+   "index": 53,
    "type": 7,
    "body": "robot/right_shoulder_yaw_link",
    "group": 3,
@@ -12276,56 +8096,18 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.03749643937274193,
-    0.043175452104045706,
-    0.08793277396408505
+    0.03749645119442106,
+    0.04317547557811294,
+    0.08793269964303295
    ],
    "pos": [
-    0.00804956885105232,
-    0.00420282487216018,
-    -0.04821007683406935
+    0.00804955250237373,
+    0.004202822834276131,
+    -0.04821004749983472
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_164>": {
-   "index": 164,
-   "type": 7,
-   "body": "robot/right_elbow_link",
-   "group": 2,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.03916483455884125,
-    0.0366641260428503,
-    0.0850859925960606
-   ],
-   "pos": [
-    0.05357441187591211,
-    -0.008582284246788056,
-    -0.008536567848057683
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_165>": {
-   "index": 165,
+  "geom@robot/right_elbow_link|t7|s(0.039165, 0.036664, 0.085086)|p(0.053574, -0.008582, -0.008537)": {
+   "index": 54,
    "type": 7,
    "body": "robot/right_elbow_link",
    "group": 3,
@@ -12352,56 +8134,18 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.03916483455884125,
-    0.0366641260428503,
-    0.0850859925960606
+    0.03916480556111555,
+    0.036664075737199375,
+    0.08508600359309254
    ],
    "pos": [
-    0.05357441187591211,
-    -0.008582284246788056,
-    -0.008536567848057683
+    0.053574405926308015,
+    -0.008582283248356665,
+    -0.008536572901288977
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_166>": {
-   "index": 166,
-   "type": 7,
-   "body": "robot/right_wrist_roll_link",
-   "group": 2,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.030001928869753242,
-    0.03811301321342589,
-    0.031041551065035665
-   ],
-   "pos": [
-    0.018657941307464523,
-    -5.957828778852661e-06,
-    -4.83245646150392e-07
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_167>": {
-   "index": 167,
+  "geom@robot/right_wrist_roll_link|t7|s(0.030002, 0.038113, 0.031042)|p(0.018658, -6e-06, -0.0)": {
+   "index": 55,
    "type": 7,
    "body": "robot/right_wrist_roll_link",
    "group": 3,
@@ -12428,56 +8172,18 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.030001928869753242,
-    0.03811301321342589,
-    0.031041551065035665
+    0.030001946504640036,
+    0.038112979138384226,
+    0.031041575108327727
    ],
    "pos": [
-    0.018657941307464523,
-    -5.957828778852661e-06,
-    -4.83245646150392e-07
+    0.018657950400238595,
+    -5.955440846714219e-06,
+    -4.847901108251979e-07
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_168>": {
-   "index": 168,
-   "type": 7,
-   "body": "robot/right_wrist_pitch_link",
-   "group": 2,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.03272681549353626,
-    0.03270843953096671,
-    0.05187056952181719
-   ],
-   "pos": [
-    0.022999880367268993,
-    0.0005172208304745039,
-    -0.0005182067564729859
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_169>": {
-   "index": 169,
+  "geom@robot/right_wrist_pitch_link|t7|s(0.032727, 0.032709, 0.051871)|p(0.023, 0.000517, -0.000518)": {
+   "index": 56,
    "type": 7,
    "body": "robot/right_wrist_pitch_link",
    "group": 3,
@@ -12504,56 +8210,18 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.03272681549353626,
-    0.03270843953096671,
-    0.05187056952181719
+    0.03272710331453635,
+    0.032708716813084855,
+    0.05187054115324896
    ],
    "pos": [
-    0.022999880367268993,
-    0.0005172208304745039,
-    -0.0005182067564729859
+    0.022999877746772937,
+    0.000517222551641325,
+    -0.0005182076756992094
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_170>": {
-   "index": 170,
-   "type": 7,
-   "body": "robot/right_wrist_yaw_link",
-   "group": 2,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.028089943325169,
-    0.03954302505044013,
-    0.031055563492553968
-   ],
-   "pos": [
-    0.020642202624980278,
-    -0.0009024964060801943,
-    4.787797910695187e-06
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_171>": {
-   "index": 171,
+  "geom@robot/right_wrist_yaw_link|t7|s(0.02809, 0.039543, 0.031056)|p(0.020642, -0.000902, 5e-06)": {
+   "index": 57,
    "type": 7,
    "body": "robot/right_wrist_yaw_link",
    "group": 3,
@@ -12580,56 +8248,18 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.028089943325169,
-    0.03954302505044013,
-    0.031055563492553968
+    0.028089944886992044,
+    0.039543008081766744,
+    0.03105554973362123
    ],
    "pos": [
-    0.020642202624980278,
-    -0.0009024964060801943,
-    4.787797910695187e-06
+    0.02064219381408567,
+    -0.0009024951378242638,
+    4.784100318461843e-06
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_172>": {
-   "index": 172,
-   "type": 7,
-   "body": "robot/right_palm_link",
-   "group": 1,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.016466358266120737,
-    0.04819354277128418,
-    0.060136586274395734
-   ],
-   "pos": [
-    -0.002782075077270405,
-    0.00045357312831960844,
-    0.03844441996759676
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_173>": {
-   "index": 173,
+  "geom@robot/right_palm_link|t7|s(0.016466, 0.048194, 0.060137)|p(-0.002782, 0.000454, 0.038444)": {
+   "index": 58,
    "type": 7,
    "body": "robot/right_palm_link",
    "group": 0,
@@ -12656,132 +8286,18 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.016466358266120737,
-    0.04819354277128418,
-    0.060136586274395734
+    0.016466329242538148,
+    0.04819355834335636,
+    0.06013653439697395
    ],
    "pos": [
-    -0.002782075077270405,
-    0.00045357312831960844,
-    0.03844441996759676
+    -0.0027820757257581556,
+    0.00045357612928448315,
+    0.038444430044380085
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_174>": {
-   "index": 174,
-   "type": 7,
-   "body": "robot/right_finger1_link1",
-   "group": 1,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.007936911954285319,
-    0.009587317152462034,
-    0.01427694171891523
-   ],
-   "pos": [
-    -0.002288716546381384,
-    -0.0019173396157672194,
-    0.007742166858664716
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_175>": {
-   "index": 175,
-   "type": 7,
-   "body": "robot/right_finger1_link1",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.007936911954285319,
-    0.009587317152462034,
-    0.01427694171891523
-   ],
-   "pos": [
-    -0.002288716546381384,
-    -0.0019173396157672194,
-    0.007742166858664716
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_176>": {
-   "index": 176,
-   "type": 7,
-   "body": "robot/right_finger1_link2",
-   "group": 1,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.007779856701473479,
-    0.0076630092599073,
-    0.022221831518259943
-   ],
-   "pos": [
-    -0.0010929085216163014,
-    2.6475279069086606e-05,
-    0.016626912790595978
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_177>": {
-   "index": 177,
+  "geom@robot/right_finger1_link2|t7|s(0.00778, 0.007663, 0.022222)|p(-0.001093, 2.6e-05, 0.016627)": {
+   "index": 59,
    "type": 7,
    "body": "robot/right_finger1_link2",
    "group": 0,
@@ -12808,56 +8324,18 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.007779856701473479,
-    0.0076630092599073,
-    0.022221831518259943
+    0.007779858483550339,
+    0.007663010037735993,
+    0.022221809102762214
    ],
    "pos": [
-    -0.0010929085216163014,
-    2.6475279069086606e-05,
-    0.016626912790595978
+    -0.0010929086309887069,
+    2.6474749206135835e-05,
+    0.016626913257917892
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_178>": {
-   "index": 178,
-   "type": 7,
-   "body": "robot/right_finger1_link3",
-   "group": 1,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.007643859255233826,
-    0.007632927684463156,
-    0.01928280737016895
-   ],
-   "pos": [
-    -0.0010166015633597623,
-    -7.235720040849782e-05,
-    0.01409030974130023
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_179>": {
-   "index": 179,
+  "geom@robot/right_finger1_link3|t7|s(0.007644, 0.007633, 0.019283)|p(-0.001017, -7.2e-05, 0.01409)": {
+   "index": 60,
    "type": 7,
    "body": "robot/right_finger1_link3",
    "group": 0,
@@ -12884,56 +8362,18 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.007643859255233826,
-    0.007632927684463156,
-    0.01928280737016895
+    0.007643864631451377,
+    0.007632929633928153,
+    0.019282807495666177
    ],
    "pos": [
-    -0.0010166015633597623,
-    -7.235720040849782e-05,
-    0.01409030974130023
+    -0.0010166005904416223,
+    -7.235683915199425e-05,
+    0.01409031168714203
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_180>": {
-   "index": 180,
-   "type": 7,
-   "body": "robot/right_finger1_link4",
-   "group": 1,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.007668188008088303,
-    0.007634952155505577,
-    0.01319337574302784
-   ],
-   "pos": [
-    -0.001157940955871149,
-    -0.0002706204178907804,
-    0.007977866112612485
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_181>": {
-   "index": 181,
+  "geom@robot/right_finger1_link4|t7|s(0.007668, 0.007635, 0.013193)|p(-0.001158, -0.000271, 0.007978)": {
+   "index": 61,
    "type": 7,
    "body": "robot/right_finger1_link4",
    "group": 0,
@@ -12960,56 +8400,18 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.007668188008088303,
-    0.007634952155505577,
-    0.01319337574302784
+    0.007668187733366469,
+    0.007634952314027541,
+    0.01319337216688833
    ],
    "pos": [
-    -0.001157940955871149,
-    -0.0002706204178907804,
-    0.007977866112612485
+    -0.0011579409477993745,
+    -0.0002706202681547228,
+    0.00797786722994379
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_182>": {
-   "index": 182,
-   "type": 7,
-   "body": "robot/right_finger1_link4",
-   "group": 1,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.008839973115791403,
-    0.00816024848297905,
-    0.00941271574118351
-   ],
-   "pos": [
-    -0.0012082373454881622,
-    -0.0001185033508260808,
-    0.024114886698704215
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_183>": {
-   "index": 183,
+  "geom@robot/right_finger1_link4|t7|s(0.00884, 0.00816, 0.009413)|p(-0.001208, -0.000119, 0.024115)": {
+   "index": 62,
    "type": 7,
    "body": "robot/right_finger1_link4",
    "group": 0,
@@ -13036,132 +8438,18 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.008839973115791403,
-    0.00816024848297905,
-    0.00941271574118351
+    0.008839974340332023,
+    0.008160250843702364,
+    0.00941271645486906
    ],
    "pos": [
-    -0.0012082373454881622,
-    -0.0001185033508260808,
-    0.024114886698704215
+    -0.0012082376062350643,
+    -0.00011850360409453794,
+    0.02411488694431137
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_184>": {
-   "index": 184,
-   "type": 7,
-   "body": "robot/right_finger2_link1",
-   "group": 1,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.004110890048108485,
-    0.007000185064638924,
-    0.009436178294699244
-   ],
-   "pos": [
-    -0.0019425024620563203,
-    -1.843829107993463e-07,
-    -3.325108988702313e-05
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_185>": {
-   "index": 185,
-   "type": 7,
-   "body": "robot/right_finger2_link1",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.004110890048108485,
-    0.007000185064638924,
-    0.009436178294699244
-   ],
-   "pos": [
-    -0.0019425024620563203,
-    -1.843829107993463e-07,
-    -3.325108988702313e-05
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_186>": {
-   "index": 186,
-   "type": 7,
-   "body": "robot/right_finger2_link2",
-   "group": 1,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.007500729400272226,
-    0.008220995739388745,
-    0.027542284447993403
-   ],
-   "pos": [
-    7.291022490024541e-07,
-    0.006077312562779155,
-    0.021247728871461802
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_187>": {
-   "index": 187,
+  "geom@robot/right_finger2_link2|t7|s(0.007501, 0.008221, 0.027542)|p(1e-06, 0.006077, 0.021248)": {
+   "index": 63,
    "type": 7,
    "body": "robot/right_finger2_link2",
    "group": 0,
@@ -13188,56 +8476,18 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.007500729400272226,
-    0.008220995739388745,
-    0.027542284447993403
+    0.007500729491306155,
+    0.008220991800631306,
+    0.027542247475869374
    ],
    "pos": [
-    7.291022490024541e-07,
-    0.006077312562779155,
-    0.021247728871461802
+    7.296589442179689e-07,
+    0.006077315680480257,
+    0.021247732492898304
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_188>": {
-   "index": 188,
-   "type": 7,
-   "body": "robot/right_finger2_link3",
-   "group": 1,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.007721535935789055,
-    0.008166936333007776,
-    0.019938826861907028
-   ],
-   "pos": [
-    -0.0010342670794965916,
-    0.00016886554559213154,
-    0.014765155546416782
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_189>": {
-   "index": 189,
+  "geom@robot/right_finger2_link3|t7|s(0.007722, 0.008167, 0.019939)|p(-0.001034, 0.000169, 0.014765)": {
+   "index": 64,
    "type": 7,
    "body": "robot/right_finger2_link3",
    "group": 0,
@@ -13264,56 +8514,18 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.007721535935789055,
-    0.008166936333007776,
-    0.019938826861907028
+    0.007721537064079558,
+    0.008166939263605111,
+    0.019938816346041232
    ],
    "pos": [
-    -0.0010342670794965916,
-    0.00016886554559213154,
-    0.014765155546416782
+    -0.0010342677736856552,
+    0.00016886510069810402,
+    0.014765154830522414
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_190>": {
-   "index": 190,
-   "type": 7,
-   "body": "robot/right_finger2_link4",
-   "group": 1,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.008271011476635145,
-    0.010118032017546885,
-    0.009082789936868502
-   ],
-   "pos": [
-    -0.0008730852035854167,
-    0.00035500962004960583,
-    0.004789563478216003
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_191>": {
-   "index": 191,
+  "geom@robot/right_finger2_link4|t7|s(0.008271, 0.010118, 0.009083)|p(-0.000873, 0.000355, 0.00479)": {
+   "index": 65,
    "type": 7,
    "body": "robot/right_finger2_link4",
    "group": 0,
@@ -13340,56 +8552,18 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.008271011476635145,
-    0.010118032017546885,
-    0.009082789936868502
+    0.008271011089781634,
+    0.0101180340074721,
+    0.00908279612489346
    ],
    "pos": [
-    -0.0008730852035854167,
-    0.00035500962004960583,
-    0.004789563478216003
+    -0.0008730848485063321,
+    0.00035500980683647826,
+    0.004789564008110261
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_192>": {
-   "index": 192,
-   "type": 7,
-   "body": "robot/right_finger2_link4",
-   "group": 1,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.008239581228799963,
-    0.007504437819611852,
-    0.011145288143807826
-   ],
-   "pos": [
-    -0.001251346531615113,
-    0.00020409013826829705,
-    0.018081143932859332
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_193>": {
-   "index": 193,
+  "geom@robot/right_finger2_link4|t7|s(0.00824, 0.007504, 0.011145)|p(-0.001251, 0.000204, 0.018081)": {
+   "index": 66,
    "type": 7,
    "body": "robot/right_finger2_link4",
    "group": 0,
@@ -13416,132 +8590,18 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.008239581228799963,
-    0.007504437819611852,
-    0.011145288143807826
+    0.008239579645420296,
+    0.007504440282834673,
+    0.011145289448282907
    ],
    "pos": [
-    -0.001251346531615113,
-    0.00020409013826829705,
-    0.018081143932859332
+    -0.0012513461813619265,
+    0.00020409027318467853,
+    0.018081143022321354
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_194>": {
-   "index": 194,
-   "type": 7,
-   "body": "robot/right_finger3_link1",
-   "group": 1,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.004110889920713609,
-    0.007000185025858681,
-    0.009436178354823632
-   ],
-   "pos": [
-    -0.0019425020804405943,
-    -1.838784692692825e-07,
-    -3.325124033075118e-05
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_195>": {
-   "index": 195,
-   "type": 7,
-   "body": "robot/right_finger3_link1",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.004110889920713609,
-    0.007000185025858681,
-    0.009436178354823632
-   ],
-   "pos": [
-    -0.0019425020804405943,
-    -1.838784692692825e-07,
-    -3.325124033075118e-05
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_196>": {
-   "index": 196,
-   "type": 7,
-   "body": "robot/right_finger3_link2",
-   "group": 1,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.0075007293976243235,
-    0.008220995964499364,
-    0.027542285113158538
-   ],
-   "pos": [
-    7.290996011004469e-07,
-    0.006077175236216312,
-    0.021247768134688243
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_197>": {
-   "index": 197,
+  "geom@robot/right_finger3_link2|t7|s(0.007501, 0.008221, 0.027542)|p(1e-06, 0.006077, 0.021248)": {
+   "index": 67,
    "type": 7,
    "body": "robot/right_finger3_link2",
    "group": 0,
@@ -13568,56 +8628,18 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.0075007293976243235,
-    0.008220995964499364,
-    0.027542285113158538
+    0.007500727441506589,
+    0.008220992732377372,
+    0.027542315456198927
    ],
    "pos": [
-    7.290996011004469e-07,
-    0.006077175236216312,
-    0.021247768134688243
+    7.276091446522582e-07,
+    0.006077172080171585,
+    0.021247763839408546
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_198>": {
-   "index": 198,
-   "type": 7,
-   "body": "robot/right_finger3_link3",
-   "group": 1,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.0077215359381659155,
-    0.008166936328690536,
-    0.019938826862633298
-   ],
-   "pos": [
-    -0.001034267082116509,
-    0.0001688655441901523,
-    0.01476515554553253
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_199>": {
-   "index": 199,
+  "geom@robot/right_finger3_link3|t7|s(0.007722, 0.008167, 0.019939)|p(-0.001034, 0.000169, 0.014765)": {
+   "index": 68,
    "type": 7,
    "body": "robot/right_finger3_link3",
    "group": 0,
@@ -13644,56 +8666,18 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.0077215359381659155,
-    0.008166936328690536,
-    0.019938826862633298
+    0.007721537064145488,
+    0.008166939263347524,
+    0.019938816346249732
    ],
    "pos": [
-    -0.001034267082116509,
-    0.0001688655441901523,
-    0.01476515554553253
+    -0.0010342677736977978,
+    0.0001688651006864173,
+    0.014765154830309987
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_200>": {
-   "index": 200,
-   "type": 7,
-   "body": "robot/right_finger3_link4",
-   "group": 1,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.008271018554908891,
-    0.010117783274630424,
-    0.00908249167779688
-   ],
-   "pos": [
-    -0.0008730901581509225,
-    0.00035498496369589704,
-    0.004789589672120667
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_201>": {
-   "index": 201,
+  "geom@robot/right_finger3_link4|t7|s(0.008271, 0.010118, 0.009082)|p(-0.000873, 0.000355, 0.00479)": {
+   "index": 69,
    "type": 7,
    "body": "robot/right_finger3_link4",
    "group": 0,
@@ -13720,56 +8704,18 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.008271018554908891,
-    0.010117783274630424,
-    0.00908249167779688
+    0.00827101828485151,
+    0.01011778233184064,
+    0.009082493650660287
    ],
    "pos": [
-    -0.0008730901581509225,
-    0.00035498496369589704,
-    0.004789589672120667
+    -0.0008730898088477779,
+    0.00035498488776333813,
+    0.004789589892628143
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_202>": {
-   "index": 202,
-   "type": 7,
-   "body": "robot/right_finger3_link4",
-   "group": 1,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.00823962303720675,
-    0.007504420060029193,
-    0.011145282960398633
-   ],
-   "pos": [
-    -0.001252584016701432,
-    0.00020274262839452837,
-    0.018081156919602576
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_203>": {
-   "index": 203,
+  "geom@robot/right_finger3_link4|t7|s(0.00824, 0.007504, 0.011145)|p(-0.001253, 0.000203, 0.018081)": {
+   "index": 70,
    "type": 7,
    "body": "robot/right_finger3_link4",
    "group": 0,
@@ -13796,132 +8742,18 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.00823962303720675,
-    0.007504420060029193,
-    0.011145282960398633
+    0.008239625452683355,
+    0.007504422937353614,
+    0.01114528378464807
    ],
    "pos": [
-    -0.001252584016701432,
-    0.00020274262839452837,
-    0.018081156919602576
+    -0.0012525841239041855,
+    0.0002027427117512255,
+    0.018081156798073705
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_204>": {
-   "index": 204,
-   "type": 7,
-   "body": "robot/right_finger4_link1",
-   "group": 1,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.00411088993074522,
-    0.0070001850136032825,
-    0.009436178089065859
-   ],
-   "pos": [
-    -0.0019425019521160816,
-    -1.834005525831688e-07,
-    -3.325131437928355e-05
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_205>": {
-   "index": 205,
-   "type": 7,
-   "body": "robot/right_finger4_link1",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.00411088993074522,
-    0.0070001850136032825,
-    0.009436178089065859
-   ],
-   "pos": [
-    -0.0019425019521160816,
-    -1.834005525831688e-07,
-    -3.325131437928355e-05
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_206>": {
-   "index": 206,
-   "type": 7,
-   "body": "robot/right_finger4_link2",
-   "group": 1,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.007500729665920397,
-    0.008220995916720925,
-    0.027542285016465818
-   ],
-   "pos": [
-    7.289022358842122e-07,
-    0.006077174902401645,
-    0.021247768232380587
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_207>": {
-   "index": 207,
+  "geom@robot/right_finger4_link2|t7|s(0.007501, 0.008221, 0.027542)|p(1e-06, 0.006077, 0.021248)": {
+   "index": 71,
    "type": 7,
    "body": "robot/right_finger4_link2",
    "group": 0,
@@ -13948,56 +8780,18 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.007500729665920397,
-    0.008220995916720925,
-    0.027542285016465818
+    0.00750072732618462,
+    0.00822099279187234,
+    0.027542314827106496
    ],
    "pos": [
-    7.289022358842122e-07,
-    0.006077174902401645,
-    0.021247768232380587
+    7.274938226832506e-07,
+    0.006077171969656392,
+    0.021247764458000713
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_208>": {
-   "index": 208,
-   "type": 7,
-   "body": "robot/right_finger4_link3",
-   "group": 1,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.007721535938027333,
-    0.008166936330183071,
-    0.01993882685175192
-   ],
-   "pos": [
-    -0.00103426706916648,
-    0.0001688655666130428,
-    0.01476515555560275
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_209>": {
-   "index": 209,
+  "geom@robot/right_finger4_link3|t7|s(0.007722, 0.008167, 0.019939)|p(-0.001034, 0.000169, 0.014765)": {
+   "index": 72,
    "type": 7,
    "body": "robot/right_finger4_link3",
    "group": 0,
@@ -14024,56 +8818,18 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.007721535938027333,
-    0.008166936330183071,
-    0.01993882685175192
+    0.0077215370606638365,
+    0.008166939282744912,
+    0.01993881635144672
    ],
    "pos": [
-    -0.00103426706916648,
-    0.0001688655666130428,
-    0.01476515555560275
+    -0.0010342677500098218,
+    0.00016886511410100084,
+    0.014765154826360791
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_210>": {
-   "index": 210,
-   "type": 7,
-   "body": "robot/right_finger4_link4",
-   "group": 1,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.008271018491097955,
-    0.010117783276837083,
-    0.009082491885056842
-   ],
-   "pos": [
-    -0.0008730901213339482,
-    0.00035498502251082403,
-    0.004789589666269957
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_211>": {
-   "index": 211,
+  "geom@robot/right_finger4_link4|t7|s(0.008271, 0.010118, 0.009082)|p(-0.000873, 0.000355, 0.00479)": {
+   "index": 73,
    "type": 7,
    "body": "robot/right_finger4_link4",
    "group": 0,
@@ -14100,56 +8856,18 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.008271018491097955,
-    0.010117783276837083,
-    0.009082491885056842
+    0.008271018426204674,
+    0.010117782733029258,
+    0.009082494154220022
    ],
    "pos": [
-    -0.0008730901213339482,
-    0.00035498502251082403,
-    0.004789589666269957
+    -0.0008730897982076495,
+    0.0003549849066780797,
+    0.004789589858127691
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_212>": {
-   "index": 212,
-   "type": 7,
-   "body": "robot/right_finger4_link4",
-   "group": 1,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.008246015434459032,
-    0.0075254167062009806,
-    0.01114115647552971
-   ],
-   "pos": [
-    -0.001261715724633619,
-    0.00016633082609524694,
-    0.018081132036960313
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_213>": {
-   "index": 213,
+  "geom@robot/right_finger4_link4|t7|s(0.008246, 0.007525, 0.011141)|p(-0.001262, 0.000166, 0.018081)": {
+   "index": 74,
    "type": 7,
    "body": "robot/right_finger4_link4",
    "group": 0,
@@ -14176,132 +8894,18 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.008246015434459032,
-    0.0075254167062009806,
-    0.01114115647552971
+    0.008246017082860144,
+    0.007525420384429658,
+    0.011141154023954667
    ],
    "pos": [
-    -0.001261715724633619,
-    0.00016633082609524694,
-    0.018081132036960313
+    -0.0012617157917900032,
+    0.00016633124469491256,
+    0.01808113180751105
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_214>": {
-   "index": 214,
-   "type": 7,
-   "body": "robot/right_finger5_link1",
-   "group": 1,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.004110889953638252,
-    0.007000185084036202,
-    0.009436178059683727
-   ],
-   "pos": [
-    -0.0019425018225496255,
-    -1.8300532421618957e-07,
-    -3.325149940264795e-05
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_215>": {
-   "index": 215,
-   "type": 7,
-   "body": "robot/right_finger5_link1",
-   "group": 0,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.004110889953638252,
-    0.007000185084036202,
-    0.009436178059683727
-   ],
-   "pos": [
-    -0.0019425018225496255,
-    -1.8300532421618957e-07,
-    -3.325149940264795e-05
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_216>": {
-   "index": 216,
-   "type": 7,
-   "body": "robot/right_finger5_link2",
-   "group": 1,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.0075009741983856695,
-    0.008220050823543186,
-    0.027541314845061057
-   ],
-   "pos": [
-    9.734347011562247e-07,
-    0.006076493421634907,
-    0.02124873587390602
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_217>": {
-   "index": 217,
+  "geom@robot/right_finger5_link2|t7|s(0.007501, 0.00822, 0.027541)|p(1e-06, 0.006076, 0.021249)": {
+   "index": 75,
    "type": 7,
    "body": "robot/right_finger5_link2",
    "group": 0,
@@ -14328,56 +8932,18 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.0075009741983856695,
-    0.008220050823543186,
-    0.027541314845061057
+    0.0075009719704234295,
+    0.008220047525664891,
+    0.027541344591691958
    ],
    "pos": [
-    9.734347011562247e-07,
-    0.006076493421634907,
-    0.02124873587390602
+    9.72138061493957e-07,
+    0.0060764903803891875,
+    0.021248732164153326
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_218>": {
-   "index": 218,
-   "type": 7,
-   "body": "robot/right_finger5_link3",
-   "group": 1,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.007721535938222871,
-    0.00816693632766698,
-    0.019938826862393687
-   ],
-   "pos": [
-    -0.0010342670821031673,
-    0.00016886554434125645,
-    0.014765155545760964
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_219>": {
-   "index": 219,
+  "geom@robot/right_finger5_link3|t7|s(0.007722, 0.008167, 0.019939)|p(-0.001034, 0.000169, 0.014765)": {
+   "index": 76,
    "type": 7,
    "body": "robot/right_finger5_link3",
    "group": 0,
@@ -14404,56 +8970,18 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.007721535938222871,
-    0.00816693632766698,
-    0.019938826862393687
+    0.007721537064145261,
+    0.008166939263347427,
+    0.01993881634624969
    ],
    "pos": [
-    -0.0010342670821031673,
-    0.00016886554434125645,
-    0.014765155545760964
+    -0.0010342677736975136,
+    0.0001688651006864665,
+    0.014765154830310039
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_220>": {
-   "index": 220,
-   "type": 7,
-   "body": "robot/right_finger5_link4",
-   "group": 1,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.008271018587342976,
-    0.01011778260113929,
-    0.009082490025715591
-   ],
-   "pos": [
-    -0.000873090061015617,
-    0.00035498486947132065,
-    0.004789589131186203
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_221>": {
-   "index": 221,
+  "geom@robot/right_finger5_link4|t7|s(0.008271, 0.010118, 0.009082)|p(-0.000873, 0.000355, 0.00479)": {
+   "index": 77,
    "type": 7,
    "body": "robot/right_finger5_link4",
    "group": 0,
@@ -14480,56 +9008,18 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.008271018587342976,
-    0.01011778260113929,
-    0.009082490025715591
+    0.008271018441807483,
+    0.01011778368759807,
+    0.00908249556403794
    ],
    "pos": [
-    -0.000873090061015617,
-    0.00035498486947132065,
-    0.004789589131186203
+    -0.0008730897171109932,
+    0.000354985073264466,
+    0.0047895893977470795
    ]
   },
-  "<unnamed_mjtObj.mjOBJ_GEOM_222>": {
-   "index": 222,
-   "type": 7,
-   "body": "robot/right_finger5_link4",
-   "group": 1,
-   "contype": 0,
-   "conaffinity": 0,
-   "condim": 3,
-   "priority": 0,
-   "solref": [
-    0.02,
-    1.0
-   ],
-   "solimp": [
-    0.9,
-    0.95,
-    0.001,
-    0.5,
-    2.0
-   ],
-   "friction": [
-    1.0,
-    0.005,
-    0.0001
-   ],
-   "margin": 0.0,
-   "gap": 0.0,
-   "size": [
-    0.008239615472505762,
-    0.007504451939749657,
-    0.011145307366693296
-   ],
-   "pos": [
-    -0.0012481326183795447,
-    0.0002130445081149928,
-    0.01808113120842631
-   ]
-  },
-  "<unnamed_mjtObj.mjOBJ_GEOM_223>": {
-   "index": 223,
+  "geom@robot/right_finger5_link4|t7|s(0.00824, 0.007504, 0.011145)|p(-0.001248, 0.000213, 0.018081)": {
+   "index": 78,
    "type": 7,
    "body": "robot/right_finger5_link4",
    "group": 0,
@@ -14556,18 +9046,18 @@
    "margin": 0.0,
    "gap": 0.0,
    "size": [
-    0.008239615472505762,
-    0.007504451939749657,
-    0.011145307366693296
+    0.008239617822195486,
+    0.007504454771244572,
+    0.011145308342536544
    ],
    "pos": [
-    -0.0012481326183795447,
-    0.0002130445081149928,
-    0.01808113120842631
+    -0.0012481327264752978,
+    0.0002130445456421852,
+    0.018081131120050064
    ]
   },
-  "apple/apple_geom": {
-   "index": 224,
+  "geom@apple/apple|t2|s(0.04, 0.0, 0.0)|p(0.0, 0.0, 0.0)": {
+   "index": 79,
    "type": 2,
    "body": "apple/apple",
    "group": 0,
@@ -14604,8 +9094,8 @@
     0.0
    ]
   },
-  "table/table_geom": {
-   "index": 225,
+  "geom@table/table|t6|s(0.105, 0.105, 0.02)|p(0.0, 0.0, 0.0)": {
+   "index": 80,
    "type": 6,
    "body": "table/table",
    "group": 0,
@@ -14687,15 +9177,15 @@
   "terrain_grid": {
    "index": 2,
    "parent": "world",
-   "mass": 12.000000000000009,
+   "mass": 12.0,
    "inertia": [
-    1200.000099999999,
-    600.0000510000002,
-    600.0000510000002
+    1200.0,
+    600.0,
+    600.0
    ],
    "ipos": [
-    -7.401486830834372e-17,
-    -7.401486830834372e-17,
+    -2.78155e-07,
+    -3.77496e-07,
     0.001
    ],
    "pos": [
@@ -14710,7 +9200,7 @@
    "mass": 3.813,
    "inertia": [
     0.010549,
-    0.0093089,
+    0.00930891,
     0.0079184
    ],
    "ipos": [
@@ -14820,7 +9310,7 @@
    ],
    "pos": [
     0.0,
-    -9.4445e-05,
+    -9.44436e-05,
     -0.30001
    ]
   },
@@ -14960,7 +9450,7 @@
    ],
    "pos": [
     0.0,
-    9.4445e-05,
+    9.44436e-05,
     -0.30001
    ]
   },
@@ -15029,9 +9519,9 @@
    "parent": "robot/waist_yaw_link",
    "mass": 0.086,
    "inertia": [
-    8.245e-06,
     7.079e-06,
-    6.339e-06
+    6.339e-06,
+    8.245e-06
    ],
    "ipos": [
     0.0,
@@ -15120,7 +9610,7 @@
    ],
    "pos": [
     0.0,
-    0.00624,
+    0.00624003,
     -0.1032
    ]
   },
@@ -15140,8 +9630,8 @@
    ],
    "pos": [
     0.015783,
-    0.0,
-    -0.080518
+    -1.49012e-08,
+    -0.0805181
    ]
   },
   "robot/left_wrist_roll_link": {
@@ -15160,8 +9650,8 @@
    ],
    "pos": [
     0.1,
-    0.00188791,
-    -0.01
+    0.00188792,
+    -0.00999999
    ]
   },
   "robot/left_wrist_pitch_link": {
@@ -15180,7 +9670,7 @@
    ],
    "pos": [
     0.038,
-    0.0,
+    -1.49012e-08,
     0.0
    ]
   },
@@ -15200,7 +9690,7 @@
    ],
    "pos": [
     0.046,
-    0.0,
+    1.49012e-08,
     0.0
    ]
   },
@@ -15215,12 +9705,12 @@
    ],
    "ipos": [
     0.0415,
-    0.003,
+    0.00299999,
     0.0
    ],
    "pos": [
     0.0415,
-    0.003,
+    0.00299999,
     0.0
    ]
   },
@@ -15259,9 +9749,9 @@
     0.00779645
    ],
    "pos": [
-    0.0084399,
-    -0.020587,
-    0.028893
+    0.00843996,
+    -0.0205871,
+    0.0288931
    ]
   },
   "robot/left_finger1_link2": {
@@ -15280,7 +9770,7 @@
    ],
    "pos": [
     -0.0047549,
-    0.0058191,
+    0.00581914,
     0.014132
    ]
   },
@@ -15299,9 +9789,9 @@
     0.0130566
    ],
    "pos": [
-    0.00026671,
-    0.0009915,
-    0.034666
+    0.000266716,
+    0.000991493,
+    0.0346661
    ]
   },
   "robot/left_finger1_link4": {
@@ -15319,8 +9809,8 @@
     0.0113475
    ],
    "pos": [
-    0.0,
-    -0.0002,
+    2.98023e-08,
+    -0.000200011,
     0.0295
    ]
   },
@@ -15334,14 +9824,14 @@
     0.0
    ],
    "ipos": [
-    -0.00105,
-    0.0002,
-    0.0313
+    -0.00104997,
+    0.000200011,
+    0.0313001
    ],
    "pos": [
-    -0.00105,
-    0.0002,
-    0.0313
+    -0.00104997,
+    0.000200011,
+    0.0313001
    ]
   },
   "robot/left_finger2_link1": {
@@ -15359,9 +9849,9 @@
     0.00031994
    ],
    "pos": [
-    -0.0058701,
+    -0.00587004,
     -0.029434,
-    0.091917
+    0.0919171
    ]
   },
   "robot/left_finger2_link2": {
@@ -15379,7 +9869,7 @@
     0.020911
    ],
    "pos": [
-    0.0022,
+    0.00219995,
     0.0,
     0.00400001
    ]
@@ -15399,9 +9889,9 @@
     0.0157188
    ],
    "pos": [
-    0.0,
-    0.00475,
-    0.0436177
+    -5.96046e-08,
+    0.00475004,
+    0.0436178
    ]
   },
   "robot/left_finger2_link4": {
@@ -15419,8 +9909,8 @@
     0.00761201
    ],
    "pos": [
-    0.0,
-    -0.0002,
+    -2.98023e-08,
+    -0.000199974,
     0.0295
    ]
   },
@@ -15434,13 +9924,13 @@
     0.0
    ],
    "ipos": [
-    -0.0010521,
-    0.000210869,
+    -0.00105208,
+    0.000210881,
     0.0267
    ],
    "pos": [
-    -0.0010521,
-    0.000210869,
+    -0.00105208,
+    0.000210881,
     0.0267
    ]
   },
@@ -15459,9 +9949,9 @@
     0.0003199
    ],
    "pos": [
-    -0.01046,
-    -0.0074615,
-    0.089544
+    -0.0104599,
+    -0.00746155,
+    0.0895441
    ]
   },
   "robot/left_finger3_link2": {
@@ -15479,9 +9969,9 @@
     0.020911
    ],
    "pos": [
-    0.0022,
-    0.0,
-    0.00400001
+    0.00220007,
+    -1.19209e-07,
+    0.00400004
    ]
   },
   "robot/left_finger3_link3": {
@@ -15499,9 +9989,9 @@
     0.0157188
    ],
    "pos": [
-    0.0,
-    0.00475,
-    0.0436177
+    -1.78814e-07,
+    0.00475003,
+    0.0436178
    ]
   },
   "robot/left_finger3_link4": {
@@ -15519,8 +10009,8 @@
     0.00761202
    ],
    "pos": [
-    0.0,
-    -0.0002,
+    -5.96046e-08,
+    -0.000200033,
     0.0295
    ]
   },
@@ -15534,14 +10024,14 @@
     0.0
    ],
    "ipos": [
-    -0.0010504,
-    0.000202672,
-    0.0267
+    -0.00105044,
+    0.000202835,
+    0.0266999
    ],
    "pos": [
-    -0.0010504,
-    0.000202672,
-    0.0267
+    -0.00105044,
+    0.000202835,
+    0.0266999
    ]
   },
   "robot/left_finger4_link1": {
@@ -15559,9 +10049,9 @@
     0.00031986
    ],
    "pos": [
-    -0.0076649,
-    0.013712,
-    0.084429
+    -0.0076648,
+    0.0137119,
+    0.0844291
    ]
   },
   "robot/left_finger4_link2": {
@@ -15579,8 +10069,8 @@
     0.020911
    ],
    "pos": [
-    0.0022,
-    0.0,
+    0.00220007,
+    5.96046e-08,
     0.00400001
    ]
   },
@@ -15600,8 +10090,8 @@
    ],
    "pos": [
     0.0,
-    0.00475,
-    0.0436177
+    0.00474998,
+    0.0436178
    ]
   },
   "robot/left_finger4_link4": {
@@ -15619,8 +10109,8 @@
     0.00761203
    ],
    "pos": [
-    0.0,
-    -0.0002,
+    2.98023e-08,
+    -0.000199914,
     0.0295
    ]
   },
@@ -15634,13 +10124,13 @@
     0.0
    ],
    "ipos": [
-    -0.00104998,
-    0.000202557,
+    -0.00104988,
+    0.000202537,
     0.0267
    ],
    "pos": [
-    -0.00104998,
-    0.000202557,
+    -0.00104988,
+    0.000202537,
     0.0267
    ]
   },
@@ -15659,7 +10149,7 @@
     0.000319845
    ],
    "pos": [
-    -0.00226865,
+    -0.00226855,
     0.0340011,
     0.0742813
    ]
@@ -15679,9 +10169,9 @@
     0.020911
    ],
    "pos": [
-    0.0022,
+    0.00219992,
     0.0,
-    0.00400001
+    0.00399999
    ]
   },
   "robot/left_finger5_link3": {
@@ -15699,9 +10189,9 @@
     0.0157188
    ],
    "pos": [
-    0.0,
-    0.00475,
-    0.0436177
+    -5.96046e-08,
+    0.00475003,
+    0.0436178
    ]
   },
   "robot/left_finger5_link4": {
@@ -15720,7 +10210,7 @@
    ],
    "pos": [
     0.0,
-    -0.0002,
+    -0.000200033,
     0.0295
    ]
   },
@@ -15734,13 +10224,13 @@
     0.0
    ],
    "ipos": [
-    -0.00105041,
-    0.000201047,
+    -0.00105035,
+    0.000200987,
     0.0267
    ],
    "pos": [
-    -0.00105041,
-    0.000201047,
+    -0.00105035,
+    0.000200987,
     0.0267
    ]
   },
@@ -15779,7 +10269,7 @@
     -0.063243
    ],
    "pos": [
-    0.0,
+    -7.27596e-12,
     -0.038,
     -0.013831
    ]
@@ -15800,7 +10290,7 @@
    ],
    "pos": [
     0.0,
-    -0.00624,
+    -0.00624003,
     -0.1032
    ]
   },
@@ -15820,8 +10310,8 @@
    ],
    "pos": [
     0.015783,
-    0.0,
-    -0.080518
+    1.49012e-08,
+    -0.0805181
    ]
   },
   "robot/right_wrist_roll_link": {
@@ -15840,8 +10330,8 @@
    ],
    "pos": [
     0.1,
-    -0.00188791,
-    -0.01
+    -0.00188792,
+    -0.00999999
    ]
   },
   "robot/right_wrist_pitch_link": {
@@ -15859,8 +10349,8 @@
     -0.00111658
    ],
    "pos": [
-    0.038,
-    0.0,
+    0.0380001,
+    1.49012e-08,
     0.0
    ]
   },
@@ -15880,7 +10370,7 @@
    ],
    "pos": [
     0.046,
-    0.0,
+    -1.49012e-08,
     0.0
    ]
   },
@@ -15895,12 +10385,12 @@
    ],
    "ipos": [
     0.0415,
-    -0.003,
+    -0.00299999,
     0.0
    ],
    "pos": [
     0.0415,
-    -0.003,
+    -0.00299999,
     0.0
    ]
   },
@@ -15939,9 +10429,9 @@
     0.00778015
    ],
    "pos": [
-    0.0084399,
-    0.020587,
-    0.028893
+    0.00843996,
+    0.0205871,
+    0.0288931
    ]
   },
   "robot/right_finger1_link2": {
@@ -15960,7 +10450,7 @@
    ],
    "pos": [
     -0.0047549,
-    -0.0058191,
+    -0.00581914,
     0.014132
    ]
   },
@@ -15979,8 +10469,8 @@
     0.0130562
    ],
    "pos": [
-    -0.000266705,
-    0.000991502,
+    -0.000266716,
+    0.000991508,
     0.0346656
    ]
   },
@@ -15999,8 +10489,8 @@
     0.0113477
    ],
    "pos": [
-    0.0,
-    0.0002,
+    1.49012e-08,
+    0.000200003,
     0.0295
    ]
   },
@@ -16014,14 +10504,14 @@
     0.0
    ],
    "ipos": [
-    -0.00105,
-    -0.0002,
-    0.0313
+    -0.00105003,
+    -0.000199974,
+    0.0313002
    ],
    "pos": [
-    -0.00105,
-    -0.0002,
-    0.0313
+    -0.00105003,
+    -0.000199974,
+    0.0313002
    ]
   },
   "robot/right_finger2_link1": {
@@ -16039,7 +10529,7 @@
     0.000319873
    ],
    "pos": [
-    -0.0058701,
+    -0.00587004,
     0.029434,
     0.091917
    ]
@@ -16059,9 +10549,9 @@
     0.0209112
    ],
    "pos": [
-    0.0022,
+    0.00220001,
     0.0,
-    0.00400001
+    0.00400004
    ]
   },
   "robot/right_finger2_link3": {
@@ -16079,7 +10569,7 @@
     0.0157628
    ],
    "pos": [
-    0.0,
+    5.96046e-08,
     0.00475028,
     0.0436177
    ]
@@ -16099,9 +10589,9 @@
     0.00770942
    ],
    "pos": [
-    0.0,
-    -0.0002,
-    0.0295
+    -5.96046e-08,
+    -0.000199914,
+    0.0295001
    ]
   },
   "robot/right_finger2_tip": {
@@ -16114,13 +10604,13 @@
     0.0
    ],
    "ipos": [
-    -0.00105,
-    0.0002,
+    -0.00104997,
+    0.000200033,
     0.0267
    ],
    "pos": [
-    -0.00105,
-    0.0002,
+    -0.00104997,
+    0.000200033,
     0.0267
    ]
   },
@@ -16139,9 +10629,9 @@
     0.000319937
    ],
    "pos": [
-    -0.01046,
-    0.0074615,
-    0.089544
+    -0.0104599,
+    0.00746155,
+    0.0895441
    ]
   },
   "robot/right_finger3_link2": {
@@ -16159,9 +10649,9 @@
     0.0209112
    ],
    "pos": [
-    0.0022,
-    0.0,
-    0.00400001
+    0.00219995,
+    5.96046e-08,
+    0.00399998
    ]
   },
   "robot/right_finger3_link3": {
@@ -16179,9 +10669,9 @@
     0.0157628
    ],
    "pos": [
-    0.0,
+    1.78814e-07,
     0.00475,
-    0.0436177
+    0.0436179
    ]
   },
   "robot/right_finger3_link4": {
@@ -16200,7 +10690,7 @@
    ],
    "pos": [
     0.0,
-    -0.0002,
+    -0.000200033,
     0.0295
    ]
   },
@@ -16214,13 +10704,13 @@
     0.0
    ],
    "ipos": [
-    -0.00104909,
-    0.00020104,
+    -0.00104913,
+    0.000200987,
     0.0267
    ],
    "pos": [
-    -0.00104909,
-    0.00020104,
+    -0.00104913,
+    0.000200987,
     0.0267
    ]
   },
@@ -16239,9 +10729,9 @@
     0.000319948
    ],
    "pos": [
-    -0.0076649,
-    -0.013712,
-    0.084429
+    -0.0076648,
+    -0.0137119,
+    0.0844291
    ]
   },
   "robot/right_finger4_link2": {
@@ -16259,7 +10749,7 @@
     0.0209112
    ],
    "pos": [
-    0.0022,
+    0.00219998,
     0.0,
     0.00400001
    ]
@@ -16279,9 +10769,9 @@
     0.0157628
    ],
    "pos": [
-    0.0,
-    0.00475,
-    0.0436177
+    -1.19209e-07,
+    0.00475001,
+    0.0436176
    ]
   },
   "robot/right_finger4_link4": {
@@ -16299,9 +10789,9 @@
     0.00770949
    ],
    "pos": [
-    0.0,
-    -0.0002,
-    0.0295
+    -5.96046e-08,
+    -0.000200033,
+    0.0294999
    ]
   },
   "robot/right_finger4_tip": {
@@ -16314,13 +10804,13 @@
     0.0
    ],
    "ipos": [
-    -0.00105961,
-    0.000190451,
+    -0.00105947,
+    0.000190556,
     0.0267
    ],
    "pos": [
-    -0.00105961,
-    0.000190451,
+    -0.00105947,
+    0.000190556,
     0.0267
    ]
   },
@@ -16339,7 +10829,7 @@
     0.000319969
    ],
    "pos": [
-    -0.00226865,
+    -0.00226855,
     -0.0340011,
     0.0742813
    ]
@@ -16359,9 +10849,9 @@
     0.0209112
    ],
    "pos": [
-    0.0022,
-    0.0,
-    0.00400001
+    0.00219998,
+    1.19209e-07,
+    0.00400007
    ]
   },
   "robot/right_finger5_link3": {
@@ -16379,9 +10869,9 @@
     0.0157628
    ],
    "pos": [
-    0.0,
-    0.00475,
-    0.0436177
+    1.19209e-07,
+    0.00474998,
+    0.0436178
    ]
   },
   "robot/right_finger5_link4": {
@@ -16399,8 +10889,8 @@
     0.0077094
    ],
    "pos": [
-    0.0,
-    -0.0002,
+    2.98023e-08,
+    -0.000200033,
     0.0295
    ]
   },
@@ -16414,14 +10904,14 @@
     0.0
    ],
    "ipos": [
-    -0.00104464,
-    0.00021131,
-    0.0267
+    -0.00104457,
+    0.000211358,
+    0.0267001
    ],
    "pos": [
-    -0.00104464,
-    0.00021131,
-    0.0267
+    -0.00104457,
+    0.000211358,
+    0.0267001
    ]
   },
   "apple/apple": {
@@ -16467,11 +10957,11 @@
   "table/table": {
    "index": 91,
    "parent": "table/mocap_base",
-   "mass": 1.7639999999999998,
+   "mass": 1.764,
    "inertia": [
-    0.006717899999999998,
-    0.006717899999999998,
-    0.012965399999999997
+    0.0067179,
+    0.0067179,
+    0.0129654
    ],
    "ipos": [
     0.0,
@@ -16486,7 +10976,7 @@
   }
  },
  "options": {
-  "timestep": 0.005,
+  "timestep": 0.002,
   "integrator": 3,
   "solver": 2,
   "iterations": 10,
@@ -16503,14 +10993,14 @@
   ],
   "density": 0.0,
   "viscosity": 0.0,
-  "disableflags": 0,
+  "disableflags": 524288,
   "enableflags": 0
  },
  "_source": {
-  "side": "mjlab_exported_xml",
-  "xml": "/home/jiarui/projects/g1-newton-interact/assets/mjlab_scene/scene.xml"
+  "side": "newton_roundtrip",
+  "xml": "/home/jiarui/projects/g1-newton-interact/assets/newton_roundtrip.xml"
  },
  "_versions": {
-  "mujoco": "3.8.1"
+  "mujoco": "3.11.0"
  }
 }

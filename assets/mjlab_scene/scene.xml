@@ -190,8 +190,7 @@
   <worldbody>
     <light name="sun" pos="0 0 1.5" dir="0 0 -1" type="directional" />
     <body name="terrain">
-      <geom name="terrain" size="0 0 0.01" type="plane" material="groundplane" rgba="1 1 1 1" />
-    </body>
+      </body>
     <body name="terrain_grid">
       <geom name="terrain_grid_x_0" size="0.005 12 0.0005" pos="-12 0 0.001" type="box" contype="0" conaffinity="0" rgba="0.72 0.72 0.72 1" />
       <geom name="terrain_grid_y_0" size="12 0.005 0.0005" pos="0 -12 0.001" type="box" contype="0" conaffinity="0" rgba="0.72 0.72 0.72 1" />
@@ -733,7 +732,8 @@
         <geom name="table/table_geom" size="0.105 0.105 0.02" type="box" rgba="0.55 0.4 0.25 1" />
       </body>
     </body>
-  </worldbody>
+  <geom name="terrain" size="0 0 0.01" type="plane" material="groundplane" rgba="1 1 1 1" />
+    </worldbody>
   <actuator>
     <general name="robot/xml_motor_unused_left_hip_pitch_joint" class="robot/g1" joint="robot/left_hip_pitch_joint" biastype="none" gainprm="1" />
     <general name="robot/xml_motor_unused_left_hip_roll_joint" class="robot/g1" joint="robot/left_hip_roll_joint" biastype="none" gainprm="1" />

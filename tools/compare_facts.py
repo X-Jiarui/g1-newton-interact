@@ -16,9 +16,19 @@ ap = argparse.ArgumentParser()
 ap.add_argument("a"); ap.add_argument("b")
 ap.add_argument("--tol", type=float, default=1e-6)
 ap.add_argument("--max-show", type=int, default=8)
+ap.add_argument("--colliding-geoms-only", action="store_true",
+                help="compare only geoms that can collide (contype|conaffinity != 0). Newton's "
+                     "SolverMuJoCo drops visual-only geoms by design, so the full geom sets are not "
+                     "comparable, but the colliding subset is exactly what must match.")
 A_ = ap.parse_args()
 
 a = json.load(open(A_.a)); b = json.load(open(A_.b))
+if A_.colliding_geoms_only:
+  def _keep(d):
+    return {n: g for n, g in d.items() if (g.get("contype", 0) or g.get("conaffinity", 0))}
+  for _side in (a, b):
+    _side["geoms"] = _keep(_side.get("geoms", {}))
+  print(f"[colliding-geoms-only] A={len(a['geoms'])} geoms, B={len(b['geoms'])} geoms")
 tol = A_.tol
 problems = 0
 
