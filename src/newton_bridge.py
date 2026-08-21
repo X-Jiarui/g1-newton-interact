@@ -295,7 +295,10 @@ class NewtonEntity:
   def set_joint_position_target(self, target: torch.Tensor, joint_ids=None) -> None:
     if self._control is None:
       raise RuntimeError("no Newton Control bound; position targets would be silently discarded")
-    ctrl = _t(self._control.mujoco.ctrl).view(1, -1)
+    # Reshape by world count, not to a single row: with N parallel worlds control.mujoco.ctrl holds
+    # N x nu entries and a hardcoded (1, -1) silently addresses only the first world.
+    nworld = _t(self._d.qpos).shape[0]
+    ctrl = _t(self._control.mujoco.ctrl).view(nworld, -1)
     slots = self._ctrl_for_joint if joint_ids is None else self._ctrl_for_joint[joint_ids]
     ctrl[:, slots] = target.to(ctrl.dtype)
 
