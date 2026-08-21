@@ -33,6 +33,11 @@ ap.add_argument("--xml", default=os.path.expanduser(
 ap.add_argument("--steps", type=int, default=400, help="control steps (decimation 4 => 4 physics each)")
 ap.add_argument("--every", type=int, default=20)
 ap.add_argument("--dump-qpos", default=None, help="npz of per-step qpos, for rendering the video")
+ap.add_argument("--newton-video", default=None,
+                help="record an mp4 with NEWTON's own renderer (ViewerGL, headless). This shows "
+                     "Newton's scene graph -- the 81 collision geoms of the converted MJCF, with no "
+                     "visual-only meshes -- rather than mjlab's visual model.")
+ap.add_argument("--video-size", default="960x720")
 ap.add_argument("--compare-obs", action="store_true",
                 help="also build mjlab's own observations at step 0 and diff them group by group")
 A = ap.parse_args()
@@ -182,6 +187,52 @@ action_term = amdp.Sonic53Action(_sonic_cfg, nenv)
 amgr = nenv.bind_action_manager(action_term.action_dim, {"sonic_action": action_term})
 print(f"action term: dim={action_term.action_dim}")
 
+# ------------------------------------------------------------- newton viewer
+viewer = None
+frames = []
+if A.newton_video:
+  # pyglet creates a shadow window even when the viewer is asked for headless, which fails on a box
+  # with no display. Its own headless path uses EGL and has to be selected before pyglet is imported.
+  os.environ.setdefault("PYGLET_HEADLESS", "1")
+  import pyglet as _pyglet
+  _pyglet.options["headless"] = True
+  import newton.viewer as _nv
+  _w, _h = (int(x) for x in A.video_size.lower().split("x"))
+  # headless=True renders offscreen; get_frame() then returns the rendered image as a warp array.
+  viewer = _nv.ViewerGL(width=_w, height=_h, headless=True)
+
+  # Newton's convention is that a collider is not drawn -- the visual mesh is. mjlab's robot has 145
+  # visual-only geoms so it renders fine, but the apple and the table are each a SINGLE geom that is
+  # both visual and collidable, which arrives here as collide-but-not-visible. The result is a video
+  # of a robot grasping thin air above an invisible table.
+  #
+  # The rule applied is per body rather than per shape: if a body has no visible shape at all, make
+  # its colliders visible. That reveals the apple and table without double-drawing the robot.
+  _flags = wp.to_torch(nmodel.shape_flags)
+  _sbody = wp.to_torch(nmodel.shape_body)
+  _VIS = int(newton.ShapeFlags.VISIBLE)
+  _revealed = 0
+  for _bid in torch.unique(_sbody):
+    _idx = (_sbody == _bid).nonzero(as_tuple=True)[0]
+    if int((_flags[_idx] & _VIS).sum()) == 0:
+      _flags[_idx] |= _VIS
+      _revealed += len(_idx)
+  print(f"  made {_revealed} collider shape(s) visible (bodies that had no visual geometry)")
+
+  viewer.set_model(nmodel)
+  cam = getattr(viewer, "camera", None)
+  if cam is not None:
+    # Camera.pos must be an array -- get_view_matrix divides it by a scale factor, so a plain tuple
+    # raises inside the first render. look_at() takes the target only; the eye comes from pos.
+    try:
+      cam.pos = np.array([1.75, -1.35, 1.40], dtype=np.float32)
+      cam.look_at(np.array([0.80, -0.06, 0.86], dtype=np.float32))
+      print(f"  camera at {np.round(np.asarray(cam.pos), 2).tolist()} looking at the table")
+    except Exception as e:
+      print(f"  camera placement failed ({type(e).__name__}: {e}); using the default view")
+  print(f"newton ViewerGL: {_w}x{_h} headless, camera attrs "
+        f"{[a for a in dir(cam) if not a.startswith('_')][:8] if cam else 'none'}")
+
 # ------------------------------------------------------------------- rollout
 nenv._force_reference_start_frame = 0
 
@@ -273,6 +324,27 @@ for k in range(A.steps):
 
   nenv.episode_length_buf += 1
 
+  if viewer is not None:
+    # Drive the render from mjw_data, not from whatever Newton's State happens to hold. The table is
+    # a mocap body: its pose is written to mocap_pos and never enters State, so it renders at the
+    # origin and the apple appears to float in mid-air with nothing under it. Syncing every body
+    # makes the picture match the simulation by construction rather than by coincidence.
+    #
+    # Both conventions here were measured, not assumed (tools/probes/probe_bodymap.py):
+    # Newton body i is MuJoCo body i+1 (MuJoCo's body 0 is the world), and Newton stores quaternions
+    # xyzw against MuJoCo's wxyz.
+    _bq = wp.to_torch(state_in.body_q)
+    _xp = wp.to_torch(solver.mjw_data.xpos)[0]
+    _xq = wp.to_torch(solver.mjw_data.xquat)[0]
+    _n = _bq.shape[0]
+    _bq[:, 0:3] = _xp[1:1 + _n]
+    _bq[:, 3:7] = _xq[1:1 + _n][:, [1, 2, 3, 0]]
+    viewer.begin_frame(k * DT * DECIMATION)
+    viewer.log_state(state_in)
+    viewer.end_frame()
+    img = viewer.get_frame()
+    frames.append(np.asarray(img.numpy() if hasattr(img, "numpy") else img).copy())
+
   z = float(obj.data.root_link_pos_w[0, 2])
   if z0 is None:
     z0 = z
@@ -307,6 +379,25 @@ for k in range(A.steps):
 print("-" * 52)
 print(f"max object rise = {peak['rise']:.2f} cm   (mjlab@3.8 49.72, mjlab@3.11 50.13)")
 print(f"min fingertip-object distance = {peak['min_h2o']:.3f} m   (mjlab 0.032-0.035)")
+
+if viewer is not None and frames:
+  import imageio.v2 as _imageio
+  arr = np.stack(frames)
+  if arr.dtype != np.uint8:
+    arr = np.clip(arr * (255.0 if arr.max() <= 1.01 else 1.0), 0, 255).astype(np.uint8)
+  if arr.shape[-1] == 4:
+    arr = arr[..., :3]
+  # ViewerGL already returns rows top-down; flipping produced an upside-down video. Kept as an env
+  # switch because framebuffer origin conventions are the sort of thing that changes between releases.
+  if bool(int(os.environ.get("NEWTON_VIDEO_FLIP", "0"))):
+    arr = arr[:, ::-1]
+  wr = _imageio.get_writer(A.newton_video, fps=int(round(1.0 / (DT * DECIMATION))),
+                           codec="libx264", macro_block_size=None, quality=8)
+  for f_ in arr:
+    wr.append_data(f_)
+  wr.close()
+  viewer.close()
+  print(f"wrote {A.newton_video}  ({len(frames)} frames rendered by Newton's own viewer)")
 
 if A.dump_qpos:
   np.savez_compressed(A.dump_qpos, qpos=np.stack(qpos_log),
