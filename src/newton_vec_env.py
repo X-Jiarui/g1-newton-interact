@@ -156,6 +156,19 @@ class NewtonVecEnv:
         except Exception:
           pass
 
+    # mjlab's MetricsManager is what produces the task-level numbers -- lift_success, contact,
+    # object tracking error. Without it the only things logged are PPO internals, and a run whose
+    # physics has failed looks identical to one that is merely early: 3576 iterations were spent
+    # that way before the NaN was found by hand.
+    self.metrics_manager = None
+    try:
+      from mjlab.managers.metrics_manager import MetricsManager
+      self.metrics_manager = MetricsManager(cfg.metrics, self._env)
+      print(f"[newton-env] MetricsManager: "
+            f"{len(getattr(self.metrics_manager, 'active_terms', []) or [])} terms")
+    except Exception as e:
+      print(f"[newton-env] MetricsManager unavailable ({type(e).__name__}: {str(e)[:80]})")
+
     self.reward_manager = RewardManager(cfg.rewards, self._env)
     self.termination_manager = TerminationManager(cfg.terminations, self._env)
     self.event_manager = EventManager(cfg.events, self._env)
@@ -245,6 +258,11 @@ class NewtonVecEnv:
       if self._render_tick % self._render_every == 0:
         self._render()
 
+    if self.metrics_manager is not None:
+      try:
+        self.metrics_manager.compute(dt=self.step_dt)
+      except Exception:
+        pass
     reward = self.reward_manager.compute(dt=self.step_dt)
     terminated = self.termination_manager.compute()
     time_out = getattr(self.termination_manager, "time_outs",
@@ -255,6 +273,8 @@ class NewtonVecEnv:
       self._reset_idx(done_ids)
 
     obs = self.get_observations()
+    # surface the task metrics so the runner logs them alongside the PPO curves
+    self.extras.setdefault("log", {}).update(self._env.extras.get("log", {}))
     self.extras["time_outs"] = time_out
     # mjlab's wrapper unpacks five values: terminated and truncated are separate, because a timeout
     # must bootstrap the value function while a real termination must not.

@@ -80,8 +80,13 @@ if A.video:
     if int((flags[idx] & VIS).sum()) == 0: flags[idx] |= VIS
   viewer.set_model(env.nmodel)
   cam = viewer.camera
-  cam.pos = np.array([1.9, -1.5, 1.4], dtype=np.float32)
-  cam.look_at(np.array([0.6, 0.0, 0.85], dtype=np.float32))
+  # Aim at where the robots actually are rather than at an assumed origin: replicate() lays the
+  # worlds out with its own spacing, and a guessed target put them on the horizon as specks.
+  _xp = wp.to_torch(env.solver.mjw_data.xpos)
+  _c = _xp[0, 1:].mean(dim=0).detach().cpu().numpy()          # world 0, excluding mujoco's world body
+  cam.pos = np.array([_c[0] + 1.6, _c[1] - 1.5, _c[2] + 0.7], dtype=np.float32)
+  cam.look_at(np.array([_c[0], _c[1], _c[2]], dtype=np.float32))
+  print(f"  camera aimed at world 0 centroid {np.round(_c, 3).tolist()}")
   frames = []
 
 print("\n=== rollout ===")
@@ -108,7 +113,16 @@ for k in range(A.steps):
     if bq.shape[0] == xp.shape[0] * nb:
       bq[:, 0:3] = xp[:, 1:1+nb].reshape(-1, 3)
       bq[:, 3:7] = xq[:, 1:1+nb].reshape(-1, 4)[:, [1, 2, 3, 0]]
-    viewer.begin_frame(k * env.step_dt); viewer.log_state(env.state_in); viewer.end_frame()
+    # Re-aim every frame: the viewer fits the camera to the scene on its own, and with several
+    # replicated worlds that fit pulls back far enough to make the robots specks.
+    _c = wp.to_torch(env.solver.mjw_data.xpos)[0, 1:].mean(dim=0).detach().cpu().numpy()
+    viewer.begin_frame(k * env.step_dt)
+    viewer.log_state(env.state_in)
+    # Set the camera last: end_frame() is what renders, and anything set before begin_frame or
+    # log_state was being overridden -- the robots came out as specks on the horizon.
+    cam.pos = np.array([_c[0] + 1.3, _c[1] - 1.2, _c[2] + 0.55], dtype=np.float32)
+    cam.look_at(np.array([_c[0], _c[1], _c[2]], dtype=np.float32))
+    viewer.end_frame()
     img = viewer.get_frame()
     arr = np.asarray(img.numpy() if hasattr(img, "numpy") else img)
     if arr.dtype != np.uint8: arr = np.clip(arr*255, 0, 255).astype(np.uint8)

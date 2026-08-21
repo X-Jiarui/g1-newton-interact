@@ -44,6 +44,11 @@ ap.add_argument("--deterministic", default="default",
                      "which disable_sensors does not avoid because the module is parsed regardless. "
                      "Newton's own hydroelastic example enables it with use_mujoco_contacts=False, "
                      "so the Newton contact path may not hit this.")
+ap.add_argument("--sdf-object", default=None,
+                help="STL whose SDF replaces the scene's authored collider. The simple-body repair "
+                     "is skipped when this is set: it reinstalls the warp model, and Newton keeps "
+                     "the SDF volumes there, so applying it silently removes the distance field.")
+ap.add_argument("--reference-pkl", default=None)
 ap.add_argument("--no-simple-fix", action="store_true",
                 help="leave Newton's pessimised mass-matrix layout in place. Newton offsets every "
                      "COM by 1mm at compile time so runtime inertia edits stay valid, which costs "
@@ -67,6 +72,9 @@ ap.add_argument("--compare-obs", action="store_true",
                 help="also build mjlab's own observations at step 0 and diff them group by group")
 A = ap.parse_args()
 
+if getattr(A, "reference_pkl", None):
+  os.environ["APPLE_EAT_PKL"] = A.reference_pkl   # read at import time by the task modules
+
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "src"))
 
 # ---------------------------------------------------------------- Newton side
@@ -80,6 +88,13 @@ builder.default_shape_cfg.gap = 0.0            # else every contact needs 10 cm 
 builder.add_mjcf(A.xml, collapse_fixed_joints=False, convert_3d_hinge_to_ball_joints=False,
                  parse_mujoco_options=True, parse_meshes=True, parse_sites=True,
                  enable_self_collisions=True)
+if A.sdf_object:
+  import mujoco as _mj
+  _ref_pre = _mj.MjModel.from_xml_path(A.xml)
+  sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__)))), "src"))
+  from grab_objects import swap_collider_to_sdf
+  swap_collider_to_sdf(builder, _ref_pre, "apple/apple", A.sdf_object, resolution=128)
 nmodel = builder.finalize()
 # update_data_interval=0 pins mjw_data as the authority: SolverMuJoCo otherwise re-syncs qpos from
 # Newton's State every step, which would erase the direct joint/root writes Sonic53Action performs
@@ -155,6 +170,10 @@ if A.compiled_model:
                                   nworld=1, nconmax=256, njmax=2048)
   print(f"[compiled-model] substituted a separately compiled MJCF: nC {_before} -> "
         f"{int(solver.mjw_model.nC)}   (this discards Newton's construction; kept for provenance)")
+elif A.sdf_object:
+  restore_freejoint_damping(_spec_capture.spec, A.xml)
+  print(f"[simple-fix] skipped: mesh collider keeps Newton's warp model (nC="
+        f"{int(solver.mjw_model.nC)})")
 elif not A.no_simple_fix:
   restore_freejoint_damping(_spec_capture.spec, A.xml)
   restore_simple_bodies(solver, _spec_capture.spec, nworld=1, nconmax=256, njmax=2048)
@@ -163,7 +182,7 @@ else:
   print(f"[native] simple-body layout NOT restored: nC={int(solver.mjw_model.nC)} "
         f"(the compressed layout would be {int(_ref_mj.nC)})")
 
-if not A.no_simple_fix and int(solver.mjw_model.nC) != int(_ref_mj.nC):
+if not A.no_simple_fix and not A.sdf_object and int(solver.mjw_model.nC) != int(_ref_mj.nC):
   raise SystemExit(f"nC is {int(solver.mjw_model.nC)}, expected {int(_ref_mj.nC)}")
 
 print(f"newton model: nq={solver.mj_model.nq} nv={solver.mj_model.nv} nu={solver.mj_model.nu} "
