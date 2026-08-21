@@ -87,14 +87,24 @@ match. It only shows up in `Data.M`, which is `(1, nC)` — different lengths on
 Running the same policy with everything else held fixed, changing only whether the warp model comes
 from Newton's reconstruction or from a compiled `MjModel`:
 
-| | native Newton model (`nC=1102`) | compiled `MjModel` (`nC=1087`) | reference (mjlab) |
-|---|---|---|---|
-| contact established | yes, frame ~85 | yes, frame ~85 | yes, frame ~85 |
-| peak lift | **16.9 cm, then dropped** | 50.6 cm, held | 49.7–50.1 cm, held |
+Same policy, same scene, same everything else; only the source of the warp model changes. Repeated
+runs, because GPU contact solving is not bit-reproducible and a single run does not characterise a
+configuration:
 
-The grasp forms either way; with the reconstructed model the object slips out at about 17 cm. The
-mislabelled body is the grasped object itself, so its mass matrix — the one the contact solve acts
-through — is the one carrying the wrong layout.
+| | native Newton model (`nC=1102`) | compiled `MjModel` (`nC=1087`) |
+|---|---|---|
+| runs holding the object | **8 of 11** | 6 of 6 |
+| peak lift when it holds | 49.8 – 52.2 cm | 49.8 – 50.8 cm |
+| peak lift when it fails | 5.7 / 8.2 / 16.9 cm, then dropped | — |
+
+So the defect does not break the grasp outright; it makes it **marginal**. The mislabelled body is the
+grasped object itself, so its mass matrix — the one the contact solve acts through — is the one
+carrying the wrong layout.
+
+Raising `opt.iterations` from the scene's 10 to 200 recovers the lift on the native model
+(51.8 cm), which suggests the different layout is harder to converge rather than describing different
+physics. That is consistent with the force diff above being a solver residual rather than a modelling
+error.
 
 ## Note on workarounds
 

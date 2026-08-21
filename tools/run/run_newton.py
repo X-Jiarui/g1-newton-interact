@@ -32,6 +32,10 @@ ap.add_argument("--xml", default=os.path.expanduser(
   "~/projects/g1-newton-interact/assets/mjlab_scene/scene.xml"))
 ap.add_argument("--steps", type=int, default=400, help="control steps (decimation 4 => 4 physics each)")
 ap.add_argument("--every", type=int, default=20)
+ap.add_argument("--solver-iterations", type=int, default=None,
+                help="override opt.iterations. The scene ships with 10, which is few. If the native "
+                     "model's failure is an under-convergence artifact of the different sparse "
+                     "layout rather than different physics, more iterations should close the gap.")
 ap.add_argument("--native-model", action="store_true",
                 help="keep Newton's OWN reconstructed model instead of substituting a compiled "
                      "MjModel. Newton's reconstruction mislabels body_simple on free bodies, so nC "
@@ -132,6 +136,21 @@ else:
 
 print(f"newton model: nq={solver.mj_model.nq} nv={solver.mj_model.nv} nu={solver.mj_model.nu} "
       f"ngeom={solver.mj_model.ngeom}")
+
+if A.solver_iterations is not None:
+  for _h in (solver.mj_model, solver.mjw_model):
+    _o = getattr(_h, "opt", None)
+    if _o is None:
+      continue
+    _it = getattr(_o, "iterations", None)
+    if _it is None:
+      continue
+    if hasattr(_it, "fill_"):
+      _it.fill_(A.solver_iterations)
+    else:
+      _o.iterations = int(A.solver_iterations)
+  print(f"solver iterations overridden to {A.solver_iterations} "
+        f"(scene default {int(_ref_mj.opt.iterations)})")
 
 DT = float(_ref_mj.opt.timestep)
 DECIMATION = 4
