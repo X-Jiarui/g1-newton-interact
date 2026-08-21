@@ -32,6 +32,10 @@ ap.add_argument("--xml", default=os.path.expanduser(
   "~/projects/g1-newton-interact/assets/mjlab_scene/scene.xml"))
 ap.add_argument("--steps", type=int, default=400, help="control steps (decimation 4 => 4 physics each)")
 ap.add_argument("--every", type=int, default=20)
+ap.add_argument("--until-ref-end", action="store_true",
+                help="run the whole reference clip instead of a fixed step count: the length is read "
+                     "from the clip itself, plus the startup hold before the reference starts "
+                     "advancing, and the rollout stops on the last frame.")
 ap.add_argument("--dump-qpos", default=None, help="npz of per-step qpos, for rendering the video")
 ap.add_argument("--newton-video", default=None,
                 help="record an mp4 with NEWTON's own renderer (ViewerGL, headless). This shows "
@@ -297,6 +301,14 @@ qpos_log, mocap_log, rows = [], [], []
 z0 = None
 peak = {"rise": -99.0, "min_h2o": 9.9, "contact": 0.0}
 
+N_FRAMES = int(amdp._ref(str(nenv.device))["n_frames"])
+if A.until_ref_end:
+  # The reference does not advance during the startup hold, so the clip ends about 40 control steps
+  # later than its frame count; the loop also breaks on the last frame, so the margin only has to be
+  # generous enough not to cut the clip short.
+  A.steps = N_FRAMES + 60
+  print(f"reference clip has {N_FRAMES} frames -> running {A.steps} control steps")
+
 print(f"\nstepping Newton: dt={DT} decimation={DECIMATION} -> control dt {DT*DECIMATION}")
 print(f"\n{'step':>5} {'frame':>6} {'obj_z':>8} {'rise_cm':>8} {'h2o_m':>8} {'nefc':>7}")
 print("-" * 52)
@@ -375,6 +387,9 @@ for k in range(A.steps):
   rows.append(dict(step=k, frame=frame, obj_z=z, rise_cm=rise, h2o=h2o, nefc=nefc))
   if k % A.every == 0 or k == A.steps - 1:
     print(f"{k:5d} {frame:6d} {z:8.3f} {rise:8.2f} {h2o:8.3f} {nefc:7d}")
+  if A.until_ref_end and frame >= N_FRAMES - 1:
+    print(f"{k:5d} {frame:6d} {z:8.3f} {rise:8.2f} {h2o:8.3f} {nefc:7d}   <- reference end")
+    break
 
 print("-" * 52)
 print(f"max object rise = {peak['rise']:.2f} cm   (mjlab@3.8 49.72, mjlab@3.11 50.13)")
