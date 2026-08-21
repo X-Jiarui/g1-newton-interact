@@ -35,6 +35,10 @@ ap.add_argument("--sdf-object", default=None,
                 help="STL whose SDF replaces the scene's sphere collider, e.g. the GRAB mesh for "
                      "this clip's object. Without it the object stays mjlab's 4cm analytic sphere.")
 ap.add_argument("--sdf-resolution", type=int, default=128)
+ap.add_argument("--viser-port", type=int, default=None,
+                help="serve a live view of training on this port (tunnel and open in a browser)")
+ap.add_argument("--render-every", type=int, default=4,
+                help="control steps between rendered frames; rendering every step costs throughput")
 ap.add_argument("--reference-pkl", default=None,
                 help="sets APPLE_EAT_PKL before the task modules read it")
 A = ap.parse_args()
@@ -78,7 +82,8 @@ if str(getattr(agent_cfg, "base_tracker_kind", "")).strip().lower() == "astra_on
 
 print(f"building {A.num_envs} Newton worlds ...")
 env = NewtonVecEnv(cfg, A.xml, num_envs=A.num_envs, device="cuda:0",
-                   sdf_object_stl=A.sdf_object, sdf_resolution=A.sdf_resolution)
+                   sdf_object_stl=A.sdf_object, sdf_resolution=A.sdf_resolution,
+                   viser_port=A.viser_port, render_every=A.render_every)
 print(f"  reward terms={len(env.reward_manager.active_terms)} "
       f"termination terms={len(env.termination_manager.active_terms)} "
       f"max_episode_length={env.max_episode_length}")

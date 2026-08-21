@@ -33,7 +33,8 @@ class NewtonVecEnv:
   def __init__(self, cfg, xml: str, num_envs: int, device: str = "cuda:0",
                njmax: int = 2048, nconmax: int = 256, object_entity: str = "apple",
                sdf_object_stl: str | None = None, sdf_resolution: int = 128,
-               sdf_hydroelastic: bool = False) -> None:
+               sdf_hydroelastic: bool = False, viser_port: int | None = None,
+               render_every: int = 4, solver_kwargs: dict | None = None) -> None:
     import mujoco
     import newton
     from newton.solvers import SolverMuJoCo
@@ -75,23 +76,32 @@ class NewtonVecEnv:
     with capture_spec() as cap:
       # update_data_interval=0 keeps mjw_data authoritative, so the direct joint/root writes the
       # action term performs during the startup hold are not overwritten from Newton's State.
-      self.solver = SolverMuJoCo(self.nmodel, enable_multiccd=True, update_data_interval=0,
-                                 njmax=njmax, nconmax=nconmax)
+      # SDF collision has its own solver parameters (sdf_iterations / sdf_initpoints) that default
+      # to None; they are passed through here so they can be set for mesh colliders.
+      _kw = dict(enable_multiccd=True, update_data_interval=0, njmax=njmax, nconmax=nconmax)
+      _kw.update(solver_kwargs or {})
+      self.solver = SolverMuJoCo(self.nmodel, **_kw)
     self._ref_mj = mujoco.MjModel.from_xml_path(xml)
     restore_freejoint_damping(cap.spec, xml, verbose=False)
-    restore_simple_bodies(self.solver, cap.spec, nworld=self.num_envs,
-                          nconmax=nconmax, njmax=njmax, verbose=False)
-    nC, nC_ref = int(self.solver.mjw_model.nC), int(self._ref_mj.nC)
-    if nC != nC_ref:
-      # With the analytic sphere this would be a defect: the object is a free body with isotropic
-      # diagonal inertia, so MuJoCo's compressed mass-matrix layout applies and a mismatch means the
-      # spec repair did not take. With a real mesh collider it is the correct answer -- the inertia
-      # is neither isotropic nor centred, so the body genuinely is not "simple" and the compressed
-      # layout does not apply to it.
-      note = "expected for a mesh collider" if sdf_object_stl else "UNEXPECTED for a sphere object"
-      print(f"[newton-env] nC {nC} vs reference {nC_ref} ({note})")
-      if not sdf_object_stl:
-        raise RuntimeError(f"nC {nC} != {nC_ref} with a sphere object; the spec repair did not take")
+
+    # The simple-body fix recompiles Newton's spec and installs put_model/put_data of the result.
+    # That is right for an analytic-primitive object, and destructive for a mesh one: Newton attaches
+    # the SDF volumes to the warp model when it builds the solver, so replacing that model wholesale
+    # leaves the mesh collider with no distance field behind it. Measured: with the fix the first
+    # solver step produced 150 NaNs in qpos; without it the same scene steps cleanly.
+    #
+    # It is also unnecessary here. The fix recovers MuJoCo's compressed mass-matrix layout for a body
+    # that qualifies as "simple" -- a free body with isotropic, centred inertia. A real mesh is
+    # neither, so nC=1102 is the correct answer for it rather than a defect to repair.
+    if sdf_object_stl:
+      print(f"[newton-env] simple-body fix skipped: the object is a mesh collider, whose SDF lives "
+            f"on the warp model the fix would replace (nC={int(self.solver.mjw_model.nC)})")
+    else:
+      restore_simple_bodies(self.solver, cap.spec, nworld=self.num_envs,
+                            nconmax=nconmax, njmax=njmax, verbose=False)
+      nC, nC_ref = int(self.solver.mjw_model.nC), int(self._ref_mj.nC)
+      if nC != nC_ref:
+        raise RuntimeError(f"nC {nC} != {nC_ref} with a primitive object; the spec repair did not take")
 
     self.control = self.nmodel.control()
     self.state_in, self.state_out = self.nmodel.state(), self.nmodel.state()
@@ -152,6 +162,27 @@ class NewtonVecEnv:
 
     self.episode_length_buf = self._env.episode_length_buf
     self._all = torch.arange(self.num_envs, dtype=torch.long, device=device)
+
+    # --- optional live view ---------------------------------------------------
+    self.viewer = None
+    self._render_every = max(1, int(render_every))
+    self._render_tick = 0
+    if viser_port:
+      import newton.viewer as _nv
+      self.viewer = _nv.ViewerViser(port=int(viser_port),
+                                    label=f"Newton training ({self.num_envs} envs)")
+      # Newton draws visual geometry and hides colliders. The object here has only a collider -- the
+      # SDF mesh -- so without this the robot appears to grasp nothing at all.
+      _flags = wp.to_torch(self.nmodel.shape_flags)
+      _sbody = wp.to_torch(self.nmodel.shape_body)
+      _VIS = int(newton.ShapeFlags.VISIBLE)
+      for _bid in torch.unique(_sbody):
+        _idx = (_sbody == _bid).nonzero(as_tuple=True)[0]
+        if int((_flags[_idx] & _VIS).sum()) == 0:
+          _flags[_idx] |= _VIS
+      self.viewer.set_model(self.nmodel)
+      print(f"[newton-env] viser on http://localhost:{viser_port} "
+            f"(rendering every {self._render_every} control steps)")
     # mjlab's event manager needs the global step count for reset-mode terms that fire on a schedule
     # (min_step_count_between_reset). It is a counter over env-steps, not control steps.
     self.common_step_counter = 0
@@ -209,6 +240,11 @@ class NewtonVecEnv:
     self.common_step_counter += 1
     self._env.common_step_counter = self.common_step_counter
 
+    if self.viewer is not None:
+      self._render_tick += 1
+      if self._render_tick % self._render_every == 0:
+        self._render()
+
     reward = self.reward_manager.compute(dt=self.step_dt)
     terminated = self.termination_manager.compute()
     time_out = getattr(self.termination_manager, "time_outs",
@@ -224,5 +260,30 @@ class NewtonVecEnv:
     # must bootstrap the value function while a real termination must not.
     return obs, reward, terminated, time_out, self.extras
 
+  def _render(self) -> None:
+    """Draw from mjw_data rather than Newton's State.
+
+    Two reasons. The table is a mocap body: its pose is written to mocap_pos and never enters State,
+    so it would draw at the origin with the object apparently floating. And with N replicated worlds
+    Newton's bodies are laid out world-major (world w, local body b -> w*B + b) against mujoco's
+    per-world (w, b+1), so the two have to be related explicitly rather than copied straight across.
+    """
+    bq = wp.to_torch(self.state_in.body_q)
+    xp = wp.to_torch(self.solver.mjw_data.xpos)
+    xq = wp.to_torch(self.solver.mjw_data.xquat)
+    nworld, nb_mj = xp.shape[0], xp.shape[1]
+    nb = nb_mj - 1                                   # mujoco body 0 is the world
+    if bq.shape[0] == nworld * nb:
+      bq[:, 0:3] = xp[:, 1:1 + nb].reshape(-1, 3)
+      bq[:, 3:7] = xq[:, 1:1 + nb].reshape(-1, 4)[:, [1, 2, 3, 0]]   # wxyz -> xyzw
+    self.viewer.begin_frame(self.common_step_counter * self.step_dt)
+    self.viewer.log_state(self.state_in)
+    self.viewer.end_frame()
+
   def close(self) -> None:
+    if self.viewer is not None:
+      try:
+        self.viewer.close()
+      except Exception:
+        pass
     return None
