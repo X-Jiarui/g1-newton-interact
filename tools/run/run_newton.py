@@ -247,8 +247,8 @@ z0 = None
 peak = {"rise": -99.0, "min_h2o": 9.9, "contact": 0.0}
 
 print(f"\nstepping Newton: dt={DT} decimation={DECIMATION} -> control dt {DT*DECIMATION}")
-print(f"\n{'step':>5} {'frame':>6} {'obj_z':>8} {'rise_cm':>8} {'h2o_m':>8} {'contact':>8}")
-print("-" * 50)
+print(f"\n{'step':>5} {'frame':>6} {'obj_z':>8} {'rise_cm':>8} {'h2o_m':>8} {'nefc':>7}")
+print("-" * 52)
 
 for k in range(A.steps):
   obs = _obs_dict()
@@ -288,11 +288,11 @@ for k in range(A.steps):
   if h2o == h2o:
     peak["min_h2o"] = min(peak["min_h2o"], h2o)
 
-  try:
-    _nc = solver.mjw_data.ncon
-    ncon = int(np.asarray(_nc.numpy() if hasattr(_nc, "numpy") else _nc).reshape(-1)[0])
-  except Exception:
-    ncon = -1
+  # mujoco_warp exposes no scalar contact count here (`contact` is a fixed 256-slot struct), so the
+  # active constraint-row count is reported instead. It is the quantity that actually matters for the
+  # budget: this is what overflowed njmax and silently dropped the table contact (defect 4).
+  _ne = solver.mjw_data.nefc
+  nefc = int(np.asarray(_ne.numpy() if hasattr(_ne, "numpy") else _ne).reshape(-1)[0])
   if A.dump_qpos:
     qpos_log.append(wp.to_torch(solver.mjw_data.qpos)[0].detach().cpu().numpy().copy())
     # The table is a mocap body, so its pose lives outside qpos. Without it the render puts the
@@ -300,11 +300,11 @@ for k in range(A.steps):
     mocap_log.append((wp.to_torch(solver.mjw_data.mocap_pos)[0].detach().cpu().numpy().copy(),
                       wp.to_torch(solver.mjw_data.mocap_quat)[0].detach().cpu().numpy().copy()))
   frame = int(rmdp._tracking_frame(nenv, int(amdp._ref(str(nenv.device))["n_frames"]))[0])
-  rows.append(dict(step=k, frame=frame, obj_z=z, rise_cm=rise, h2o=h2o, ncon=ncon))
+  rows.append(dict(step=k, frame=frame, obj_z=z, rise_cm=rise, h2o=h2o, nefc=nefc))
   if k % A.every == 0 or k == A.steps - 1:
-    print(f"{k:5d} {frame:6d} {z:8.3f} {rise:8.2f} {h2o:8.3f} {ncon:8d}")
+    print(f"{k:5d} {frame:6d} {z:8.3f} {rise:8.2f} {h2o:8.3f} {nefc:7d}")
 
-print("-" * 50)
+print("-" * 52)
 print(f"max object rise = {peak['rise']:.2f} cm   (mjlab@3.8 49.72, mjlab@3.11 50.13)")
 print(f"min fingertip-object distance = {peak['min_h2o']:.3f} m   (mjlab 0.032-0.035)")
 

@@ -1,8 +1,15 @@
 # Migrating the mjlab residual-grasp stack to Newton
 
+> **Status (reached).** Requirement 2 is met: the mjlab `apple_eat_1` checkpoint runs under Newton
+> 1.5 and lifts the apple 50.60 cm against mjlab's 49.72 cm (mujoco_warp 3.8) and 50.13 cm (3.11),
+> holding the grasp to the end of the rollout. The 3.8→3.11 control run establishes a 0.4 cm version
+> noise floor, so the remaining 0.47 cm gap sits inside it. Nine silent defects were found on the way;
+> they are catalogued in [03-defects.md](03-defects.md). Requirement 1 (training) is not started.
+
 ## Acceptance criterion
 
-Load the mjlab-trained checkpoint (`OF_00_apple_eat_1_SPHERE/model_2010.pt`) in Newton and get
+Load the mjlab-trained checkpoint (`sweep_ckpts_r2/OF_00_apple_eat_1_SPHERE/model_7310.pt`,
+identified and verified in [02-baseline.md](02-baseline.md)) in Newton and get
 behaviour consistent with mjlab.
 
 ## What "consistent" can and cannot mean

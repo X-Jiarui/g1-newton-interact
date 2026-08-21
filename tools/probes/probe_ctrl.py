@@ -19,7 +19,7 @@ from dataclasses import asdict
 from pathlib import Path
 import numpy as np, torch, yaml as _yaml
 
-CKPT = os.path.expanduser("~/sweep_ckpts/OF_00_apple_eat_1_SPHERE/model_2010.pt")
+CKPT = os.path.expanduser("~/sweep_ckpts_r2/OF_00_apple_eat_1_SPHERE/model_7310.pt")
 OUT = os.path.expanduser("~/projects/g1-newton-interact/docs/ctrl_probe.json")
 
 import mjlab.tasks  # noqa: F401

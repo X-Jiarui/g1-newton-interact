@@ -27,7 +27,7 @@ sys.path.insert(0, os.path.expanduser("~/projects/g1-newton-interact/src"))
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--checkpoint", default=os.path.expanduser(
-  "~/sweep_ckpts/OF_00_apple_eat_1_SPHERE/model_2010.pt"))
+  "~/sweep_ckpts_r2/OF_00_apple_eat_1_SPHERE/model_7310.pt"))
 ap.add_argument("--outdir", default=os.path.expanduser("~/projects/g1-newton-interact/docs"))
 ARGS = ap.parse_args()
 

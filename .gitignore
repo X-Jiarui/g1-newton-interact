@@ -2,3 +2,5 @@ logs/
 __pycache__/
 *.pyc
 assets/mjlab_scene/assets/
+MUJOCO_LOG.TXT
+*.mp4
