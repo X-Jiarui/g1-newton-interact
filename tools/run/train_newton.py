@@ -58,6 +58,7 @@ from mjlab.rl import RslRlVecEnvWrapper, MjlabOnPolicyRunner
 from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
 from mjlab.scripts.play import _apply_cfg_mapping
 from newton_vec_env import NewtonVecEnv
+from reward_cfg_from_checkpoint import reward_weights_from_env_yaml, apply_reward_weights
 
 TASK = "Mjlab-ResidualInteract-G1"
 torch.manual_seed(A.seed)
@@ -70,6 +71,16 @@ p = Path(A.agent_cfg_from).parent / "params" / "agent.yaml"
 if not p.exists():
   raise SystemExit(f"missing {p}: the task default agent config points at another project's tracker")
 _apply_cfg_mapping(agent_cfg, _yaml.unsafe_load(p.open()))
+
+# The agent config is not the whole story: the checkpoint's env.yaml carries the reward weights it
+# trained with, and load_env_cfg returns the task default where only `tracking` has weight. Training
+# against the default is training with no grasping reward at all.
+_env_yaml = Path(A.agent_cfg_from).parent / "params" / "env.yaml"
+if _env_yaml.exists():
+  apply_reward_weights(cfg, reward_weights_from_env_yaml(_env_yaml))
+else:
+  print(f"[reward-cfg] WARNING: no env.yaml beside the checkpoint; training with the task default, "
+        f"where only one reward term carries weight")
 
 # Every candidate trained with the pelvis start-assist disabled; the task default is 1.5 for 120
 # steps, which would prop the robot up with a wrench it never sees at evaluation.
