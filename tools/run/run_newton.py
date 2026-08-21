@@ -36,11 +36,15 @@ ap.add_argument("--solver-iterations", type=int, default=None,
                 help="override opt.iterations. The scene ships with 10, which is few. If the native "
                      "model's failure is an under-convergence artifact of the different sparse "
                      "layout rather than different physics, more iterations should close the gap.")
-ap.add_argument("--native-model", action="store_true",
-                help="keep Newton's OWN reconstructed model instead of substituting a compiled "
-                     "MjModel. Newton's reconstruction mislabels body_simple on free bodies, so nC "
-                     "and the mass-matrix layout differ from MuJoCo's -- this flag exists to measure "
-                     "whether that actually costs anything behaviourally.")
+ap.add_argument("--no-simple-fix", action="store_true",
+                help="leave Newton's pessimised mass-matrix layout in place. Newton offsets every "
+                     "COM by 1mm at compile time so runtime inertia edits stay valid, which costs "
+                     "the compressed qM layout; by default that is undone by recompiling Newton's "
+                     "own spec. This flag keeps the pessimised layout, for comparison.")
+ap.add_argument("--compiled-model", action="store_true",
+                help="substitute a separately compiled MJCF instead of using Newton's model. Kept "
+                     "for provenance -- it discards Newton's construction and is no longer needed "
+                     "now that the spec recompile achieves the same layout natively.")
 ap.add_argument("--until-ref-end", action="store_true",
                 help="run the whole reference clip instead of a fixed step count: the length is read "
                      "from the clip itself, plus the startup hold before the reference starts "
@@ -78,8 +82,15 @@ nmodel = builder.finalize()
 # to 65"), and an overflowing solver silently DROPS constraints: the apple fell straight through the
 # table it was resting on. The warning scrolls past in a log nobody reads; the symptom looks like bad
 # physics rather than a budget.
-solver = SolverMuJoCo(nmodel, enable_multiccd=True, update_data_interval=0,
-                      njmax=2048, nconmax=256)
+sys.path.insert(0, os.path.expanduser("~/projects/g1-newton-interact/src"))
+from newton_simple_fix import capture_spec
+
+# SolverMuJoCo does not keep its MjSpec, and the fix needs it: Newton writes the true centre of mass
+# back onto the spec after compiling, so the spec -- not the model -- is the thing that is already
+# correct.
+with capture_spec() as _spec_capture:
+  solver = SolverMuJoCo(nmodel, enable_multiccd=True, update_data_interval=0,
+                        njmax=2048, nconmax=256)
 control = nmodel.control()
 
 _ref_mj = mujoco.MjModel.from_xml_path(A.xml)
@@ -106,33 +117,38 @@ _ref_mj = mujoco.MjModel.from_xml_path(A.xml)
 # of it -- and the two were verified identical in tree topology, body/joint/actuator counts and
 # order, so this substitutes a correctly-derived model, not a different robot.
 import mujoco_warp as _mjw
-if A.native_model:
-  # Newton's own model, with only the conversion defects that have to be repaired for the physics to
-  # be right at all: free-joint damping is dropped, and plane geoms come through resized.
-  for _h in (solver.mj_model, solver.mjw_model):
-    _dd = getattr(_h, "dof_damping", None)
-    if _dd is None:
-      continue
-    if hasattr(_dd, "assign"):
-      _dd.assign(_ref_mj.dof_damping.astype(_dd.numpy().dtype).reshape(_dd.numpy().shape))
-    else:
-      _dd[:] = _ref_mj.dof_damping
-  _planes = [i for i in range(solver.mj_model.ngeom) if int(solver.mj_model.geom_type[i]) == 0]
-  if _planes:
-    _src = [j for j in range(_ref_mj.ngeom) if int(_ref_mj.geom_type[j]) == 0][0]
-    for i in _planes:
-      solver.mj_model.geom_size[i] = _ref_mj.geom_size[_src]
-  print(f"NATIVE Newton model kept: nC={int(solver.mjw_model.nC)} "
-        f"(compiled MjModel would give {int(_ref_mj.nC)}), nmocap={int(solver.mj_model.nmocap)}")
-else:
-  _before = (int(solver.mjw_model.nC), int(solver.mj_model.nmocap))
+from newton_simple_fix import restore_simple_bodies, restore_freejoint_damping
+
+# Two repairs, both applied to Newton's OWN spec and flowing through Newton's own compile:
+#
+#   free-joint damping -- add_mjcf does not carry `damping` on a <freejoint>, and setting it on the
+#     builder before finalize does not reach the model either. Authored values are read from the
+#     scene file with MuJoCo's parser (not its model compiler) and written onto the spec.
+#
+#   simple-body layout -- Newton offsets every COM by 1mm at compile time so that later inertia edits
+#     stay valid, at the cost of the compressed qM layout. Nothing here edits inertia, and Newton has
+#     already restored the true COM onto the spec by this point, so recompiling recovers the layout.
+#
+# Plane geom_size is deliberately NOT repaired: planes are infinite for collision in MuJoCo and the
+# size only affects the rendered grid.
+if A.compiled_model:
+  _before = int(solver.mjw_model.nC)
   solver.mj_model = _ref_mj
   solver.mjw_model = _mjw.put_model(_ref_mj)
   solver.mjw_data = _mjw.put_data(_ref_mj, mujoco.MjData(_ref_mj),
                                   nworld=1, nconmax=256, njmax=2048)
-  print(f"warp model rebuilt from the compiled MJCF: nC {_before[0]} -> {int(solver.mjw_model.nC)}, "
-        f"nmocap {_before[1]} -> {int(_ref_mj.nmocap)}")
-  assert int(solver.mjw_model.nC) == int(_ref_mj.nC)
+  print(f"[compiled-model] substituted a separately compiled MJCF: nC {_before} -> "
+        f"{int(solver.mjw_model.nC)}   (this discards Newton's construction; kept for provenance)")
+elif not A.no_simple_fix:
+  restore_freejoint_damping(_spec_capture.spec, A.xml)
+  restore_simple_bodies(solver, _spec_capture.spec, nworld=1, nconmax=256, njmax=2048)
+else:
+  restore_freejoint_damping(_spec_capture.spec, A.xml)
+  print(f"[native] simple-body layout NOT restored: nC={int(solver.mjw_model.nC)} "
+        f"(the compressed layout would be {int(_ref_mj.nC)})")
+
+if not A.no_simple_fix and int(solver.mjw_model.nC) != int(_ref_mj.nC):
+  raise SystemExit(f"nC is {int(solver.mjw_model.nC)}, expected {int(_ref_mj.nC)}")
 
 print(f"newton model: nq={solver.mj_model.nq} nv={solver.mj_model.nv} nu={solver.mj_model.nu} "
       f"ngeom={solver.mj_model.ngeom}")
@@ -205,7 +221,7 @@ print("policy loaded (mjlab env is for construction only and is never stepped)")
 from newton_bridge import NewtonEnv
 
 nenv = NewtonEnv(solver.mj_model, solver.mjw_data, num_envs=1, device="cuda:0",
-                 control=control, rename_from=(_ref_mj if A.native_model else None),
+                 control=control, rename_from=(None if A.compiled_model else _ref_mj),
                  physics_dt=DT, decimation=DECIMATION,
                  solver=solver)
 print(f"bridge: robot joints={len(nenv.scene['robot'].joint_names)} "
