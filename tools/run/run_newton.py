@@ -36,6 +36,15 @@ ap.add_argument("--solver-iterations", type=int, default=None,
                 help="override opt.iterations. The scene ships with 10, which is few. If the native "
                      "model's failure is an under-convergence artifact of the different sparse "
                      "layout rather than different physics, more iterations should close the gap.")
+ap.add_argument("--deterministic", default="default",
+                choices=["RUN_TO_RUN", "GPU_TO_GPU", "NOT_GUARANTEED", "default"],
+                help="Newton's determinism mode. Repeats are NOT reproducible by default -- the "
+                     "same command held the object in 11 of 15 runs -- so this would be worth "
+                     "having. It does not currently work on this path: warp rejects mujoco_warp's "
+                     "_sensor_tactile kernel at CODEGEN time ('cannot mix max and add reductions'), "
+                     "which disable_sensors does not avoid because the module is parsed regardless. "
+                     "Newton's own hydroelastic example enables it with use_mujoco_contacts=False, "
+                     "so the Newton contact path may not hit this.")
 ap.add_argument("--no-simple-fix", action="store_true",
                 help="leave Newton's pessimised mass-matrix layout in place. Newton offsets every "
                      "COM by 1mm at compile time so runtime inertia edits stay valid, which costs "
@@ -88,9 +97,17 @@ from newton_simple_fix import capture_spec
 # SolverMuJoCo does not keep its MjSpec, and the fix needs it: Newton writes the true centre of mass
 # back onto the spec after compiling, so the spec -- not the model -- is the thing that is already
 # correct.
+_solver_kw = dict(enable_multiccd=True, update_data_interval=0, njmax=2048, nconmax=256)
+if A.deterministic != "default":
+  _solver_kw["deterministic"] = getattr(wp.DeterministicMode, A.deterministic)
+  # mujoco_warp's tactile sensor kernel mixes max and add atomic reductions on one array, which
+  # deterministic mode rejects outright. Newton's model carries no sensors here anyway -- sensordata
+  # is shape (1, 0) -- so disabling them costs nothing. Newton's own hydroelastic example does the
+  # same for the same reason.
+  _solver_kw["disable_sensors"] = True
 with capture_spec() as _spec_capture:
-  solver = SolverMuJoCo(nmodel, enable_multiccd=True, update_data_interval=0,
-                        njmax=2048, nconmax=256)
+  solver = SolverMuJoCo(nmodel, **_solver_kw)
+print(f"solver determinism: {A.deterministic}")
 control = nmodel.control()
 
 _ref_mj = mujoco.MjModel.from_xml_path(A.xml)
