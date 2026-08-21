@@ -22,6 +22,12 @@ ap.add_argument("--checkpoint", default=os.path.expanduser(
 ap.add_argument("--outdir", default=os.path.expanduser("~/projects/g1-newton-interact/assets/mjlab_scene"))
 A_ = ap.parse_args()
 
+import sys, os
+sys.path.insert(0, os.path.expanduser("~/projects/g1-newton-interact/src"))
+try:
+  import mjw_compat as _c; _c.apply()
+except Exception:
+  pass
 import mjlab.tasks  # noqa: F401
 from mjlab.envs import ManagerBasedRlEnv
 from mjlab.tasks.registry import load_env_cfg, load_rl_cfg

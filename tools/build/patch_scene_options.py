@@ -6,15 +6,18 @@ therefore compiles to MuJoCo's defaults -- Euler at 2 ms with 100 solver iterati
 actually runs implicitfast at 5 ms with 10. Anyone importing the bare XML, Newton included, would be
 simulating a different system than the policy was trained in, and nothing about the file would say so.
 
-Values are taken from the measured baseline (`docs/mjlab_facts.json`), not retyped, so this cannot
+Values are taken from the measured baseline (`docs/data/mjlab_facts.json`), not retyped, so this cannot
 drift away from what mjlab actually ran.
 """
 from __future__ import annotations
 import json, os, re, sys
 from pathlib import Path
 
-FACTS = Path(os.path.expanduser("~/projects/g1-newton-interact/docs/mjlab_facts.json"))
-XML = Path(os.path.expanduser("~/projects/g1-newton-interact/assets/mjlab_scene/scene.xml"))
+FACTS = Path(os.path.expanduser("~/projects/g1-newton-interact/docs/data/mjlab_facts.json"))
+# Scene path is an argument so the tool works on any exported scene, not only the first one.
+XML = Path(os.path.expanduser(
+  sys.argv[1] if len(sys.argv) > 1
+  else "~/projects/g1-newton-interact/assets/mjlab_scene/scene.xml"))
 
 INTEGRATOR = {0: "Euler", 1: "RK4", 2: "implicit", 3: "implicitfast"}
 SOLVER = {0: "PGS", 1: "CG", 2: "Newton"}

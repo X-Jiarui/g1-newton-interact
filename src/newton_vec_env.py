@@ -31,7 +31,9 @@ class NewtonVecEnv:
   """Duck-types enough of mjlab's ManagerBasedRlEnv for `RslRlVecEnvWrapper`."""
 
   def __init__(self, cfg, xml: str, num_envs: int, device: str = "cuda:0",
-               njmax: int = 2048, nconmax: int = 256, object_entity: str = "apple") -> None:
+               njmax: int = 2048, nconmax: int = 256, object_entity: str = "apple",
+               sdf_object_stl: str | None = None, sdf_resolution: int = 128,
+               sdf_hydroelastic: bool = False) -> None:
     import mujoco
     import newton
     from newton.solvers import SolverMuJoCo
@@ -54,6 +56,16 @@ class NewtonVecEnv:
     SolverMuJoCo.register_custom_attributes(scene)
     scene.default_shape_cfg.gap = 0.0          # Newton's default of 0.1 needs 10cm of penetration
     scene.add_mjcf(xml, collapse_fixed_joints=False, parse_mujoco_options=True)
+
+    # Swap the object's collider before replicating, so every world gets it. mjlab authors the object
+    # as a 4 cm sphere and its own mesh path uses the *_cir160 convex hull instead of the real shape.
+    self._ref_mj_pre = mujoco.MjModel.from_xml_path(xml)
+    if sdf_object_stl:
+      from grab_objects import swap_collider_to_sdf
+      swap_collider_to_sdf(scene, self._ref_mj_pre, f"{object_entity}/{object_entity}",
+                           sdf_object_stl, resolution=sdf_resolution,
+                           hydroelastic=sdf_hydroelastic)
+
     world = newton.ModelBuilder()
     SolverMuJoCo.register_custom_attributes(world)
     world.default_shape_cfg.gap = 0.0
@@ -69,8 +81,17 @@ class NewtonVecEnv:
     restore_freejoint_damping(cap.spec, xml, verbose=False)
     restore_simple_bodies(self.solver, cap.spec, nworld=self.num_envs,
                           nconmax=nconmax, njmax=njmax, verbose=False)
-    if int(self.solver.mjw_model.nC) != int(self._ref_mj.nC):
-      raise RuntimeError(f"nC {int(self.solver.mjw_model.nC)} != {int(self._ref_mj.nC)}")
+    nC, nC_ref = int(self.solver.mjw_model.nC), int(self._ref_mj.nC)
+    if nC != nC_ref:
+      # With the analytic sphere this would be a defect: the object is a free body with isotropic
+      # diagonal inertia, so MuJoCo's compressed mass-matrix layout applies and a mismatch means the
+      # spec repair did not take. With a real mesh collider it is the correct answer -- the inertia
+      # is neither isotropic nor centred, so the body genuinely is not "simple" and the compressed
+      # layout does not apply to it.
+      note = "expected for a mesh collider" if sdf_object_stl else "UNEXPECTED for a sphere object"
+      print(f"[newton-env] nC {nC} vs reference {nC_ref} ({note})")
+      if not sdf_object_stl:
+        raise RuntimeError(f"nC {nC} != {nC_ref} with a sphere object; the spec repair did not take")
 
     self.control = self.nmodel.control()
     self.state_in, self.state_out = self.nmodel.state(), self.nmodel.state()
