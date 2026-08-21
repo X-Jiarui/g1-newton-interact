@@ -23,12 +23,12 @@ from pathlib import Path
 
 import yaml as _yaml
 
-sys.path.insert(0, os.path.expanduser("~/projects/g1-newton-interact/src"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "src"))
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--checkpoint", default=os.path.expanduser(
   "~/sweep_ckpts_r2/OF_00_apple_eat_1_SPHERE/model_7310.pt"))
-ap.add_argument("--outdir", default=os.path.expanduser("~/projects/g1-newton-interact/docs"))
+ap.add_argument("--outdir", default=os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "docs"))
 ARGS = ap.parse_args()
 
 import mjlab.tasks  # noqa: F401,E402

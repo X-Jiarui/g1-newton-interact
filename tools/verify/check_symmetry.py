@@ -10,7 +10,7 @@ resolve outside a built env, and the live config is what training actually uses.
 """
 from __future__ import annotations
 import os, sys
-sys.path.insert(0, os.path.expanduser("~/projects/g1-newton-interact/src"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "src"))
 import mjw_compat; mjw_compat.apply()
 import mjlab.tasks  # noqa: F401
 from mjlab.tasks.registry import load_env_cfg

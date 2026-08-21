@@ -13,7 +13,7 @@ from __future__ import annotations
 import json, os, re, sys
 from pathlib import Path
 
-FACTS = Path(os.path.expanduser("~/projects/g1-newton-interact/docs/data/mjlab_facts.json"))
+FACTS = Path(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "docs/data/mjlab_facts.json"))
 # Scene path is an argument so the tool works on any exported scene, not only the first one.
 XML = Path(os.path.expanduser(
   sys.argv[1] if len(sys.argv) > 1

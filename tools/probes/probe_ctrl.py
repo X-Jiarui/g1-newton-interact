@@ -20,7 +20,7 @@ from pathlib import Path
 import numpy as np, torch, yaml as _yaml
 
 CKPT = os.path.expanduser("~/sweep_ckpts_r2/OF_00_apple_eat_1_SPHERE/model_7310.pt")
-OUT = os.path.expanduser("~/projects/g1-newton-interact/docs/ctrl_probe.json")
+OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "docs/ctrl_probe.json")
 
 import mjlab.tasks  # noqa: F401
 from mjlab.envs import ManagerBasedRlEnv

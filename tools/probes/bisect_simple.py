@@ -5,7 +5,7 @@ the two models, so the deciding field is something else. With two bodies and one
 model is small enough to compare field by field.
 """
 import os, sys, numpy as np, mujoco
-sys.path.insert(0, os.path.expanduser("~/projects/g1-newton-interact/src"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "src"))
 import mjw_compat; mjw_compat.apply()
 import newton
 from newton.solvers import SolverMuJoCo

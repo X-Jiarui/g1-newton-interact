@@ -7,7 +7,7 @@ decision. So the test is direct: build the same model with gap forced to 0 and s
 says.
 """
 import os, sys, numpy as np, mujoco
-sys.path.insert(0, os.path.expanduser("~/projects/g1-newton-interact/src"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "src"))
 import mjw_compat; mjw_compat.apply()
 import newton
 from newton.solvers import SolverMuJoCo
@@ -40,7 +40,7 @@ for gap in (None, 0.0):
           f"body_margin={np.round(mm.body_margin,4).tolist()}")
 
 # and the real scene, where gap is already forced to 0
-SCENE = os.path.expanduser("~/projects/g1-newton-interact/assets/mjlab_scene/scene.xml")
+SCENE = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets/mjlab_scene/scene.xml")
 sref = mujoco.MjModel.from_xml_path(SCENE)
 b = newton.ModelBuilder(); SolverMuJoCo.register_custom_attributes(b)
 b.default_shape_cfg.gap = 0.0

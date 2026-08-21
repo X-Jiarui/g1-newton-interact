@@ -14,16 +14,16 @@ import argparse, json, os, sys
 from pathlib import Path
 import yaml as _yaml
 
-sys.path.insert(0, os.path.expanduser("~/projects/g1-newton-interact/src"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "src"))
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--checkpoint", default=os.path.expanduser(
   "~/sweep_ckpts_r2/OF_00_apple_eat_1_SPHERE/model_7310.pt"))
-ap.add_argument("--outdir", default=os.path.expanduser("~/projects/g1-newton-interact/assets/mjlab_scene"))
+ap.add_argument("--outdir", default=os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets/mjlab_scene"))
 A_ = ap.parse_args()
 
 import sys, os
-sys.path.insert(0, os.path.expanduser("~/projects/g1-newton-interact/src"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "src"))
 try:
   import mjw_compat as _c; _c.apply()
 except Exception:
@@ -60,7 +60,7 @@ m2 = mujoco.MjModel.from_xml_path(str(xml))
 f2 = facts(m2)
 f2["_source"] = dict(side="mjlab_exported_xml", xml=str(xml))
 f2["_versions"] = dict(mujoco=mujoco.__version__)
-rt = Path(os.path.expanduser("~/projects/g1-newton-interact/docs/mjlab_exported_facts.json"))
+rt = Path(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "docs/mjlab_exported_facts.json"))
 rt.write_text(json.dumps(f2, indent=1))
 print(f"wrote {rt}")
 s = f2["sizes"]

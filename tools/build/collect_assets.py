@@ -14,7 +14,7 @@ from __future__ import annotations
 import hashlib, os, shutil, sys
 from pathlib import Path
 
-XML = Path(os.path.expanduser("~/projects/g1-newton-interact/assets/mjlab_scene/scene.xml"))
+XML = Path(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets/mjlab_scene/scene.xml"))
 DEST = XML.parent / "assets"
 ROOTS = [  # priority order: mjlab's own tree wins
   Path(os.path.expanduser("~/projects/mjlab-astra-dagger-distill-20260625/src/mjlab/asset_zoo/robots/unitree_g1/xmls/assets")),

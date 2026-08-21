@@ -6,12 +6,12 @@ is created inside the importer. If the builder still exposes it afterwards, SDF 
 place; if not, the object has to be added separately from the robot.
 """
 import os, sys, numpy as np, trimesh
-sys.path.insert(0, os.path.expanduser("~/projects/g1-newton-interact/src"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "src"))
 import mjw_compat; mjw_compat.apply()
 import newton
 from newton.solvers import SolverMuJoCo
 
-XML = os.path.expanduser("~/projects/g1-newton-interact/assets/mjlab_scene/scene.xml")
+XML = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets/mjlab_scene/scene.xml")
 b = newton.ModelBuilder(); SolverMuJoCo.register_custom_attributes(b)
 b.default_shape_cfg.gap = 0.0
 b.add_mjcf(XML, collapse_fixed_joints=False, parse_mujoco_options=True)

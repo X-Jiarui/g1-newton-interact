@@ -23,15 +23,13 @@ import yaml as _yaml
 ap = argparse.ArgumentParser()
 ap.add_argument("--num-envs", type=int, default=256)
 ap.add_argument("--iterations", type=int, default=2000)
-ap.add_argument("--xml", default=os.path.expanduser(
-  "~/projects/g1-newton-interact/assets/mjlab_scene/scene.xml"))
+ap.add_argument("--xml", default=os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets/mjlab_scene/scene.xml"))
 ap.add_argument("--agent-cfg-from", default=os.path.expanduser(
   "~/sweep_ckpts_r2/OF_00_apple_eat_1_SPHERE/model_7310.pt"),
   help="checkpoint whose params/agent.yaml supplies the agent config (tracker, residual gains)")
 ap.add_argument("--resume", default=None, help="checkpoint to warm-start from")
 ap.add_argument("--run-name", default="NEWTON_NATIVE")
-ap.add_argument("--log-root", default=os.path.expanduser(
-  "~/projects/g1-newton-interact/logs/rsl_rl"))
+ap.add_argument("--log-root", default=os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "logs/rsl_rl"))
 ap.add_argument("--seed", type=int, default=42)
 ap.add_argument("--sdf-object", default=None,
                 help="STL whose SDF replaces the scene's sphere collider, e.g. the GRAB mesh for "
@@ -45,7 +43,7 @@ if A.reference_pkl:
   # Has to be set before mjlab's task modules import: the clip path is read at module level.
   os.environ["APPLE_EAT_PKL"] = A.reference_pkl
 
-sys.path.insert(0, os.path.expanduser("~/projects/g1-newton-interact/src"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "src"))
 import mjw_compat
 _p = mjw_compat.apply()
 if _p:

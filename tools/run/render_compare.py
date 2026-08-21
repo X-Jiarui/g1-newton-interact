@@ -13,8 +13,7 @@ import argparse, os
 import numpy as np, mujoco, imageio.v2 as imageio
 
 ap = argparse.ArgumentParser()
-ap.add_argument("--xml", default=os.path.expanduser(
-  "~/projects/g1-newton-interact/assets/mjlab_scene/scene.xml"))
+ap.add_argument("--xml", default=os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets/mjlab_scene/scene.xml"))
 ap.add_argument("--left", default="/tmp/mjlab_qpos.npz")
 ap.add_argument("--left-label", default="mjlab (MuJoCo Warp)")
 ap.add_argument("--right", default="/tmp/newton_qpos.npz")

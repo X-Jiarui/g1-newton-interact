@@ -15,8 +15,7 @@ import numpy as np
 import mujoco
 
 ap = argparse.ArgumentParser()
-ap.add_argument("--xml", default=os.path.expanduser(
-  "~/projects/g1-newton-interact/assets/mjlab_scene/scene.xml"))
+ap.add_argument("--xml", default=os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets/mjlab_scene/scene.xml"))
 ap.add_argument("--left", required=True, help="npz trace, drawn on the left")
 ap.add_argument("--right", default=None, help="optional npz trace, drawn on the right")
 ap.add_argument("--left-label", default="left")

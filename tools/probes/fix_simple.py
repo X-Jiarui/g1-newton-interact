@@ -14,12 +14,12 @@ are actually flagged, how large the differences are, and whether restoring the f
 mj_setConst brings nC back.
 """
 import os, sys, numpy as np, mujoco
-sys.path.insert(0, os.path.expanduser("~/projects/g1-newton-interact/src"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "src"))
 import mjw_compat; mjw_compat.apply()
 import newton, warp as wp, mujoco_warp as mjw
 from newton.solvers import SolverMuJoCo
 
-XML = os.path.expanduser("~/projects/g1-newton-interact/assets/mjlab_scene/scene.xml")
+XML = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets/mjlab_scene/scene.xml")
 ref = mujoco.MjModel.from_xml_path(XML)
 b = newton.ModelBuilder(); SolverMuJoCo.register_custom_attributes(b)
 b.default_shape_cfg.gap = 0.0

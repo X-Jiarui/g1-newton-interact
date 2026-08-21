@@ -17,7 +17,7 @@ from dataclasses import asdict
 from pathlib import Path
 import numpy as np, torch, yaml as _yaml
 
-sys.path.insert(0, os.path.expanduser("~/projects/g1-newton-interact/src"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "src"))
 import mjw_compat; mjw_compat.apply()
 
 import newton, mujoco, warp as wp
@@ -27,7 +27,7 @@ from mjlab.envs import ManagerBasedRlEnv
 from mjlab.tasks.registry import load_env_cfg, load_rl_cfg
 from mjlab.scripts.play import _apply_cfg_mapping
 
-XML = os.path.expanduser("~/projects/g1-newton-interact/assets/mjlab_scene/scene.xml")
+XML = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets/mjlab_scene/scene.xml")
 CKPT = os.path.expanduser("~/sweep_ckpts_r2/OF_00_apple_eat_1_SPHERE/model_7310.pt")
 TASK = "Mjlab-ResidualInteract-G1"
 

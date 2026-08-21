@@ -23,7 +23,7 @@ from pathlib import Path
 import numpy as np, yaml as _yaml
 
 CKPT = os.path.expanduser("~/sweep_ckpts_r2/OF_00_apple_eat_1_SPHERE/model_7310.pt")
-OUT = os.path.expanduser("~/projects/g1-newton-interact/docs/action_mapping.json")
+OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "docs/action_mapping.json")
 
 import mjlab.tasks  # noqa: F401
 from mjlab.envs import ManagerBasedRlEnv

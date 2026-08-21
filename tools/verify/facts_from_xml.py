@@ -4,7 +4,7 @@ mjlab's exported scene.xml, and the MJCF that Newton's SolverMuJoCo emits via sa
 from __future__ import annotations
 import argparse, json, os, sys
 from pathlib import Path
-sys.path.insert(0, os.path.expanduser("~/projects/g1-newton-interact/src"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "src"))
 import mujoco
 from model_facts import facts
 

@@ -23,10 +23,8 @@ import argparse, os, sys, traceback
 from pathlib import Path
 
 ap = argparse.ArgumentParser()
-ap.add_argument("--xml", default=os.path.expanduser(
-  "~/projects/g1-newton-interact/assets/mjlab_scene/scene.xml"))
-ap.add_argument("--out", default=os.path.expanduser(
-  "~/projects/g1-newton-interact/assets/newton_roundtrip.xml"))
+ap.add_argument("--xml", default=os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets/mjlab_scene/scene.xml"))
+ap.add_argument("--out", default=os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets/newton_roundtrip.xml"))
 ap.add_argument("--override-options", action="store_true",
                 help="pass mjlab's solver settings to SolverMuJoCo explicitly")
 A = ap.parse_args()
@@ -146,12 +144,12 @@ print(f"\nwrote {A.out}  ({Path(A.out).stat().st_size/1e6:.2f} MB)")
 # snapshot of the conversion rather than of what will be simulated. The fact-sheet that matters is
 # taken from the live model here.
 import sys as _sys, json as _json
-_sys.path.insert(0, os.path.expanduser("~/projects/g1-newton-interact/src"))
+_sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "src"))
 from model_facts import facts as _facts
 _lf = _facts(solver.mj_model)
 _lf["_source"] = dict(side="newton_live_model", xml=A.xml)
 _lf["_versions"] = dict(mujoco=_mj.__version__, newton=newton.__version__)
-_lp = os.path.expanduser("~/projects/g1-newton-interact/docs/newton_live_facts.json")
+_lp = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "docs/newton_live_facts.json")
 Path(_lp).write_text(_json.dumps(_lf, indent=1))
 print(f"wrote {_lp}  <-- compare against this, not the saved XML")
 

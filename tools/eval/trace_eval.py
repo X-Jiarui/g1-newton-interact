@@ -30,7 +30,7 @@ A = ap.parse_args()
 # mjlab targets mujoco_warp 3.8 and sets options 3.9.1 removed. Newton 1.5 pins 3.11, so the shim
 # goes in before any mjlab Simulation is built. It patches the new library, never mjlab: mjlab is the
 # baseline, and editing it would mean the reference and the port stopped running identical code.
-sys.path.insert(0, os.path.expanduser("~/projects/g1-newton-interact/src"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "src"))
 try:
   import mjw_compat as _mjw_compat
   _patched = _mjw_compat.apply()

@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 import newton
 
 D = os.path.expanduser("~/jiarui/scaled_grab_wuji_all_o70/meshes")
-OUT = os.path.expanduser("~/projects/g1-newton-interact/media/object_representations.png")
+OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "media/object_representations.png")
 os.makedirs(os.path.dirname(OUT), exist_ok=True)
 
 def section_polys(mesh, origin, normal):

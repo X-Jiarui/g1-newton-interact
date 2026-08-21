@@ -21,7 +21,7 @@ ap.add_argument("--still", default=None, help="also render a single PNG with Vie
 ap.add_argument("--settle-steps", type=int, default=600, help="physics steps before the still")
 A = ap.parse_args()
 
-sys.path.insert(0, os.path.expanduser("~/projects/g1-newton-interact/src"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "src"))
 import mjw_compat; mjw_compat.apply()
 import newton, warp as wp
 import newton.viewer as nv

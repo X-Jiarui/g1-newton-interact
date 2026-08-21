@@ -7,7 +7,7 @@ the function and diffs the numbers.
 from __future__ import annotations
 import os, sys
 import numpy as np, torch
-sys.path.insert(0, os.path.expanduser("~/projects/g1-newton-interact/src"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "src"))
 import mjw_compat; mjw_compat.apply()
 import mjlab.tasks  # noqa: F401
 from mjlab.envs import ManagerBasedRlEnv

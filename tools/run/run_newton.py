@@ -28,8 +28,7 @@ import numpy as np, torch, yaml as _yaml
 ap = argparse.ArgumentParser()
 ap.add_argument("--checkpoint", default=os.path.expanduser(
   "~/sweep_ckpts_r2/OF_00_apple_eat_1_SPHERE/model_7310.pt"))
-ap.add_argument("--xml", default=os.path.expanduser(
-  "~/projects/g1-newton-interact/assets/mjlab_scene/scene.xml"))
+ap.add_argument("--xml", default=os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets/mjlab_scene/scene.xml"))
 ap.add_argument("--steps", type=int, default=400, help="control steps (decimation 4 => 4 physics each)")
 ap.add_argument("--every", type=int, default=20)
 ap.add_argument("--solver-iterations", type=int, default=None,
@@ -68,7 +67,7 @@ ap.add_argument("--compare-obs", action="store_true",
                 help="also build mjlab's own observations at step 0 and diff them group by group")
 A = ap.parse_args()
 
-sys.path.insert(0, os.path.expanduser("~/projects/g1-newton-interact/src"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "src"))
 
 # ---------------------------------------------------------------- Newton side
 import newton, warp as wp, mujoco
@@ -91,7 +90,7 @@ nmodel = builder.finalize()
 # to 65"), and an overflowing solver silently DROPS constraints: the apple fell straight through the
 # table it was resting on. The warning scrolls past in a log nobody reads; the symptom looks like bad
 # physics rather than a budget.
-sys.path.insert(0, os.path.expanduser("~/projects/g1-newton-interact/src"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "src"))
 from newton_simple_fix import capture_spec
 
 # SolverMuJoCo does not keep its MjSpec, and the fix needs it: Newton writes the true centre of mass
@@ -192,7 +191,7 @@ DECIMATION = 4
 # mjlab targets mujoco_warp 3.8 and sets options 3.9.1 removed. Newton 1.5 pins 3.11, so the shim
 # goes in before any mjlab Simulation is built. It patches the new library, never mjlab: mjlab is the
 # baseline, and editing it would mean the reference and the port stopped running identical code.
-sys.path.insert(0, os.path.expanduser("~/projects/g1-newton-interact/src"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "src"))
 try:
   import mjw_compat as _mjw_compat
   _patched = _mjw_compat.apply()
