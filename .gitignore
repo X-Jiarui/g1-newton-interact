@@ -4,3 +4,4 @@ __pycache__/
 assets/mjlab_scene/assets/
 MUJOCO_LOG.TXT
 *.mp4
+assets/newton_roundtrip.xml
