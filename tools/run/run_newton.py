@@ -32,6 +32,11 @@ ap.add_argument("--xml", default=os.path.expanduser(
   "~/projects/g1-newton-interact/assets/mjlab_scene/scene.xml"))
 ap.add_argument("--steps", type=int, default=400, help="control steps (decimation 4 => 4 physics each)")
 ap.add_argument("--every", type=int, default=20)
+ap.add_argument("--native-model", action="store_true",
+                help="keep Newton's OWN reconstructed model instead of substituting a compiled "
+                     "MjModel. Newton's reconstruction mislabels body_simple on free bodies, so nC "
+                     "and the mass-matrix layout differ from MuJoCo's -- this flag exists to measure "
+                     "whether that actually costs anything behaviourally.")
 ap.add_argument("--until-ref-end", action="store_true",
                 help="run the whole reference clip instead of a fixed step count: the length is read "
                      "from the clip itself, plus the startup hold before the reference starts "
@@ -97,14 +102,33 @@ _ref_mj = mujoco.MjModel.from_xml_path(A.xml)
 # of it -- and the two were verified identical in tree topology, body/joint/actuator counts and
 # order, so this substitutes a correctly-derived model, not a different robot.
 import mujoco_warp as _mjw
-_before = (int(solver.mjw_model.nC), int(solver.mj_model.nmocap))
-solver.mj_model = _ref_mj
-solver.mjw_model = _mjw.put_model(_ref_mj)
-solver.mjw_data = _mjw.put_data(_ref_mj, mujoco.MjData(_ref_mj),
-                                nworld=1, nconmax=256, njmax=2048)
-print(f"warp model rebuilt from the compiled MJCF: nC {_before[0]} -> {int(solver.mjw_model.nC)}, "
-      f"nmocap {_before[1]} -> {int(_ref_mj.nmocap)}")
-assert int(solver.mjw_model.nC) == int(_ref_mj.nC)
+if A.native_model:
+  # Newton's own model, with only the conversion defects that have to be repaired for the physics to
+  # be right at all: free-joint damping is dropped, and plane geoms come through resized.
+  for _h in (solver.mj_model, solver.mjw_model):
+    _dd = getattr(_h, "dof_damping", None)
+    if _dd is None:
+      continue
+    if hasattr(_dd, "assign"):
+      _dd.assign(_ref_mj.dof_damping.astype(_dd.numpy().dtype).reshape(_dd.numpy().shape))
+    else:
+      _dd[:] = _ref_mj.dof_damping
+  _planes = [i for i in range(solver.mj_model.ngeom) if int(solver.mj_model.geom_type[i]) == 0]
+  if _planes:
+    _src = [j for j in range(_ref_mj.ngeom) if int(_ref_mj.geom_type[j]) == 0][0]
+    for i in _planes:
+      solver.mj_model.geom_size[i] = _ref_mj.geom_size[_src]
+  print(f"NATIVE Newton model kept: nC={int(solver.mjw_model.nC)} "
+        f"(compiled MjModel would give {int(_ref_mj.nC)}), nmocap={int(solver.mj_model.nmocap)}")
+else:
+  _before = (int(solver.mjw_model.nC), int(solver.mj_model.nmocap))
+  solver.mj_model = _ref_mj
+  solver.mjw_model = _mjw.put_model(_ref_mj)
+  solver.mjw_data = _mjw.put_data(_ref_mj, mujoco.MjData(_ref_mj),
+                                  nworld=1, nconmax=256, njmax=2048)
+  print(f"warp model rebuilt from the compiled MJCF: nC {_before[0]} -> {int(solver.mjw_model.nC)}, "
+        f"nmocap {_before[1]} -> {int(_ref_mj.nmocap)}")
+  assert int(solver.mjw_model.nC) == int(_ref_mj.nC)
 
 print(f"newton model: nq={solver.mj_model.nq} nv={solver.mj_model.nv} nu={solver.mj_model.nu} "
       f"ngeom={solver.mj_model.ngeom}")
@@ -162,7 +186,8 @@ print("policy loaded (mjlab env is for construction only and is never stepped)")
 from newton_bridge import NewtonEnv
 
 nenv = NewtonEnv(solver.mj_model, solver.mjw_data, num_envs=1, device="cuda:0",
-                 control=control, rename_from=None, physics_dt=DT, decimation=DECIMATION,
+                 control=control, rename_from=(_ref_mj if A.native_model else None),
+                 physics_dt=DT, decimation=DECIMATION,
                  solver=solver)
 print(f"bridge: robot joints={len(nenv.scene['robot'].joint_names)} "
       f"bodies={len(nenv.scene['robot'].body_names)} entities={sorted(nenv.scene)}")

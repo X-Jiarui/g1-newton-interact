@@ -82,6 +82,20 @@ steps.
 The difficulty is that this is invisible to model comparison: `nM`, topology and every per-body field
 match. It only shows up in `Data.M`, which is `(1, nC)` — different lengths on the two sides.
 
+### Behavioural cost
+
+Running the same policy with everything else held fixed, changing only whether the warp model comes
+from Newton's reconstruction or from a compiled `MjModel`:
+
+| | native Newton model (`nC=1102`) | compiled `MjModel` (`nC=1087`) | reference (mjlab) |
+|---|---|---|---|
+| contact established | yes, frame ~85 | yes, frame ~85 | yes, frame ~85 |
+| peak lift | **16.9 cm, then dropped** | 50.6 cm, held | 49.7–50.1 cm, held |
+
+The grasp forms either way; with the reconstructed model the object slips out at about 17 cm. The
+mislabelled body is the grasped object itself, so its mass matrix — the one the contact solve acts
+through — is the one carrying the wrong layout.
+
 ## Note on workarounds
 
 Setting `body_simple` / `dof_simplenum` on the reconstructed `MjModel` and calling `put_model` again
