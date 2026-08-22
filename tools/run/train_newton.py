@@ -26,6 +26,8 @@ ap.add_argument("--profile-step", type=int, default=0,
                 help="time each part of one control step over N steps and exit; says whether the cost is in warp kernels or in the torch-side managers")
 ap.add_argument("--state-digest", type=int, default=0,
                 help="step N times with zero residual and print checksums of qpos, qvel and reward; run twice with and without --cuda-graph to prove the graph changes no number")
+ap.add_argument("--effortless-action", action="store_true",
+                help="drop the PD torque law from the action term; it is discarded on this backend and costs a host sync per substep")
 ap.add_argument("--cuda-graph", action="store_true",
                 help="replay the physics substep from a captured CUDA graph")
 ap.add_argument("--sensor-probe", type=int, default=0,
@@ -104,7 +106,8 @@ print(f"building {A.num_envs} Newton worlds ...")
 env = NewtonVecEnv(cfg, A.xml, num_envs=A.num_envs, device="cuda:0",
                    sdf_object_stl=A.sdf_object, sdf_resolution=A.sdf_resolution,
                    viser_port=A.viser_port, render_every=A.render_every,
-                   cuda_graph=A.cuda_graph)
+                   cuda_graph=A.cuda_graph,
+                   effortless_action=A.effortless_action)
 
 if A.state_digest:
   import torch as _t, warp as _wp

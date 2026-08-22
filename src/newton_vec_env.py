@@ -35,7 +35,7 @@ class NewtonVecEnv:
                sdf_object_stl: str | None = None, sdf_resolution: int = 128,
                sdf_hydroelastic: bool = False, viser_port: int | None = None,
                render_every: int = 4, solver_kwargs: dict | None = None,
-               cuda_graph: bool = False) -> None:
+               cuda_graph: bool = False, effortless_action: bool = False) -> None:
     import mujoco
     import newton
     from newton.solvers import SolverMuJoCo
@@ -155,7 +155,15 @@ class NewtonVecEnv:
 
     sonic_cfg = (cfg.actions.get("sonic_action") if isinstance(cfg.actions, dict)
                  else getattr(cfg.actions, "sonic_action"))
-    self.action_term = amdp.Sonic53Action(sonic_cfg, self._env)
+    # The torque law inside Sonic53Action.apply_actions is discarded on this backend --
+    # set_joint_effort_target is a verified no-op here -- so it can be cut out along with the host
+    # synchronisation it performs on every substep. See src/newton_action.py.
+    _action_cls = amdp.Sonic53Action
+    if effortless_action:
+      from newton_action import make_effortless
+      _action_cls = make_effortless(amdp.Sonic53Action)
+      print("[newton-env] action term: torque law removed (it reaches no actuator here)")
+    self.action_term = _action_cls(sonic_cfg, self._env)
     self.action_manager = self._env.bind_action_manager(
       self.action_term.action_dim, {"sonic_action": self.action_term})
     self.action_manager.total_action_dim = self.action_term.action_dim
