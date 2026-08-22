@@ -69,6 +69,31 @@ if str(getattr(agent_cfg, "base_tracker_kind", "")).strip().lower() == "astra_on
   from mjlab.tasks.residual_interact.env_cfgs import install_astra_body_pd, install_object_variant_sizes
   install_astra_body_pd(u); install_object_variant_sizes(u)
 
+if os.environ.get("PEN_PROBE"):
+  import numpy as _np, torch as _t, warp as _wp, mujoco as _mj
+  _u = env.unwrapped
+  _obj = _u.scene["apple"]
+  _m = _u.sim.mj_model
+  # mjlab's object is the 4cm sphere placeholder, so its lowest point is centre minus the radius
+  _rad = None
+  for _g in range(_m.ngeom):
+    _n = _mj.mj_id2name(_m, _mj.mjtObj.mjOBJ_GEOM, _g) or ""
+    if _n.endswith("apple_geom"):
+      _rad = float(_m.geom_size[_g][0]); break
+  env.reset()
+  _act = _t.zeros(_u.num_envs, _u.action_manager.total_action_dim, device="cuda:0")
+  _mp = _wp.to_torch(_u.sim.wp_data.mocap_pos)[0].detach().cpu().numpy()
+  _top = float(_mp[-1][2]) + 0.02
+  print("PEN mjlab sphere radius=%.4f table_top=%.5f" % (_rad, _top))
+  _done = 0
+  for _step in (0, 5, 20, 60, 150):
+    while _done < _step:
+      env.step(_act); _done += 1
+    _z = float(_obj.data.root_link_pos_w[0, 2])
+    print("PEN step=%-4d obj_z=%.5f obj_lowest=%.5f penetration=%+.2f mm"
+          % (_step, _z, _z - _rad, 1000.0 * (_top - (_z - _rad))))
+  raise SystemExit(0)
+
 if A.sensor_probe:
   import numpy as _np, torch as _t, warp as _wp
   _u = env.unwrapped if hasattr(env, "unwrapped") else env

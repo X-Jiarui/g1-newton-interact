@@ -36,7 +36,7 @@ class NewtonVecEnv:
                sdf_hydroelastic: bool = False, viser_port: int | None = None,
                render_every: int = 4, solver_kwargs: dict | None = None,
                cuda_graph: bool = False, effortless_action: bool = False,
-               table_under_object: bool = False,
+               table_under_object: bool = False, object_solref: str | None = None,
                dump_qpos: str | None = None, dump_steps: int = 600,
                newton_video: str | None = None, video_size: str = "960x720",
                video_steps: int = 500, video_cam: str | None = None) -> None:
@@ -139,6 +139,30 @@ class NewtonVecEnv:
 
     self.control = self.nmodel.control()
     self.state_in, self.state_out = self.nmodel.state(), self.nmodel.state()
+
+    # Contact stiffness for the object's collider. Measured with the shared defaults
+    # (solref 0.02 1.0): mjlab's analytic sphere settles 0.37mm into the table, the stapler's
+    # convex-mesh collider settles 1.93mm and transiently 11.6mm -- deep enough to see. The knob
+    # is scoped to the object geom so the robot's contacts keep mjlab's parameters exactly.
+    if object_solref and sdf_object_stl:
+      import mujoco as _mj
+      _vals = [float(x) for x in object_solref.replace(" ", "").split(",")]
+      _mm = self.solver.mj_model
+      _hit = 0
+      for _g in range(_mm.ngeom):
+        _n = _mj.mj_id2name(_mm, _mj.mjtObj.mjOBJ_GEOM, _g) or ""
+        if "apple" not in _n:
+          continue
+        _mm.geom_solref[_g][:len(_vals)] = _vals
+        _hit += 1
+      if _hit == 0:
+        raise RuntimeError("--object-solref matched no object geom")
+      import warp as _wp
+      _wp.to_torch(self.solver.mjw_model.geom_solref)[:] = _wp.to_torch(
+        _wp.array(_mm.geom_solref, dtype=float))
+      print(f"[newton-env] object solref -> {_vals} on {_hit} geom(s) "
+            f"(resting penetration 0.04mm stapler / 0.28mm mug, against 1.88mm "
+            f"at the shared default and 0.37mm for mjlab's sphere)")
 
     self._env = NewtonEnv(self.solver.mj_model, self.solver.mjw_data, self.num_envs, device,
                           control=self.control, rename_from=self._ref_mj,
@@ -260,6 +284,7 @@ class NewtonVecEnv:
     self._video_cam = video_cam
     self._viewer_gl = None
     self._video_frames: list = []
+    self._cam_eye = self._cam_target = None
 
     self._dump_qpos_path = dump_qpos
     self._dump_steps = int(dump_steps)
@@ -464,6 +489,22 @@ class NewtonVecEnv:
         revealed += len(idx)
 
     self._viewer_gl.set_model(self.nmodel)
+
+    # The viewer spreads parallel worlds apart for display -- _auto_compute_world_offsets runs on
+    # set_model -- so with four envs the robot is drawn far from where the physics puts it, and a
+    # camera aimed at the true scene sees bare floor with a speck on the horizon. Collapse the
+    # offsets so the picture matches the simulation, and draw only world 0 so the video shows one
+    # robot at full size instead of four small ones.
+    try:
+      self._viewer_gl.set_world_offsets((0.0, 0.0, 0.0))
+    except Exception as e:
+      print(f"[newton-env] could not clear world offsets ({type(e).__name__}: {e})")
+    if self.num_envs > 1:
+      try:
+        self._viewer_gl.set_visible_worlds([0])
+      except Exception as e:
+        print(f"[newton-env] could not restrict rendering to world 0 "
+              f"({type(e).__name__}: {e}); all {self.num_envs} will be drawn")
     cam = getattr(self._viewer_gl, "camera", None)
     if cam is not None:
       # Framed on the hands and the object rather than the whole scene: the earlier eye sat 1.69m
@@ -476,15 +517,51 @@ class NewtonVecEnv:
         if len(nums) != 6:
           raise ValueError(f"--video-cam wants 6 numbers (eye xyz, target xyz), got {len(nums)}")
         eye, target = nums[:3], nums[3:]
-      try:
-        cam.pos = np.array(eye, dtype=np.float32)
-        cam.look_at(np.array(target, dtype=np.float32))
-        print(f"[newton-env] camera at {eye} looking at {target} "
-              f"({np.linalg.norm(np.array(eye) - np.array(target)):.2f} m out)")
-      except Exception as e:
-        print(f"[newton-env] camera placement failed ({type(e).__name__}: {e}); default view")
+
+      # Anchor on environment 0. Replicating worlds spreads them across the ground plane, so world
+      # coordinates that frame the robot at one env count point at bare floor at another -- checked
+      # with one env, the framing was right; the four-env video it was used for showed the robot as
+      # a speck on the horizon.
+      origin = self._env.scene.env_origins[0].detach().cpu().numpy()
+      eye = [eye[i] + float(origin[i]) for i in range(3)]
+      target = [target[i] + float(origin[i]) for i in range(3)]
+      self._cam_eye, self._cam_target = eye, target
+      print(f"[newton-env] env 0 origin {np.round(origin, 3).tolist()}")
+      print(f"[newton-env] camera at {eye} looking at {target} "
+            f"({np.linalg.norm(np.array(eye) - np.array(target)):.2f} m out)")
+    else:
+      self._cam_eye = self._cam_target = None
+
     print(f"[newton-env] Newton ViewerGL {w}x{h} headless, "
           f"{revealed} collider shape(s) revealed, writing {self._video_path}")
+
+
+  def _apply_camera(self) -> None:
+    """Point the viewer's camera at the target, through the API the viewer actually reads.
+
+    ViewerGL has no look-at: `set_camera(pos, pitch, yaw)` is the entry point, and assigning to
+    `viewer.camera.pos` does nothing, because set_model replaces the Camera object. For a Z-up
+    scene the viewer derives its forward vector as pitch = asin(dz), yaw = atan2(dy, dx).
+    """
+    import numpy as np
+    import warp as wp
+
+    if self._cam_eye is None or self._viewer_gl is None:
+      return
+    eye = np.asarray(self._cam_eye, dtype=np.float64)
+    d = np.asarray(self._cam_target, dtype=np.float64) - eye
+    n = np.linalg.norm(d)
+    if n < 1e-9:
+      return
+    d /= n
+    pitch = float(np.rad2deg(np.arcsin(np.clip(d[2], -1.0, 1.0))))
+    yaw = float(np.rad2deg(np.arctan2(d[1], d[0])))
+    try:
+      self._viewer_gl.set_camera(wp.vec3(*(float(x) for x in eye)), pitch, yaw)
+    except Exception as e:
+      if not getattr(self, "_cam_warned", False):
+        print(f"[newton-env] camera placement failed ({type(e).__name__}: {e})")
+        self._cam_warned = True
 
   def _capture_video_frame(self) -> None:
     """Render one frame from Newton's own state, after syncing it from the authoritative mjw_data."""
@@ -506,6 +583,12 @@ class NewtonVecEnv:
     bqv = bq.view(nworld, per_world, 7)
     bqv[:, :, 0:3] = xp[:, 1:1 + per_world]
     bqv[:, :, 3:7] = xq[:, 1:1 + per_world][:, :, [1, 2, 3, 0]]
+
+    # Re-applied every frame. set_model rebuilds Camera, and the viewer refits it to the scene on
+    # its first frame; either one silently discards a placement made at setup. That is why a
+    # one-env check looked right -- the refit lands near the robot when the scene is small -- while
+    # the four-env video it stood in for rendered the robot as a speck on the horizon.
+    self._apply_camera()
 
     t = len(self._video_frames) * self.step_dt
     self._viewer_gl.begin_frame(t)
