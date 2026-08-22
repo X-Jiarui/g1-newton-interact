@@ -1,4 +1,4 @@
-# The ten defects, and the measurement that found each
+# The twelve defects, and the measurement that found each
 
 Every one of these is silent. None raised an exception, none printed a warning that anybody would
 read as an error, and the model comparisons kept saying the two simulators matched. What they
@@ -209,6 +209,63 @@ in mjlab, rising to 3.09) is a usable early signal that contact sensing is live.
 run, and both training entries take `--sensor-probe N`, which steps N times with zero residual and
 reports how many sensordata slots ever read nonzero. An `nsensor=0` regression is now loud. It
 caught one within the hour: a bad variable name in this very fix.
+
+## 11. Every reward term matched, and the total was 49x too small
+
+`RewardManager` was constructed as `RewardManager(cfg.rewards, env)`, which takes the constructor
+default `scale_by_dt=True`. mjlab passes it explicitly -- `manager_based_rl_env.py:330` reads
+`scale_by_dt=self.cfg.scale_rewards_by_dt` -- and this task sets that flag `False`. So every Newton
+reward was multiplied by an extra `dt = 0.02`.
+
+**Why it survived a term-by-term parity check.** A uniform scale is invisible term by term. The
+measurement that caught it evaluated each active term on both backends at the same state *and*
+printed what `compute()` returned:
+
+| term | mjlab | Newton |
+|---|---|---|
+| `tracking` | +0.001077 | +0.001163 |
+| `left_wrist_tracking` | +0.001197 | +0.001101 |
+| `right_wrist_tracking` | +0.000131 | +0.000232 |
+| `omnigrasp_style` | +0.012214 | +0.012218 |
+| **`compute()` returned** | **0.726881** | **0.014713** |
+
+Four significant figures of agreement on every term, and a 49.7x gap in the total -- and 49.7 is
+1/0.02. The ratio named the bug.
+
+## 12. `_reset_idx` called no manager's `reset()`
+
+mjlab's reset runs `reset(env_ids)` on every manager, in an order its source marks as sensitive.
+The Newton env ran none of them. The visible symptom was a missing `Episode_Reward/*` log group,
+which is the least of it:
+
+- `reward_manager.reset` zeroes the per-episode sums,
+- `metrics_manager.reset` clears episodic accumulators such as `lift_success`,
+- `action_manager.reset` drops the previous action that the two action-history observation groups
+  are built from -- so a new episode began by observing the end of the old one.
+
+All of that leaked across every episode boundary of every run. The bridge's `_ActionManagerView`
+gained a matching `reset()`; the task has no curriculum or command manager (both cfg dicts are
+empty), so mjlab's calls to those have no counterpart.
+
+**Parity after 11 and 12**, iteration 40, same clip, 128 envs, same analytic-sphere object:
+
+| | mjlab | Newton |
+|---|---|---|
+| `Train/mean_reward` | 53.05 | 49.64 |
+| episode length | 98.90 | 98.93 |
+| `body_tracking` | 0.5983 | 0.6055 |
+| min tip distance | 0.2671 | 0.2599 |
+| `object_tracking_raw` | 0.1401 | 0.1445 |
+
+**A correction.** Before these two fixes Newton read `mean_reward` 0.73 against mjlab's 53.05, and
+its fingertips sat 15cm further from the object. That gap was attributed here to the object
+representation -- Newton colliding against the exact mesh where mjlab uses a 4cm sphere. It was
+not: the sphere-vs-mesh runs differ from each other by almost nothing, and the whole gap closed
+when the reward scale and the resets were fixed.
+
+**What generalises.** Both defects are the same shape as defect 10: a wrong value that is still a
+*valid* value. Nothing raises. The guard that works is not a stricter type -- it is a control run
+of the thing you are porting from, compared on the aggregate rather than the parts.
 
 ## Not a defect: `ls_parallel`
 
