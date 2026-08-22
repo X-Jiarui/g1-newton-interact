@@ -198,7 +198,13 @@ class NewtonVecEnv:
     except Exception as e:
       print(f"[newton-env] MetricsManager unavailable ({type(e).__name__}: {str(e)[:80]})")
 
-    self.reward_manager = RewardManager(cfg.rewards, self._env)
+    # scale_by_dt must come from the config, not the constructor default. mjlab passes
+    # cfg.scale_rewards_by_dt here (manager_based_rl_env.py:330) and this task sets it
+    # False; taking the default of True multiplies every reward term by dt=0.02, making
+    # the whole reward signal 50x smaller than mjlab's while every individual term still
+    # measures identical -- which is why this survived a term-by-term parity check.
+    self.reward_manager = RewardManager(cfg.rewards, self._env,
+                                        scale_by_dt=cfg.scale_rewards_by_dt)
     self.termination_manager = TerminationManager(cfg.terminations, self._env)
     self.event_manager = EventManager(cfg.events, self._env)
 
@@ -263,6 +269,23 @@ class NewtonVecEnv:
       return
     self.event_manager.apply(mode="reset", env_ids=env_ids,
                              global_env_step_count=self.common_step_counter * self.num_envs)
+
+    # Every manager's reset() has to run, in mjlab's order (it marks the sequence order-sensitive).
+    # Skipping them is not merely a logging gap: reward_manager.reset zeroes the per-episode sums,
+    # metrics_manager.reset clears episodic accumulators like lift_success, and action_manager.reset
+    # drops the previous action the smoothness terms difference against -- so without these, state
+    # leaks across episode boundaries for the whole run. The task has no curriculum or command
+    # manager (both cfg dicts are empty), so mjlab's calls to those have no counterpart here.
+    log = self.extras.setdefault("log", {})
+    for mgr in (self.observation_manager, self.action_manager, self.reward_manager,
+                self.metrics_manager, self.event_manager, self.termination_manager):
+      fn = getattr(mgr, "reset", None)
+      if fn is None:      # the action manager here is a bridge view, not mjlab's ActionManager
+        continue
+      info = fn(env_ids)
+      if info:
+        log.update(info)
+
     self._env.episode_length_buf[env_ids] = 0
     # qpos was written; xpos/xquat are stale until forward kinematics runs, and the observation
     # terms read the derived fields rather than qpos.

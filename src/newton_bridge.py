@@ -391,6 +391,20 @@ class _ActionManagerView:
     self.prev_action = torch.zeros(num_envs, dim, device=device)
     self._terms = terms or {}
 
+  def reset(self, env_ids=None) -> dict:
+    """Match mjlab's ActionManager.reset: clear the action history for the envs being reset.
+
+    Without this the previous action survives an episode boundary, and the two observation groups
+    built from it start the new episode describing the end of the old one.
+    """
+    if env_ids is None:
+      self.action.zero_()
+      self.prev_action.zero_()
+    else:
+      self.action[env_ids] = 0.0
+      self.prev_action[env_ids] = 0.0
+    return {}
+
   def get_term(self, name: str):
     try:
       return self._terms[name]
