@@ -39,7 +39,7 @@ class NewtonVecEnv:
                table_under_object: bool = False,
                dump_qpos: str | None = None, dump_steps: int = 600,
                newton_video: str | None = None, video_size: str = "960x720",
-               video_steps: int = 500) -> None:
+               video_steps: int = 500, video_cam: str | None = None) -> None:
     import mujoco
     import newton
     from newton.solvers import SolverMuJoCo
@@ -257,6 +257,7 @@ class NewtonVecEnv:
     self._video_path = newton_video
     self._video_steps = int(video_steps)
     self._video_size = video_size
+    self._video_cam = video_cam
     self._viewer_gl = None
     self._video_frames: list = []
 
@@ -465,9 +466,21 @@ class NewtonVecEnv:
     self._viewer_gl.set_model(self.nmodel)
     cam = getattr(self._viewer_gl, "camera", None)
     if cam is not None:
+      # Framed on the hands and the object rather than the whole scene: the earlier eye sat 1.69m
+      # back, which fits the robot and the table in but leaves the grasp itself a few pixels wide.
+      # This sits 1.07m out in three-quarter view: the whole robot reads large, and the object on the
+      # table stays in frame with both hands. Override with --video-cam "ex,ey,ez,tx,ty,tz".
+      eye, target = [1.55, -0.55, 1.05], [0.60, -0.10, 0.84]
+      if self._video_cam:
+        nums = [float(x) for x in self._video_cam.replace(" ", "").split(",")]
+        if len(nums) != 6:
+          raise ValueError(f"--video-cam wants 6 numbers (eye xyz, target xyz), got {len(nums)}")
+        eye, target = nums[:3], nums[3:]
       try:
-        cam.pos = np.array([1.75, -1.35, 1.40], dtype=np.float32)
-        cam.look_at(np.array([0.80, -0.06, 0.86], dtype=np.float32))
+        cam.pos = np.array(eye, dtype=np.float32)
+        cam.look_at(np.array(target, dtype=np.float32))
+        print(f"[newton-env] camera at {eye} looking at {target} "
+              f"({np.linalg.norm(np.array(eye) - np.array(target)):.2f} m out)")
       except Exception as e:
         print(f"[newton-env] camera placement failed ({type(e).__name__}: {e}); default view")
     print(f"[newton-env] Newton ViewerGL {w}x{h} headless, "

@@ -35,6 +35,8 @@ ap.add_argument("--newton-video", default=None,
                      "model the physics holds -- real object mesh, real table")
 ap.add_argument("--video-size", default="960x720")
 ap.add_argument("--video-steps", type=int, default=500)
+ap.add_argument("--video-cam", default=None,
+                help="camera as \"ex,ey,ez,tx,ty,tz\"; default frames the hands and the object from 0.9m")
 ap.add_argument("--dump-qpos", default=None,
                 help="npz of env-0 qpos and mocap per control step, for rendering "
                      "a video of the run with tools/run/render_traj.py")
@@ -123,7 +125,8 @@ env = NewtonVecEnv(cfg, A.xml, num_envs=A.num_envs, device="cuda:0",
                    table_under_object=A.table_under_object,
                    dump_qpos=A.dump_qpos, dump_steps=A.dump_steps,
                    newton_video=A.newton_video, video_size=A.video_size,
-                   video_steps=A.video_steps)
+                   video_steps=A.video_steps, video_cam=A.video_cam)
+
 
 if A.state_digest:
   import torch as _t, warp as _wp
