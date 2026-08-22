@@ -419,6 +419,29 @@ class _ActionManagerView:
 class NewtonEnv:
   """The `env` mjlab's builders and action term expect, backed by Newton."""
 
+  # The residual runner publishes its per-step bookkeeping with `setattr(self.env.unwrapped, ...)`,
+  # which in this port is NewtonVecEnv -- while every observation, reward and metric term is handed
+  # this bridge instead. mjlab has one env object and the two coincide; here they do not, so 27
+  # `_residual_*` attributes were written to one object and read from the other. The readers fall
+  # back to zeros rather than raising, so the policy trained blind to its own previous action and
+  # every residual metric reported 0.0000 while mjlab's climbed.
+  #
+  # Delegation is limited to that documented prefix: any other unknown attribute still raises,
+  # which is what caught this in the first place.
+  def __getattr__(self, name: str):
+    if name.startswith("_residual_"):
+      owner = self.__dict__.get("_owner")
+      if owner is not None:
+        try:
+          return getattr(owner, name)
+        except AttributeError:
+          pass
+    raise AttributeError(
+      f"{type(self).__name__} has no attribute {name!r}"
+      + ("" if name.startswith("_residual_") else
+         "; if a manager needs it, map it explicitly rather than defaulting it to zero"))
+
+
   def __init__(self, model, data, num_envs: int, device: str = "cuda:0",
                object_entity: str = "apple", control=None, rename_from=None,
                physics_dt: float = 0.005, decimation: int = 4, solver=None) -> None:

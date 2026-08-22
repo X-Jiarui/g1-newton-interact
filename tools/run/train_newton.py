@@ -28,6 +28,18 @@ ap.add_argument("--state-digest", type=int, default=0,
                 help="step N times with zero residual and print checksums of qpos, qvel and reward; run twice with and without --cuda-graph to prove the graph changes no number")
 ap.add_argument("--effortless-action", action="store_true",
                 help="drop the PD torque law from the action term; it is discarded on this backend and costs a host sync per substep")
+ap.add_argument("--table-under-object", action="store_true",
+                help="move the mocap table so the object's true collider rests where the reference places it, instead of letting the object settle away from it")
+ap.add_argument("--newton-video", default=None,
+                help="record an mp4 with Newton's own renderer, which draws the "
+                     "model the physics holds -- real object mesh, real table")
+ap.add_argument("--video-size", default="960x720")
+ap.add_argument("--video-steps", type=int, default=500)
+ap.add_argument("--dump-qpos", default=None,
+                help="npz of env-0 qpos and mocap per control step, for rendering "
+                     "a video of the run with tools/run/render_traj.py")
+ap.add_argument("--dump-steps", type=int, default=600,
+                help="how many control steps --dump-qpos records")
 ap.add_argument("--cuda-graph", action="store_true",
                 help="replay the physics substep from a captured CUDA graph")
 ap.add_argument("--sensor-probe", type=int, default=0,
@@ -107,7 +119,11 @@ env = NewtonVecEnv(cfg, A.xml, num_envs=A.num_envs, device="cuda:0",
                    sdf_object_stl=A.sdf_object, sdf_resolution=A.sdf_resolution,
                    viser_port=A.viser_port, render_every=A.render_every,
                    cuda_graph=A.cuda_graph,
-                   effortless_action=A.effortless_action)
+                   effortless_action=A.effortless_action,
+                   table_under_object=A.table_under_object,
+                   dump_qpos=A.dump_qpos, dump_steps=A.dump_steps,
+                   newton_video=A.newton_video, video_size=A.video_size,
+                   video_steps=A.video_steps)
 
 if A.state_digest:
   import torch as _t, warp as _wp
@@ -205,4 +221,5 @@ if A.resume:
   print(f"warm-started from {A.resume}")
 
 print(f"training for {A.iterations} iterations -> {log_dir}")
+
 runner.learn(num_learning_iterations=A.iterations, init_at_random_ep_len=True)

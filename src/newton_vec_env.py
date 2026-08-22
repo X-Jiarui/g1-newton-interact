@@ -35,7 +35,11 @@ class NewtonVecEnv:
                sdf_object_stl: str | None = None, sdf_resolution: int = 128,
                sdf_hydroelastic: bool = False, viser_port: int | None = None,
                render_every: int = 4, solver_kwargs: dict | None = None,
-               cuda_graph: bool = False, effortless_action: bool = False) -> None:
+               cuda_graph: bool = False, effortless_action: bool = False,
+               table_under_object: bool = False,
+               dump_qpos: str | None = None, dump_steps: int = 600,
+               newton_video: str | None = None, video_size: str = "960x720",
+               video_steps: int = 500) -> None:
     import mujoco
     import newton
     from newton.solvers import SolverMuJoCo
@@ -163,6 +167,21 @@ class NewtonVecEnv:
       from newton_action import make_effortless
       _action_cls = make_effortless(amdp.Sonic53Action)
       print("[newton-env] action term: torque law removed (it reaches no actuator here)")
+    # Must be installed before the action term first writes a table pose. See src/newton_table.py:
+    # the scene was authored around a 4cm sphere, so a real collider does not rest where the
+    # reference puts the object unless the table moves to meet it.
+    if table_under_object:
+      if not sdf_object_stl:
+        raise RuntimeError("--table-under-object needs the object mesh (--sdf-object) to know "
+                           "where the real collider bottom is")
+      from newton_table import install as _install_table
+      _ref_pkl = os.environ.get("APPLE_EAT_PKL")
+      if not _ref_pkl:
+        raise RuntimeError("--table-under-object needs APPLE_EAT_PKL: the object's resting height "
+                           "is read from the reference clip, not guessed")
+      _install_table(self.solver.mj_model, sdf_object_stl, _ref_pkl,
+                     z_offset=float(os.environ.get("APPLE_SCENE_Z_OFFSET", 0.0)))
+
     self.action_term = _action_cls(sonic_cfg, self._env)
     self.action_manager = self._env.bind_action_manager(
       self.action_term.action_dim, {"sonic_action": self.action_term})
@@ -233,9 +252,26 @@ class NewtonVecEnv:
     # Two graphs, not one: the substep swaps state_in/state_out, and a captured graph bakes in the
     # buffer pointers it was recorded with. Decimation is even, so alternating A->B and B->A
     # returns the buffers to their original orientation at the end of each control step.
+    # Optional recording of env 0 for video. The table is a mocap body, so its pose lives outside
+    # qpos; without it the renderer draws the table at the origin and the object appears to float.
+    self._video_path = newton_video
+    self._video_steps = int(video_steps)
+    self._video_size = video_size
+    self._viewer_gl = None
+    self._video_frames: list = []
+
+    self._dump_qpos_path = dump_qpos
+    self._dump_steps = int(dump_steps)
+    self._qpos_log: list = []
+    self._mocap_log: list = []
+
     self._use_cuda_graph = bool(cuda_graph)
     self._graphs: list = []
     self._graph_warmup = 4      # uncaptured substeps per parity before capturing
+    # The bridge reads the runner's `_residual_*` bookkeeping through this back-reference; the
+    # runner writes it on this object, not on the bridge the MDP terms see.
+    self._env._owner = self
+
     self.episode_length_buf = self._env.episode_length_buf
     self._all = torch.arange(self.num_envs, dtype=torch.long, device=device)
 
@@ -357,6 +393,129 @@ class NewtonVecEnv:
 
     wp.capture_launch(self._graphs[parity])
 
+
+  def _record_frame(self) -> None:
+    """Append env 0's qpos and mocap pose, and write the npz once enough frames are collected."""
+    import warp as wp
+    import numpy as np
+
+    d = self.solver.mjw_data
+    self._qpos_log.append(wp.to_torch(d.qpos)[0].detach().cpu().numpy().copy())
+    self._mocap_log.append((wp.to_torch(d.mocap_pos)[0].detach().cpu().numpy().copy(),
+                            wp.to_torch(d.mocap_quat)[0].detach().cpu().numpy().copy()))
+    if len(self._qpos_log) < self._dump_steps:
+      return
+    # Mocap body names travel with the poses. The renderer replays into a different model whose
+    # mocap bodies need not be in the same order -- index 2 here is the table, and writing it into
+    # index 0 there put the table under the robot's feet in the first video made this way.
+    import mujoco as _mj
+    m = self.solver.mj_model
+    names = [_mj.mj_id2name(m, _mj.mjtObj.mjOBJ_BODY, b) or ""
+             for b in range(m.nbody) if m.body_mocapid[b] >= 0]
+    order = [b for b in range(m.nbody) if m.body_mocapid[b] >= 0]
+    names = [x for _, x in sorted(zip([int(m.body_mocapid[b]) for b in order], names))]
+    np.savez_compressed(self._dump_qpos_path,
+                        qpos=np.stack(self._qpos_log),
+                        mocap_pos=np.stack([q[0] for q in self._mocap_log]),
+                        mocap_quat=np.stack([q[1] for q in self._mocap_log]),
+                        mocap_names=np.array(names))
+    print(f"[newton-env] wrote {self._dump_qpos_path} "
+          f"({len(self._qpos_log)} frames of env 0 for rendering)")
+
+
+  def _setup_newton_viewer(self) -> None:
+    """Newton's own offscreen renderer, drawing the scene the physics actually holds.
+
+    Replaying qpos through mjlab's visual model instead -- which is what the first videos did --
+    draws the object as the 4cm placeholder sphere the scene authors, because the real mesh only
+    ever reached the collider. It also has to re-apply the mocap table by hand, and getting that
+    mapping wrong put the table under the robot's feet. Rendering Newton's own model has neither
+    failure mode: what is drawn is what was simulated.
+    """
+    import numpy as np
+    import newton
+    import torch
+    import warp as wp
+
+    # pyglet creates a shadow window even when the viewer is asked for headless, which fails on a
+    # box with no display. Its headless path uses EGL and must be selected before pyglet is imported.
+    os.environ.setdefault("PYGLET_HEADLESS", "1")
+    import pyglet as _pyglet
+    _pyglet.options["headless"] = True
+    import newton.viewer as _nv
+
+    w, h = (int(x) for x in self._video_size.lower().split("x"))
+    self._viewer_gl = _nv.ViewerGL(width=w, height=h, headless=True)
+
+    # Newton draws visual shapes, not colliders. mjlab's robot carries visual meshes, but the object
+    # and the table are each a single geom that is both visual and collidable, and arrives here
+    # marked collide-but-not-visible -- a video of a robot grasping thin air over an invisible
+    # table. Reveal colliders only on bodies that have no visible shape at all, so the robot is not
+    # drawn twice.
+    flags = wp.to_torch(self.nmodel.shape_flags)
+    sbody = wp.to_torch(self.nmodel.shape_body)
+    VIS = int(newton.ShapeFlags.VISIBLE)
+    revealed = 0
+    for bid in torch.unique(sbody):
+      idx = (sbody == bid).nonzero(as_tuple=True)[0]
+      if int((flags[idx] & VIS).sum()) == 0:
+        flags[idx] |= VIS
+        revealed += len(idx)
+
+    self._viewer_gl.set_model(self.nmodel)
+    cam = getattr(self._viewer_gl, "camera", None)
+    if cam is not None:
+      try:
+        cam.pos = np.array([1.75, -1.35, 1.40], dtype=np.float32)
+        cam.look_at(np.array([0.80, -0.06, 0.86], dtype=np.float32))
+      except Exception as e:
+        print(f"[newton-env] camera placement failed ({type(e).__name__}: {e}); default view")
+    print(f"[newton-env] Newton ViewerGL {w}x{h} headless, "
+          f"{revealed} collider shape(s) revealed, writing {self._video_path}")
+
+  def _capture_video_frame(self) -> None:
+    """Render one frame from Newton's own state, after syncing it from the authoritative mjw_data."""
+    import numpy as np
+    import warp as wp
+
+    if self._viewer_gl is None:
+      self._setup_newton_viewer()
+
+    # mjw_data is authoritative here (update_data_interval=0), and the table is a mocap body whose
+    # pose never enters State -- without this sync it renders at the origin. Newton body i is
+    # MuJoCo body i+1 (MuJoCo body 0 is the world), and Newton stores quaternions xyzw against
+    # MuJoCo's wxyz; both conventions were measured, not assumed.
+    bq = wp.to_torch(self.state_in.body_q)
+    xp = wp.to_torch(self.solver.mjw_data.xpos)
+    xq = wp.to_torch(self.solver.mjw_data.xquat)
+    nworld = xp.shape[0]
+    per_world = bq.shape[0] // nworld
+    bqv = bq.view(nworld, per_world, 7)
+    bqv[:, :, 0:3] = xp[:, 1:1 + per_world]
+    bqv[:, :, 3:7] = xq[:, 1:1 + per_world][:, :, [1, 2, 3, 0]]
+
+    t = len(self._video_frames) * self.step_dt
+    self._viewer_gl.begin_frame(t)
+    self._viewer_gl.log_state(self.state_in)
+    self._viewer_gl.end_frame()
+    img = self._viewer_gl.get_frame()
+    self._video_frames.append(
+      np.asarray(img.numpy() if hasattr(img, "numpy") else img).copy())
+
+    if len(self._video_frames) < self._video_steps:
+      return
+    import imageio.v2 as imageio
+    wr = imageio.get_writer(self._video_path, fps=int(round(1.0 / self.step_dt)),
+                            codec="libx264", macro_block_size=None, quality=8)
+    for f in self._video_frames:
+      wr.append_data(f)
+    wr.close()
+    self._viewer_gl.close()
+    self._viewer_gl = None
+    print(f"[newton-env] wrote {self._video_path} "
+          f"({len(self._video_frames)} frames from Newton's own renderer)")
+    self._video_path = None
+
   def step(self, action: torch.Tensor):
     self.extras["log"] = dict()
     self.action_manager.advance(action)
@@ -403,6 +562,12 @@ class NewtonVecEnv:
     obs = self.get_observations()
     # surface the task metrics so the runner logs them alongside the PPO curves
     self.extras.setdefault("log", {}).update(self._env.extras.get("log", {}))
+    if self._dump_qpos_path is not None and len(self._qpos_log) < self._dump_steps:
+      self._record_frame()
+
+    if self._video_path is not None:
+      self._capture_video_frame()
+
     self.extras["time_outs"] = time_out
     # mjlab's wrapper unpacks five values: terminated and truncated are separate, because a timeout
     # must bootstrap the value function while a real termination must not.
