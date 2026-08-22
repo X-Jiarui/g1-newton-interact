@@ -22,6 +22,12 @@ import yaml as _yaml
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--num-envs", type=int, default=256)
+ap.add_argument("--profile-step", type=int, default=0,
+                help="time each part of one control step over N steps and exit; says whether the cost is in warp kernels or in the torch-side managers")
+ap.add_argument("--state-digest", type=int, default=0,
+                help="step N times with zero residual and print checksums of qpos, qvel and reward; run twice with and without --cuda-graph to prove the graph changes no number")
+ap.add_argument("--cuda-graph", action="store_true",
+                help="replay the physics substep from a captured CUDA graph")
 ap.add_argument("--sensor-probe", type=int, default=0,
                 help="step N times with zero residual and report which sensordata slots ever "
                      "read nonzero, then exit; verifies contact sensors are live")
@@ -97,7 +103,69 @@ if str(getattr(agent_cfg, "base_tracker_kind", "")).strip().lower() == "astra_on
 print(f"building {A.num_envs} Newton worlds ...")
 env = NewtonVecEnv(cfg, A.xml, num_envs=A.num_envs, device="cuda:0",
                    sdf_object_stl=A.sdf_object, sdf_resolution=A.sdf_resolution,
-                   viser_port=A.viser_port, render_every=A.render_every)
+                   viser_port=A.viser_port, render_every=A.render_every,
+                   cuda_graph=A.cuda_graph)
+
+if A.state_digest:
+  import torch as _t, warp as _wp
+  _e = env
+  _e.reset()
+  _act = _t.zeros(_e.num_envs, _e.action_manager.total_action_dim, device="cuda:0")
+  for _k in range(int(A.state_digest)):
+    _obs, _rew, *_ = _e.step(_act)
+  _qp = _wp.to_torch(_e.solver.mjw_data.qpos).double()
+  _qv = _wp.to_torch(_e.solver.mjw_data.qvel).double()
+  print("DIGEST steps=%d graph=%s" % (A.state_digest, bool(A.cuda_graph)))
+  for _n, _x in (("qpos", _qp), ("qvel", _qv), ("reward", _rew.double())):
+    print("DIGEST   %-7s sum=%+.12e  absmax=%.12e  mean=%+.12e"
+          % (_n, float(_x.sum()), float(_x.abs().max()), float(_x.mean())))
+  raise SystemExit(0)
+
+if A.profile_step:
+  import time as _time, torch as _t
+  _e = env
+  _e.reset()
+  _act = _t.zeros(_e.num_envs, _e.action_manager.total_action_dim, device="cuda:0")
+  _acc = {}
+
+  def _tick(_key, _fn):
+    _t.cuda.synchronize(); _t0 = _time.perf_counter()
+    _r = _fn()
+    _t.cuda.synchronize()
+    _acc[_key] = _acc.get(_key, 0.0) + (_time.perf_counter() - _t0)
+    return _r
+
+  for _ in range(10):        # warm up kernels and any lazy compilation
+    _e.step(_act)
+
+  _N = int(A.profile_step)
+  for _ in range(_N):
+    _tick("action_manager.advance", lambda: _e.action_manager.advance(_act))
+    _tick("action_term.process", lambda: _e.action_term.process_actions(_act))
+    def _phys():
+      for _ in range(_e.decimation):
+        _e.action_term.apply_actions()
+        _e.solver.step(_e.state_in, _e.state_out, _e.control, None, _e.physics_dt)
+        _e.state_in, _e.state_out = _e.state_out, _e.state_in
+    _tick("physics (decimation loop)", _phys)
+    def _phys_apply():
+      for _ in range(_e.decimation):
+        _e.action_term.apply_actions()
+    _tick("  of which apply_actions", _phys_apply)
+    _tick("observation_manager", lambda: _e.observation_manager.compute())
+    _e._env.reward_buf = _tick("reward_manager", lambda: _e.reward_manager.compute(dt=_e.step_dt))
+    _tick("termination_manager", lambda: _e.termination_manager.compute())
+    _tick("metrics_manager", lambda: _e.metrics_manager.compute()
+          if hasattr(_e.metrics_manager, "compute") else None)
+
+  _total = sum(v for k, v in _acc.items() if not k.startswith("  "))
+  print("PROF envs=%d decimation=%d steps=%d" % (_e.num_envs, _e.decimation, _N))
+  for _k, _v in sorted(_acc.items(), key=lambda kv: -kv[1]):
+    _pct = 100.0 * _v / _total if not _k.startswith("  ") else float("nan")
+    print("PROF   %-30s %8.2f ms/step  %s" % (
+      _k, 1000.0 * _v / _N, ("%5.1f%%" % _pct) if _pct == _pct else "(subset)"))
+  print("PROF   %-30s %8.2f ms/step" % ("TOTAL (accounted)", 1000.0 * _total / _N))
+  raise SystemExit(0)
 
 if A.sensor_probe:
   import numpy as _np, torch as _t, warp as _wp

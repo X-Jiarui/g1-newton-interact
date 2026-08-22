@@ -34,7 +34,8 @@ class NewtonVecEnv:
                njmax: int = 2048, nconmax: int = 256, object_entity: str = "apple",
                sdf_object_stl: str | None = None, sdf_resolution: int = 128,
                sdf_hydroelastic: bool = False, viser_port: int | None = None,
-               render_every: int = 4, solver_kwargs: dict | None = None) -> None:
+               render_every: int = 4, solver_kwargs: dict | None = None,
+               cuda_graph: bool = False) -> None:
     import mujoco
     import newton
     from newton.solvers import SolverMuJoCo
@@ -169,8 +170,12 @@ class NewtonVecEnv:
       print(f"[newton-env] using mjlab ObservationManager "
             f"({len(self.observation_manager.active_terms)} groups)")
     except Exception as e:
-      print(f"[newton-env] ObservationManager unavailable ({type(e).__name__}: {e}); "
-            "falling back to per-group builders")
+      # Fatal rather than a fallback. The per-group builders below are early-port scaffolding and
+      # are not the code mjlab runs; silently switching to them would mean training on a different
+      # observation than the one whose parity with mjlab was measured at 8.3e-07.
+      raise RuntimeError(
+        f"mjlab's ObservationManager failed to construct ({type(e).__name__}: {e}). "
+        "Refusing to fall back to the per-group builders -- fix the cause instead.") from e
 
     obs_cfg = cfg.observations if isinstance(cfg.observations, dict) else vars(cfg.observations)
     self._obs_builders = {}
@@ -182,8 +187,9 @@ class NewtonVecEnv:
         t = terms.get("policy") or next(iter(terms.values()))
         try:
           self._obs_builders[gname] = t.func(t, self._env)
-        except Exception:
-          pass
+        except Exception as e:
+          print(f"[newton-env] observation builder {gname!r} unavailable "
+                f"({type(e).__name__}: {e})")
 
     # mjlab's MetricsManager is what produces the task-level numbers -- lift_success, contact,
     # object tracking error. Without it the only things logged are PPO internals, and a run whose
@@ -196,7 +202,11 @@ class NewtonVecEnv:
       print(f"[newton-env] MetricsManager: "
             f"{len(getattr(self.metrics_manager, 'active_terms', []) or [])} terms")
     except Exception as e:
-      print(f"[newton-env] MetricsManager unavailable ({type(e).__name__}: {str(e)[:80]})")
+      # Fatal: the MetricsManager is what produces lift_success, sequence_success and
+      # object_mpjpe_mm -- the numbers the whole port is judged on. A run without it looks healthy
+      # and reports nothing true.
+      raise RuntimeError(
+        f"mjlab's MetricsManager failed to construct ({type(e).__name__}: {e})") from e
 
     # scale_by_dt must come from the config, not the constructor default. mjlab passes
     # cfg.scale_rewards_by_dt here (manager_based_rl_env.py:330) and this task sets it
@@ -208,6 +218,16 @@ class NewtonVecEnv:
     self.termination_manager = TerminationManager(cfg.terminations, self._env)
     self.event_manager = EventManager(cfg.events, self._env)
 
+    # CUDA graph capture of the physics substep. mujoco_warp issues hundreds of short kernels per
+    # step, so at these env counts the GPU spends most of its time idle between launches -- 15-20%
+    # utilisation at 2048 envs. A captured graph replays the whole launch sequence as one command.
+    #
+    # Two graphs, not one: the substep swaps state_in/state_out, and a captured graph bakes in the
+    # buffer pointers it was recorded with. Decimation is even, so alternating A->B and B->A
+    # returns the buffers to their original orientation at the end of each control step.
+    self._use_cuda_graph = bool(cuda_graph)
+    self._graphs: list = []
+    self._graph_warmup = 4      # uncaptured substeps per parity before capturing
     self.episode_length_buf = self._env.episode_length_buf
     self._all = torch.arange(self.num_envs, dtype=torch.long, device=device)
 
@@ -291,14 +311,55 @@ class NewtonVecEnv:
     # terms read the derived fields rather than qpos.
     self._env.forward()
 
+
+  def _physics_substep_graphed(self, parity: int) -> None:
+    """Run one solver substep, replaying a captured CUDA graph instead of relaunching kernels.
+
+    `parity` selects which of the two buffer orientations this substep uses. Capture happens
+    lazily on the first substep of each parity, after the uncaptured warm-up steps have forced
+    every lazy kernel compilation and allocation to happen -- capturing an allocation would bake a
+    stale pointer into the graph.
+    """
+    import warp as wp
+
+    while len(self._graphs) <= parity:
+      self._graphs.append(None)
+
+    if self._graphs[parity] is None:
+      if self._graph_warmup > 0:
+        self._graph_warmup -= 1
+        self.solver.step(self.state_in, self.state_out, self.control, None, self.physics_dt)
+        return
+      try:
+        with wp.ScopedCapture() as cap:
+          self.solver.step(self.state_in, self.state_out, self.control, None, self.physics_dt)
+        self._graphs[parity] = cap.graph
+        print(f"[newton-env] captured CUDA graph for substep parity {parity}")
+        # Capture records the launches without running them, so this substep's physics has not
+        # happened yet. Replaying the fresh graph performs it, keeping the captured step on the
+        # trajectory instead of silently skipping it.
+        wp.capture_launch(cap.graph)
+        return
+      except Exception as e:
+        print(f"[newton-env] CUDA graph capture failed ({type(e).__name__}: {e}); "
+              "continuing without it")
+        self._use_cuda_graph = False
+        self.solver.step(self.state_in, self.state_out, self.control, None, self.physics_dt)
+        return
+
+    wp.capture_launch(self._graphs[parity])
+
   def step(self, action: torch.Tensor):
     self.extras["log"] = dict()
     self.action_manager.advance(action)
     self.action_term.process_actions(action)
 
-    for _ in range(self.decimation):
+    for i in range(self.decimation):
       self.action_term.apply_actions()
-      self.solver.step(self.state_in, self.state_out, self.control, None, self.physics_dt)
+      if self._use_cuda_graph:
+        self._physics_substep_graphed(i % 2)
+      else:
+        self.solver.step(self.state_in, self.state_out, self.control, None, self.physics_dt)
       self.state_in, self.state_out = self.state_out, self.state_in
 
     self._env.episode_length_buf += 1
@@ -310,15 +371,22 @@ class NewtonVecEnv:
       if self._render_tick % self._render_every == 0:
         self._render()
 
-    if self.metrics_manager is not None:
-      try:
-        self.metrics_manager.compute(dt=self.step_dt)
-      except Exception:
-        pass
-    reward = self.reward_manager.compute(dt=self.step_dt)
+    # Order follows mjlab's step (manager_based_rl_env.py:451): terminations, then the reward,
+    # then the metrics -- and the reward has to be published on the env as `reward_buf` before the
+    # metrics run, because reward_total_metric reads it.
     terminated = self.termination_manager.compute()
     time_out = getattr(self.termination_manager, "time_outs",
                        torch.zeros_like(terminated, dtype=torch.bool))
+
+    reward = self.reward_manager.compute(dt=self.step_dt)
+    self._env.reward_buf = reward
+
+    if self.metrics_manager is not None:
+      # compute() takes no dt. The earlier `compute(dt=...)` wrapped in `except Exception: pass`
+      # raised TypeError on every step of every run and was swallowed, so the manager never
+      # produced a metric -- the Episode_Metrics/* values that reached tensorboard were
+      # zero-initialised accumulators being flushed at reset.
+      self.metrics_manager.compute()
 
     done_ids = (terminated | time_out).nonzero(as_tuple=False).squeeze(-1)
     if len(done_ids) > 0:
