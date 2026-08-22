@@ -22,6 +22,9 @@ import yaml as _yaml
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--num-envs", type=int, default=256)
+ap.add_argument("--sensor-probe", type=int, default=0,
+                help="step N times with zero residual and report which sensordata slots ever "
+                     "read nonzero, then exit; verifies contact sensors are live")
 ap.add_argument("--iterations", type=int, default=2000)
 ap.add_argument("--xml", default=os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets/mjlab_scene/scene.xml"))
 ap.add_argument("--agent-cfg-from", default=os.path.expanduser(
@@ -95,6 +98,28 @@ print(f"building {A.num_envs} Newton worlds ...")
 env = NewtonVecEnv(cfg, A.xml, num_envs=A.num_envs, device="cuda:0",
                    sdf_object_stl=A.sdf_object, sdf_resolution=A.sdf_resolution,
                    viser_port=A.viser_port, render_every=A.render_every)
+
+if A.sensor_probe:
+  import numpy as _np, torch as _t, warp as _wp
+  _m = env.solver.mjw_model
+  env.reset()
+  _peak = _np.zeros(int(_m.nsensordata))
+  for _ in range(A.sensor_probe):
+    env.step(_t.zeros(env.num_envs, env.action_manager.total_action_dim, device="cuda:0"))
+    _sd = _wp.to_torch(env.solver.mjw_data.sensordata).detach().cpu().numpy()
+    _peak = _np.maximum(_peak, _np.abs(_sd).max(axis=0))
+  _nz = int((_peak > 1e-9).sum())
+  _ty = _wp.to_torch(env.solver.mjw_model.sensor_type).cpu().numpy()
+  _ad = _wp.to_torch(env.solver.mjw_model.sensor_adr).cpu().numpy()
+  _dm = _wp.to_torch(env.solver.mjw_model.sensor_dim).cpu().numpy()
+  _cmask = _np.zeros(len(_peak), bool)
+  for _t_, _a_, _d_ in zip(_ty, _ad, _dm):
+    if int(_t_) == 42:
+      _cmask[int(_a_):int(_a_) + int(_d_)] = True
+  _cp = _peak[_cmask]
+  print(f"PROBE_CONTACT slots={_cmask.sum()} nonzero={int((_cp>1e-9).sum())} max={_cp.max():.4f}")
+  print(f"PROBE steps={A.sensor_probe} nonzero_slots={_nz}/{len(_peak)} max={_peak.max():.4f}")
+  raise SystemExit(0)
 print(f"  reward terms={len(env.reward_manager.active_terms)} "
       f"termination terms={len(env.termination_manager.active_terms)} "
       f"max_episode_length={env.max_episode_length}")

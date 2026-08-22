@@ -39,6 +39,7 @@ class NewtonVecEnv:
     import newton
     from newton.solvers import SolverMuJoCo
     from newton_simple_fix import capture_spec, restore_simple_bodies, restore_freejoint_damping
+    from newton_sensors import transplant_sensors
     from newton_bridge import NewtonEnv
 
     self.cfg = cfg
@@ -73,14 +74,42 @@ class NewtonVecEnv:
     world.replicate(scene, world_count=self.num_envs)
     self.nmodel = world.finalize()
 
-    with capture_spec() as cap:
+    # Newton drops <sensor> entirely, and 136 of this scene's sensors are the contact sensors the
+    # grasp rewards gate on -- multi_tip_surface (weight 5.0), contact_duration (1.0) and
+    # object_hard_lift (2.0) read exactly zero without them, for every step of every run. They are
+    # added to Newton's own spec just before it compiles, so MuJoCo evaluates its own sensors.
+    import mujoco as _mj
+    _orig_compile = _mj.MjSpec.compile
+    _xml_for_sensors = xml
+
+    def _compile_with_sensors(spec_self, *a, **k):
+      try:
+        transplant_sensors(spec_self, _xml_for_sensors, verbose=True)
+      except Exception as e:
+        print(f"[sensors] transplant failed ({type(e).__name__}: {e}); "
+              "contact-gated rewards will read zero")
+      return _orig_compile(spec_self, *a, **k)
+
+    _mj.MjSpec.compile = _compile_with_sensors
+    try:
+      with capture_spec() as cap:
       # update_data_interval=0 keeps mjw_data authoritative, so the direct joint/root writes the
       # action term performs during the startup hold are not overwritten from Newton's State.
-      # SDF collision has its own solver parameters (sdf_iterations / sdf_initpoints) that default
-      # to None; they are passed through here so they can be set for mesh colliders.
-      _kw = dict(enable_multiccd=True, update_data_interval=0, njmax=njmax, nconmax=nconmax)
-      _kw.update(solver_kwargs or {})
-      self.solver = SolverMuJoCo(self.nmodel, **_kw)
+        # SDF collision has its own solver parameters (sdf_iterations / sdf_initpoints) that
+        # default to None; they are passed through here so they can be set for mesh colliders.
+        _kw = dict(enable_multiccd=True, update_data_interval=0, njmax=njmax, nconmax=nconmax)
+        _kw.update(solver_kwargs or {})
+        self.solver = SolverMuJoCo(self.nmodel, **_kw)
+    finally:
+      _mj.MjSpec.compile = _orig_compile
+
+    # Reported every run because its absence is silent: with nsensor=0 the contact-gated reward
+    # terms return exactly 0.0 forever instead of erroring, which cost 3576 wasted iterations once.
+    _ns = int(self.solver.mjw_model.nsensor)
+    _nc = int((wp.to_torch(self.solver.mjw_model.sensor_type) == 42).sum()) if _ns else 0
+    print(f"[newton-env] sensors: nsensor={_ns} contact={_nc} "
+          f"nsensordata={int(self.solver.mjw_model.nsensordata)}"
+          + ("" if _nc else "  <-- contact-gated rewards will read zero"))
     self._ref_mj = mujoco.MjModel.from_xml_path(xml)
     restore_freejoint_damping(cap.spec, xml, verbose=False)
 
