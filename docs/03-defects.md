@@ -1,4 +1,4 @@
-# The nine defects, and the measurement that found each
+# The ten defects, and the measurement that found each
 
 Every one of these is silent. None raised an exception, none printed a warning that anybody would
 read as an error, and the model comparisons kept saying the two simulators matched. What they
@@ -171,6 +171,44 @@ compiler and stored on the model, so `put_model` copies the stale value through.
 Worth reporting upstream to Newton.
 
 ---
+
+## 10. Newton drops every `<sensor>`, and the rewards that read them return 0.0 instead of failing
+
+`import_mjcf.py` and `solver_mujoco.py` contain no handling of `<sensor>` at all, so every scene
+Newton compiles has `nsensor=0`. Nothing errors. The three reward terms that gate on tip contact —
+`multi_tip_surface` (weight 5.0), `contact_duration` (1.0), `object_hard_lift` (2.0) — simply return
+0.0 on every step of every run, and PPO happily optimises the remaining terms.
+
+**The measurement.** Running mjlab and Newton on the same clip with the same config and printing
+`nsensor`: mjlab 140, Newton 0. This defect is a repeat of one already recorded on the mjlab side
+(geomless tip bodies made contact-gated rewards silently zero for 2900 iterations); the same class
+of bug survived the port because the failure mode is a zero, not an exception.
+
+**The fix.** `src/newton_sensors.py` copies all 140 sensors from the authored scene into Newton's own
+`MjSpec` just before it compiles, remapping body names by longest-suffix match. Newton's importer
+also drops the `<site>` elements the 4 IMU sensors mount on, so those sites are recreated on the
+matching body — pure geometry, no change to the kinematic tree.
+
+**Parity after the fix**, same clip, 150 steps, zero residual:
+
+| | mjlab | Newton |
+|---|---|---|
+| `nsensor` / contact / `nsensordata` | 140 / 136 / 294 | 140 / 136 / 294 |
+| sensordata slots ever nonzero | 16 / 294 | 16 / 294 |
+| peak contact magnitude | 3.23 | 8.83 |
+
+The magnitudes differ because Newton collides against the exact SDF of the mesh where mjlab uses a
+convex hull — that difference is the point of the port, not an error.
+
+**A correction to an earlier reading.** `object_hard_lift` sitting at 0.0 was listed as evidence the
+sensors were missing. It is not: the mjlab control holds it at exactly 0.0 through 163 iterations
+too, because nothing lifts the stapler that early. Only `multi_tip_surface` (0.0023 at iteration 0
+in mjlab, rising to 3.09) is a usable early signal that contact sensing is live.
+
+**Guardrails.** `NewtonVecEnv` now prints `nsensor`/contact/`nsensordata` at construction on every
+run, and both training entries take `--sensor-probe N`, which steps N times with zero residual and
+reports how many sensordata slots ever read nonzero. An `nsensor=0` regression is now loud. It
+caught one within the hour: a bad variable name in this very fix.
 
 ## Not a defect: `ls_parallel`
 
