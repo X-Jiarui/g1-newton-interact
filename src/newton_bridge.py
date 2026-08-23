@@ -369,6 +369,53 @@ def _rename(newton_names: Sequence[str], ref_names: Sequence[str], what: str) ->
   return out
 
 
+class SensorDataView:
+  """The two fields mjlab's ContactSensor reads, as live torch views of Newton's warp buffers.
+
+  mjlab slices `sensordata` with `[:, a:b]` and indexes `time` by env, which needs torch semantics:
+  handing the raw warp arrays to it overflows an int32 while interpreting the data pointer.
+  `wp.to_torch` is zero-copy, so these views stay current as the simulation advances.
+  """
+
+  def __init__(self, mjw_data) -> None:
+    import warp as wp
+    self.sensordata = wp.to_torch(mjw_data.sensordata)
+    self.time = wp.to_torch(mjw_data.time)
+
+
+def bind_contact_sensors(scene: "SceneView", mjlab_scene, mj_model, mjw_model, mjw_data,
+                         device: str) -> list[str]:
+  """Expose mjlab's contact sensors on the bridge scene, reading Newton's data.
+
+  mjlab reaches contact through `env.scene["hand_apple_contact"].data.found`, and `_physical_contact`
+  returns zeros on a KeyError instead of raising. With the bridge scene holding only robot/apple/
+  table, every contact metric read exactly 0.0 and -- worse -- `contact_duration` (weight 1.0) and
+  `object_hard_lift` (weight 2.0) never paid out, while the policy was visibly grasping.
+
+  The sensors already exist in Newton's compiled model, transplanted by name before compile. These
+  are mjlab's own sensor objects rebound onto Newton's buffers rather than a reimplementation:
+  `initialize` resolves every slot by sensor name, and the transplant preserved the names.
+  """
+  view = SensorDataView(mjw_data)
+  bound = []
+  for name, sensor in mjlab_scene.sensors.items():
+    try:
+      sensor.initialize(mj_model, mjw_model, view, device)
+    except Exception as e:
+      raise RuntimeError(
+        f"could not rebind sensor {name!r} onto Newton ({type(e).__name__}: {e}). Refusing to "
+        "continue: a sensor that fails to bind makes every contact reward silently zero.") from e
+    # The sensor was constructed against a one-environment mjlab scene, and the base class caches
+    # the last computed data. Rebinding swaps the buffers underneath it but leaves that cache, so
+    # the first read after binding returns one env's worth of data and the observation manager
+    # fails on the shape. Invalidate it so the next read recomputes from Newton's buffers.
+    sensor._cached_data = None
+    sensor._cache_valid = False
+    scene[name] = sensor
+    bound.append(name)
+  return bound
+
+
 class SceneView(dict):
   def __getitem__(self, key):
     try:

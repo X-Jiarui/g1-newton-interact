@@ -58,11 +58,24 @@ ap.add_argument("--compiled-model", action="store_true",
                 help="substitute a separately compiled MJCF instead of using Newton's model. Kept "
                      "for provenance -- it discards Newton's construction and is no longer needed "
                      "now that the spec recompile achieves the same layout natively.")
+ap.add_argument("--start-frame", type=int, default=0,
+                help="reference frame to start the rollout from. Training uses "
+                     "RSI over a window; evaluating only frame 0 measures one "
+                     "point of that distribution.")
 ap.add_argument("--until-ref-end", action="store_true",
                 help="run the whole reference clip instead of a fixed step count: the length is read "
                      "from the clip itself, plus the startup hold before the reference starts "
                      "advancing, and the rollout stops on the last frame.")
 ap.add_argument("--dump-qpos", default=None, help="npz of per-step qpos, for rendering the video")
+ap.add_argument("--table-under-object", action="store_true",
+                help="same scene correction as training: move the mocap table so the "
+                     "object rests where the reference places it")
+ap.add_argument("--object-solref", default="0.004,1.0",
+                help="same object contact stiffness as training; empty string keeps "
+                     "the scene default")
+ap.add_argument("--viser-port", type=int, default=None,
+                help="serve a live viser view of this rollout on the given port; "
+                     "rendering only, the rollout itself is untouched")
 ap.add_argument("--newton-video", default=None,
                 help="record an mp4 with NEWTON's own renderer (ViewerGL, headless). This shows "
                      "Newton's scene graph -- the 81 collision geoms of the converted MJCF, with no "
@@ -119,8 +132,51 @@ if A.deterministic != "default":
   # is shape (1, 0) -- so disabling them costs nothing. Newton's own hydroelastic example does the
   # same for the same reason.
   _solver_kw["disable_sensors"] = True
-with capture_spec() as _spec_capture:
-  solver = SolverMuJoCo(nmodel, **_solver_kw)
+# Newton drops <sensor> on import, and mjlab reads contact through sensor objects that resolve by
+# name -- so without this the eval scene has nsensor=0 and every contact metric silently reads zero,
+# exactly as the training env did before the same transplant was added there.
+import mujoco as _mj_t
+from newton_sensors import transplant_sensors as _transplant
+_orig_compile_t = _mj_t.MjSpec.compile
+
+def _compile_with_sensors_t(spec_self, *a, **k):
+  try:
+    _transplant(spec_self, A.xml, verbose=True)
+  except Exception as e:
+    raise RuntimeError(f"sensor transplant failed ({type(e).__name__}: {e}); refusing to evaluate "
+                       "against a scene whose contact sensors are absent") from e
+  return _orig_compile_t(spec_self, *a, **k)
+
+_mj_t.MjSpec.compile = _compile_with_sensors_t
+try:
+  with capture_spec() as _spec_capture:
+    solver = SolverMuJoCo(nmodel, **_solver_kw)
+finally:
+  _mj_t.MjSpec.compile = _orig_compile_t
+
+if A.object_solref and A.sdf_object:
+  # Applied through the same values training uses. Without it the object settles ~1.9mm into the
+  # table here while training had it at 0.04mm, so the policy is scored in a scene it never saw.
+  _vals = [float(x) for x in A.object_solref.replace(" ", "").split(",")]
+  _hit = 0
+  for _g in range(solver.mj_model.ngeom):
+    if "apple" in (mujoco.mj_id2name(solver.mj_model, mujoco.mjtObj.mjOBJ_GEOM, _g) or ""):
+      solver.mj_model.geom_solref[_g][:len(_vals)] = _vals
+      _hit += 1
+  wp.to_torch(solver.mjw_model.geom_solref)[:] = wp.to_torch(
+    wp.array(solver.mj_model.geom_solref, dtype=float))
+  print(f"eval: object solref -> {_vals} on {_hit} geom(s), matching training")
+
+if A.table_under_object:
+  if not A.sdf_object:
+    raise SystemExit("--table-under-object needs --sdf-object")
+  sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
+    os.path.dirname(os.path.abspath(__file__)))), "src"))
+  from newton_table import install as _install_table
+  # The same function the training env calls, not a copy of it: a second implementation is how
+  # the eval path drifted from the training path before.
+  _install_table(solver.mj_model, A.sdf_object, A.reference_pkl,
+                 z_offset=float(os.environ.get("APPLE_SCENE_Z_OFFSET", 0.0)))
 print(f"solver determinism: {A.deterministic}")
 control = nmodel.control()
 
@@ -286,6 +342,41 @@ action_term = amdp.Sonic53Action(_sonic_cfg, nenv)
 amgr = nenv.bind_action_manager(action_term.action_dim, {"sonic_action": action_term})
 print(f"action term: dim={action_term.action_dim}")
 
+# mjlab reads contact through scene sensor objects, not raw sensordata: _physical_contact does
+# `env.scene["hand_apple_contact"].data.found`, and on a KeyError it returns zeros rather than
+# raising. The bridge's scene held only robot/apple/table, so every contact metric and every
+# contact-gated reward read exactly 0.0 -- while the policy was visibly grasping.
+#
+# The sensors themselves already exist in Newton's compiled model (transplanted by name before
+# compile). mjlab's own sensor objects, built by the construction-only env, are rebound onto
+# Newton's data here rather than reimplemented: initialize() resolves each slot by sensor name,
+# and the transplant preserved the names.
+class _SensorDataView:
+  """The two fields mjlab's ContactSensor reads, as live torch views of Newton's warp buffers.
+
+  It slices `sensordata` with `[:, a:b]` and indexes `time` by env, which needs torch semantics --
+  handing it the raw warp arrays overflows an int32 while interpreting the data pointer.
+  wp.to_torch is zero-copy, so the views stay current as the simulation advances.
+  """
+
+  def __init__(self, mjw):
+    self.sensordata = wp.to_torch(mjw.sensordata)
+    self.time = wp.to_torch(mjw.time)
+
+
+_sensor_data_view = _SensorDataView(solver.mjw_data)
+_bound = []
+for _sname, _sensor in mjenv.scene.sensors.items():
+  try:
+    _sensor.initialize(solver.mj_model, solver.mjw_model, _sensor_data_view, "cuda:0")
+    nenv.scene[_sname] = _sensor
+    _bound.append(_sname)
+  except Exception as _e:
+    raise RuntimeError(
+      f"could not rebind sensor {_sname!r} onto Newton ({type(_e).__name__}: {_e}). "
+      "Refusing to continue: a missing sensor makes every contact reward silently zero.") from _e
+print(f"sensors rebound onto Newton: {_bound}")
+
 # ------------------------------------------------------------- newton viewer
 viewer = None
 frames = []
@@ -319,21 +410,39 @@ if A.newton_video:
   print(f"  made {_revealed} collider shape(s) visible (bodies that had no visual geometry)")
 
   viewer.set_model(nmodel)
-  cam = getattr(viewer, "camera", None)
-  if cam is not None:
-    # Camera.pos must be an array -- get_view_matrix divides it by a scale factor, so a plain tuple
-    # raises inside the first render. look_at() takes the target only; the eye comes from pos.
-    try:
-      cam.pos = np.array([1.75, -1.35, 1.40], dtype=np.float32)
-      cam.look_at(np.array([0.80, -0.06, 0.86], dtype=np.float32))
-      print(f"  camera at {np.round(np.asarray(cam.pos), 2).tolist()} looking at the table")
-    except Exception as e:
-      print(f"  camera placement failed ({type(e).__name__}: {e}); using the default view")
-  print(f"newton ViewerGL: {_w}x{_h} headless, camera attrs "
-        f"{[a for a in dir(cam) if not a.startswith('_')][:8] if cam else 'none'}")
+  # ViewerGL has no look-at, and assigning viewer.camera.pos does nothing because set_model
+  # replaces the Camera object -- videos recorded that way silently used the viewer's own auto-fit.
+  # set_camera(pos, pitch, yaw) is the real entry point; for a Z-up scene the forward vector is
+  # pitch = asin(dz), yaw = atan2(dy, dx).
+  import numpy as _np
+  _eye = _np.array([1.55, -0.55, 1.05])
+  _tgt = _np.array([0.60, -0.10, 0.84])
+  _d = _tgt - _eye
+  _d = _d / _np.linalg.norm(_d)
+  viewer.set_camera(wp.vec3(*(float(x) for x in _eye)),
+                    float(_np.rad2deg(_np.arcsin(_d[2]))),
+                    float(_np.rad2deg(_np.arctan2(_d[1], _d[0]))))
+  print(f"video camera at {_eye.tolist()} looking at {_tgt.tolist()}")
+
+viser_viewer = None
+if A.viser_port:
+  import newton.viewer as _nvv
+  viser_viewer = _nvv.ViewerViser(port=int(A.viser_port),
+                                  label=f"Newton eval {os.path.basename(A.checkpoint)}")
+  # Newton draws visual geometry and hides colliders; the object here has only a collider, so
+  # without revealing it the robot appears to grasp nothing.
+  _f = wp.to_torch(nmodel.shape_flags)
+  _b = wp.to_torch(nmodel.shape_body)
+  _V = int(newton.ShapeFlags.VISIBLE)
+  for _bid in torch.unique(_b):
+    _i = (_b == _bid).nonzero(as_tuple=True)[0]
+    if int((_f[_i] & _V).sum()) == 0:
+      _f[_i] |= _V
+  viser_viewer.set_model(nmodel)
+  print(f"viser serving this rollout on http://localhost:{A.viser_port}")
 
 # ------------------------------------------------------------------- rollout
-nenv._force_reference_start_frame = 0
+nenv._force_reference_start_frame = int(A.start_frame)
 
 # Place robot, object and table at the reference start frame using mjlab's OWN reset event. Without
 # it the scene starts at the model's default qpos: measured, the apple began 13 cm high and fell 82 cm
@@ -452,6 +561,31 @@ for k in range(A.steps):
     img = viewer.get_frame()
     frames.append(np.asarray(img.numpy() if hasattr(img, "numpy") else img).copy())
 
+  for _sensor in nenv.scene.values():
+    if hasattr(_sensor, "update"):
+      _sensor.update(DT * DECIMATION)
+
+  if os.environ.get("SENSOR_PROBE") and k % 20 == 0:
+    from mjlab.tasks.residual_interact import mdp as _rm
+    _c, _g, _f = _rm._physical_contact(nenv)
+    _found = nenv.scene["hand_apple_contact"].data.found
+    print(f"LIVE step={k:4d} contact={float(_c.float().mean()):.3f} "
+          f"grasp2tips={float(_g.float().mean()):.3f} closeforce={float(_f.float().mean()):.3f} "
+          f"tips_touching={int((_found > 0).sum())}")
+
+  if viser_viewer is not None:
+    # Same body-transform sync as the video path: mjw_data is authoritative and the table is a
+    # mocap body whose pose never enters State, so without this it renders at the origin.
+    _bq = wp.to_torch(state_in.body_q)
+    _xp = wp.to_torch(solver.mjw_data.xpos)[0]
+    _xq = wp.to_torch(solver.mjw_data.xquat)[0]
+    _n = _bq.shape[0]
+    _bq[:, 0:3] = _xp[1:1 + _n]
+    _bq[:, 3:7] = _xq[1:1 + _n][:, [1, 2, 3, 0]]
+    viser_viewer.begin_frame(k * DT * DECIMATION)
+    viser_viewer.log_state(state_in)
+    viser_viewer.end_frame()
+
   z = float(obj.data.root_link_pos_w[0, 2])
   if z0 is None:
     z0 = z
@@ -515,3 +649,16 @@ if A.dump_qpos:
                       mocap_quat=np.stack([m[1] for m in mocap_log]),
                       rows=json.dumps(rows))
   print(f"wrote {A.dump_qpos}  ({len(qpos_log)} frames of qpos for rendering)")
+
+if A.viser_port and viser_viewer is not None:
+  # The rollout is short; without this the process exits, the port closes, and the browser tab the
+  # user just opened goes dead. Replay the recorded trajectory on a loop instead so there is
+  # something to watch, and keep serving until interrupted.
+  import time as _time
+  print(f"rollout finished; viser still serving on http://localhost:{A.viser_port} "
+        f"(replaying {len(qpos_log) if A.dump_qpos else 0} recorded frames, Ctrl-C to stop)")
+  try:
+    while True:
+      _time.sleep(1.0)
+  except KeyboardInterrupt:
+    pass

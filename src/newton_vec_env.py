@@ -264,6 +264,28 @@ class NewtonVecEnv:
     # False; taking the default of True multiplies every reward term by dt=0.02, making
     # the whole reward signal 50x smaller than mjlab's while every individual term still
     # measures identical -- which is why this survived a term-by-term parity check.
+    # Contact sensors have to reach the MDP through the scene, not just the model. The transplant
+    # above puts them in Newton's compiled model, but mjlab reads them as scene entities
+    # (`env.scene["hand_apple_contact"].data.found`) and falls back to zeros on a KeyError -- which
+    # is why contact_duration (weight 1.0) and object_hard_lift (weight 2.0) never paid out, and
+    # why every contact metric read 0.0 while the policy was visibly grasping.
+    #
+    # A one-environment mjlab env is built purely to obtain its constructed sensor objects; they are
+    # then rebound onto Newton's buffers. Constructing them by hand would mean reimplementing
+    # mjlab's pattern expansion, which is the kind of second implementation that has drifted before.
+    import copy as _copy
+    from mjlab.envs import ManagerBasedRlEnv as _MjlabEnv
+    from newton_bridge import bind_contact_sensors
+
+    _sensor_cfg = _copy.deepcopy(cfg)
+    _sensor_cfg.scene.num_envs = 1
+    _probe = _MjlabEnv(cfg=_sensor_cfg, device=device, render_mode=None)
+    _bound = bind_contact_sensors(self._env.scene, _probe.scene, self.solver.mj_model,
+                                  self.solver.mjw_model, self.solver.mjw_data, device)
+    self._contact_sensors = [self._env.scene[n] for n in _bound]
+    print(f"[newton-env] contact sensors on the scene: {len(_bound)} "
+          f"({', '.join(n for n in _bound if 'contact' in n and n.count('_') < 4)})")
+
     self.reward_manager = RewardManager(cfg.rewards, self._env,
                                         scale_by_dt=cfg.scale_rewards_by_dt)
     self.termination_manager = TerminationManager(cfg.terminations, self._env)
@@ -637,6 +659,9 @@ class NewtonVecEnv:
     # Order follows mjlab's step (manager_based_rl_env.py:451): terminations, then the reward,
     # then the metrics -- and the reward has to be published on the env as `reward_buf` before the
     # metrics run, because reward_total_metric reads it.
+    for _sensor in getattr(self, "_contact_sensors", ()):
+      _sensor.update(self.step_dt)
+
     terminated = self.termination_manager.compute()
     time_out = getattr(self.termination_manager, "time_outs",
                        torch.zeros_like(terminated, dtype=torch.bool))
