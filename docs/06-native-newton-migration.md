@@ -417,3 +417,54 @@ Every one of these passed a one-env probe and failed on launch at 2048:
    Everything past the cap is dropped -- missed contacts in the interaction being trained.
 5. `_hyd` was moved inside the explicit-broad-phase branch while the body-pose sync still needed
    it (`UnboundLocalError`).
+
+## The native path produces non-finite worlds, and they never heal
+
+Measured, 512 envs, 300 steps, stapler:
+
+| | non-finite worlds at step 300 |
+|---|---|
+| MuJoCo-contact path | **0** |
+| native, robot hulled, object real mesh | 4 |
+| native, robot hulled, object hulled | 3 |
+| native, nothing hulled | **490** |
+
+So the convex hulls are not the cause -- they are what keeps 99% of the batch alive. Full-mesh
+narrow phase is catastrophically unstable at scale.
+
+What the failure looks like: one world's entire state (qpos, qvel, qacc) goes non-finite in a
+single step, with no velocity build-up beforehand (max|qvel| was 6.8 the step before). The
+contacts Newton hands the solver that step are clean -- normals unit length, `dist` in
+[-0.018, 0], solref [0.02, 1], solimp [0.001, 2], zero non-finite entries. Ruled out by
+measurement: `impratio` (1 and 1000), `cone` (elliptic and pyramidal), solver iteration count,
+and `solref_mode` (it is 2 = MJCF_DEFAULT, not FORCE_SPACE, so the Newton-only `body_invweight0`
+override never runs). The root cause is still open.
+
+**The worlds never recover**, even though they terminate and reset the whole time -- the NaN sits
+in `qacc` and the warm start, which the reset events do not write. `_clear_world_state` now wipes
+those for any world detected non-finite, and forces it through a reset. Verified: 0 non-finite at
+every checkpoint over 300 steps, against 1 -> 8 before.
+
+This mattered more than it looks. `_safe_log` computes `nan_to_num(value.mean(), nan=0.0)` --
+mean first, sanitise second -- so a single dead world turns a whole metric into a clean-looking
+**0.0000**. That is the entire explanation for `Metric/hand_to_obj_dist = 0.0000` alongside
+`contact = 0.014`, for the 22 `Episode_Metrics/*` reading `nan`, and for
+`Episode_Termination/og_object_far` running 5.6x the baseline. One defect, three symptoms.
+
+## The hull filter swept up the object
+
+`--rigid-object-table` clears the hydroelastic flag, and the hull selection keyed off that flag,
+so the object and table were silently hulled along with the robot: the count went 65 -> 67 and the
+stapler's collider became a **64-vertex hull** -- coarser than the 68-vertex `cir160` hull this
+whole path exists to avoid -- with the real 19991-vertex mesh surviving only as a visual. Every
+rigid-pair measurement and video taken before this was found used that hulled object. The
+selection now excludes the object and table by name, and the log line prints what it kept instead
+of asserting it.
+
+## Baseline timing: 400 iterations proves nothing
+
+From the baselines' own tensorboard history, `Episode_Metrics/lift_success` first exceeds 0.01 at
+iteration **4447** (stapler S2) and **5992** (mug S2), and `Stage/physical_contact` turns on at the
+same iteration -- contact and lift appear together, as a phase transition, after ~4400 iterations
+of exactly zero. Mug S1 never lifted at all in 7295 iterations. Any comparison at 400 iterations
+can only say "the native path is not broken and is training"; it cannot say "better".

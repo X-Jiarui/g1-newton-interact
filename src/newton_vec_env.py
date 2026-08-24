@@ -116,6 +116,7 @@ class NewtonVecEnv:
                sdf_hydroelastic: bool = False, native_contacts: bool = False,
                table_sdf_resolution: int | None = None,
                hydro_object_table: bool = True,
+               convex_hull_robot: bool = True,
                hydro_kh: float | None = None, hydro_grid_size: int | None = None,
                broad_phase: str = "nxn",
                viser_port: int | None = None,
@@ -217,15 +218,26 @@ class NewtonVecEnv:
       # and the table keep their real geometry, which is the whole point of the SDF path.
       _H = int(newton.ShapeFlags.HYDROELASTIC)
       _C = int(newton.ShapeFlags.COLLIDE_SHAPES)
+      # Exclude the object and the table by NAME, not by the hydroelastic flag. Keying off the
+      # flag meant that turning hydroelastic off (--rigid-object-table) silently swept them into
+      # the hull pass: the count went 65 -> 67 and the stapler's collider became a 64-vertex hull,
+      # coarser than the 68-vertex cir160 hull this whole path exists to get away from. The real
+      # mesh survived only as a visual. Verified by shape_source vertex counts, not by the log
+      # line -- which cheerfully claimed the object kept its real geometry either way.
+      _keep_real = ("_sdf",)
       _to_hull = [i for i in range(len(scene.shape_type))
                   if int(scene.shape_type[i]) == int(newton.GeoType.MESH)
                   and int(scene.shape_flags[i]) & _C
-                  and not (int(scene.shape_flags[i]) & _H)]
-      if _to_hull:
+                  and not (int(scene.shape_flags[i]) & _H)
+                  and not any(k in (scene.shape_label[i] or "").lower() for k in _keep_real)]
+      if _to_hull and convex_hull_robot:
         _done = scene.approximate_meshes(method="convex_hull", shape_indices=_to_hull,
                                          keep_visual_shapes=True)
-        print(f"[newton-env] convex-hulled {len(_done)} of {len(_to_hull)} non-hydroelastic mesh "
-              f"collider(s); the object and table keep their real geometry")
+        _kept = [scene.shape_label[i].split("/")[-1] for i in range(len(scene.shape_type))
+                 if int(scene.shape_type[i]) == int(newton.GeoType.MESH)
+                 and int(scene.shape_flags[i]) & _C and i not in _to_hull]
+        print(f"[newton-env] convex-hulled {len(_done)} of {len(_to_hull)} robot mesh collider(s); "
+              f"kept as real meshes: {_kept}")
 
     world.replicate(scene, world_count=self.num_envs)
     self.nmodel = world.finalize()
@@ -604,6 +616,7 @@ class NewtonVecEnv:
     self._video_steps = int(video_steps)
     self._video_size = video_size
     self._video_cam = video_cam
+    self._nonfinite_total = 0
     self._object_collider_view = object_collider_view
     self._viewer_gl = None
     self._video_frames: list = []
@@ -676,6 +689,39 @@ class NewtonVecEnv:
     ids = self._all if env_ids is None else env_ids
     self._reset_idx(ids)
     return self.get_observations(), self.extras
+
+  def _nonfinite_worlds(self) -> "torch.Tensor | None":
+    """World indices whose MuJoCo state has gone non-finite."""
+    import warp as wp
+    d = self.solver.mjw_data
+    qpos = wp.to_torch(d.qpos)
+    qvel = wp.to_torch(d.qvel)
+    bad = (~torch.isfinite(qpos)).any(1) | (~torch.isfinite(qvel)).any(1)
+    if not bool(bad.any()):
+      return None
+    return bad.nonzero(as_tuple=False).squeeze(-1)
+
+  def _clear_world_state(self, ids: "torch.Tensor") -> None:
+    """Wipe every per-world field a reset does not write, so a dead world can come back.
+
+    The reset events rewrite qpos and qvel. They do not touch qacc, the warm start, or the applied
+    forces, and a NaN parked in any of those reproduces itself on the next step -- which is why
+    the dead-world count only ever went up.
+    """
+    import warp as wp
+    d = self.solver.mjw_data
+    for name in ("qacc", "qacc_warmstart", "qacc_smooth", "qfrc_applied", "xfrc_applied",
+                 "qfrc_constraint", "qfrc_smooth", "act", "act_dot", "efc_force", "qvel"):
+      arr = getattr(d, name, None)
+      if arr is None:
+        continue
+      try:
+        t = wp.to_torch(arr)
+      except Exception:
+        continue
+      if t.shape[0] != self.num_envs:
+        continue
+      t[ids] = 0.0
 
   def _reset_idx(self, env_ids: torch.Tensor) -> None:
     if len(env_ids) == 0:
@@ -1032,7 +1078,26 @@ class NewtonVecEnv:
       # zero-initialised accumulators being flushed at reset.
       self.metrics_manager.compute()
 
-    done_ids = (terminated | time_out).nonzero(as_tuple=False).squeeze(-1)
+    # Non-finite worlds do not heal. Measured on the native path, 512 envs, 300 steps: the first
+    # env goes non-finite somewhere before step 101 and the count climbs 1 -> 4 -> 8 and never
+    # falls, even though those envs are terminating and being reset the whole time -- so the NaN
+    # lives in state the reset events do not write (qacc and the solver's warm start). The
+    # MuJoCo-contact path shows 0 of 512 over the same run, so this is native-only.
+    #
+    # Two costs if it is left alone: over a 4500-iteration run (the baseline needs 4447 before it
+    # lifts anything) the whole batch dies, and every mean-based metric is poisoned long before
+    # that -- _safe_log takes mean() and only then nan_to_num(..., 0.0), so one dead world makes a
+    # metric read a clean-looking 0.0000.
+    _bad = self._nonfinite_worlds()
+    if _bad is not None and len(_bad) > 0:
+      self._nonfinite_total += int(len(_bad))
+      self.extras.setdefault("log", {})["Health/nonfinite_worlds"] = float(len(_bad))
+      self._clear_world_state(_bad)
+      done_ids = torch.unique(torch.cat([
+        (terminated | time_out).nonzero(as_tuple=False).squeeze(-1), _bad]))
+      terminated[_bad] = True
+    else:
+      done_ids = (terminated | time_out).nonzero(as_tuple=False).squeeze(-1)
     if len(done_ids) > 0:
       self._reset_idx(done_ids)
 
