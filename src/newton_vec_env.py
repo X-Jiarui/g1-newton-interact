@@ -114,6 +114,8 @@ class NewtonVecEnv:
                njmax: int = 2048, nconmax: int = 256, object_entity: str = "apple",
                sdf_object_stl: str | None = None, sdf_resolution: int = 64,
                sdf_hydroelastic: bool = False, native_contacts: bool = False,
+               table_sdf_resolution: int | None = None,
+               hydro_object_table: bool = True,
                hydro_kh: float | None = None, hydro_grid_size: int | None = None,
                broad_phase: str = "nxn",
                viser_port: int | None = None,
@@ -122,6 +124,7 @@ class NewtonVecEnv:
                table_under_object: bool = False, object_solref: str | None = None,
                dump_qpos: str | None = None, dump_steps: int = 600,
                newton_video: str | None = None, video_size: str = "960x720",
+               object_collider_view: bool = False,
                video_steps: int = 500, video_cam: str | None = None) -> None:
     import mujoco
     import newton
@@ -169,7 +172,7 @@ class NewtonVecEnv:
       from grab_objects import swap_collider_to_sdf
       swap_collider_to_sdf(scene, self._ref_mj_pre, f"{object_entity}/{object_entity}",
                            sdf_object_stl, resolution=sdf_resolution,
-                           hydroelastic=(sdf_hydroelastic or native_contacts))
+                           hydroelastic=((sdf_hydroelastic or native_contacts) and hydro_object_table))
 
     world = newton.ModelBuilder()
     SolverMuJoCo.register_custom_attributes(world)
@@ -190,8 +193,15 @@ class NewtonVecEnv:
                                 "assets/meshes/table_box.stl")
       if not os.path.exists(_table_stl):
         raise RuntimeError(f"missing {_table_stl}; generate it from the table's half-extents first")
+      # The table is a flat box that only ever meets the object on its top face, so its SDF
+      # carries no shape worth resolving -- but it does help set the tessellation of the contact
+      # patch, and object/table is half of every contact in the scene (30-37 of 48-79 per world).
+      # The object keeps its own resolution; only the table's is dialled down.
+      _tres = int(table_sdf_resolution or sdf_resolution)
       swap_collider_to_sdf(scene, self._ref_mj_pre, "table/table", _table_stl,
-                           resolution=sdf_resolution, hydroelastic=True)
+                           resolution=_tres, hydroelastic=hydro_object_table)
+      if _tres != sdf_resolution:
+        print(f"[newton-env] table SDF resolution {_tres}, object stays at {sdf_resolution}")
       _n = sum(1 for f in scene.shape_flags if f & int(newton.ShapeFlags.HYDROELASTIC))
       print(f"[newton-env] hydroelastic shapes before replicate: {_n} "
             f"(object + table; a pair routes to SDF only when both sides are flagged)")
@@ -251,9 +261,13 @@ class NewtonVecEnv:
           # contacts are generated last, so they were exactly the ones truncated: 46..56 contacts
           # with correct +z normals, max|force| == 0, and the object in textbook free fall
           # (per-step drop increment a constant 3.9 mm = g*dt^2) straight through the table.
-          nconmax, njmax = 4096, max(njmax, 16384)
+          # Per world, and sized for the per-world count AFTER the gap fix: 48-79 contacts, of
+          # which 30-37 are the object on the table. The first version of this line used 4096 /
+          # 16384, which was right for the 1500 contacts a scene-wide gap produced at one env and
+          # OOMed on launch at 2048 worlds -- these are per-world budgets, not totals.
+          nconmax, njmax = 512, max(njmax, 2048)
           print(f"[newton-env] native contacts: nconmax -> {nconmax}, njmax -> {njmax} "
-                f"(mjlab's 256 truncates Newton's own narrow phase)")
+                f"(mjlab's 256 is sized for MuJoCo's own narrow phase)")
         _kw = dict(enable_multiccd=True, update_data_interval=0, njmax=njmax, nconmax=nconmax)
         _kw.update(solver_kwargs or {})
         # Newton's own SDF hydroelastic contact, following
@@ -276,24 +290,17 @@ class NewtonVecEnv:
           # through the table, while the hydroelastic counter stayed at 0. MuJoCo's own collision
           # path is unaffected because it works from the converted MuJoCo model, which is why this
           # only shows up with use_mujoco_contacts=False.
-          import warp as _wp
-          _probe = CollisionPipeline(self.nmodel, reduce_contacts=True, broad_phase="explicit",
-                                     sdf_hydroelastic_config=HydroelasticSDF.Config())
-          _pairs = _wp.to_torch(_probe.shape_pairs_filtered).cpu().numpy().tolist()
-          _hyd = [int(i) for i, f in enumerate(wp.to_torch(self.nmodel.shape_flags).cpu().numpy())
-                  if int(f) & int(newton.ShapeFlags.HYDROELASTIC)]
-          _have = {(min(a, b), max(a, b)) for a, b in _pairs}
-          _added = 0
-          for _i in range(len(_hyd)):
-            for _j in range(_i + 1, len(_hyd)):
-              _k = (min(_hyd[_i], _hyd[_j]), max(_hyd[_i], _hyd[_j]))
-              if _k not in _have:
-                _pairs.append([_k[0], _k[1]])
-                _have.add(_k)
-                _added += 1
-          print(f"[newton-env] added {_added} hydroelastic collision pair(s) that the MJCF import "
-                f"could not know about ({len(_pairs)} pairs total)")
-          _pairs = mujoco_legal_shape_pairs(self.solver, _pairs)
+          # Needed by both branches and by the body-pose sync below, so it is computed here
+          # rather than inside the explicit-only pair building.
+          _flags_np = wp.to_torch(self.nmodel.shape_flags).cpu().numpy()
+          _hyd = [int(i) for i in range(len(_flags_np))
+                  if int(_flags_np[i]) & int(newton.ShapeFlags.HYDROELASTIC)]
+          # Newton's default of 1e6 mesh-triangle pairs is a global buffer, and this scene
+          # overflowed it every few steps -- "Triangle pair buffer overflowed 2177620 > 1000000"
+          # for the stapler, 1025759 for the mug. Everything past the cap is dropped, which means
+          # missed contacts in exactly the interaction being trained. A pair is a vec3i, so 4 M
+          # costs 48 MB.
+          _max_tri = 4_000_000
           # grid_size is the hydroelastic working grid and it is charged per step regardless of
           # how many contacts there actually are: profiled at 2048 env, collide() was 234.7 ms of
           # a 253.9 ms substep while solver.step() was 19.2 ms, for 42 contacts per world.
@@ -307,14 +314,45 @@ class NewtonVecEnv:
           # 162 are meshes. "sap" prunes by AABB first and takes its pairs from the model's own
           # contact-pair table, which already contains the object/table pair.
           if broad_phase == "explicit":
+            import warp as _wp
+            _probe = CollisionPipeline(self.nmodel, reduce_contacts=True, broad_phase="explicit",
+                                       sdf_hydroelastic_config=HydroelasticSDF.Config())
+            _pairs = _wp.to_torch(_probe.shape_pairs_filtered).cpu().numpy().tolist()
+            # Per world. The first version paired every hydroelastic shape with every other one
+            # across the whole replicated model: at 2048 worlds that is 4096 shapes, 8.4 M pairs,
+            # nearly all of them between different worlds, and it OOMed on launch. At one env it
+            # added 0 pairs, which is why it survived every probe.
+            _shapes_per_world = self.nmodel.shape_count // self.num_envs
+            _flags_np = wp.to_torch(self.nmodel.shape_flags).cpu().numpy()
+            _hyd = [int(i) for i in range(len(_flags_np))
+                    if int(_flags_np[i]) & int(newton.ShapeFlags.HYDROELASTIC)]
+            _by_world = {}
+            for _i in _hyd:
+              _by_world.setdefault(_i // _shapes_per_world, []).append(_i)
+            _have = {(min(a, b), max(a, b)) for a, b in _pairs}
+            _added = 0
+            for _ws in _by_world.values():
+              for _i in range(len(_ws)):
+                for _j in range(_i + 1, len(_ws)):
+                  _k = (min(_ws[_i], _ws[_j]), max(_ws[_i], _ws[_j]))
+                  if _k not in _have:
+                    _pairs.append([_k[0], _k[1]])
+                    _have.add(_k)
+                    _added += 1
+            print(f"[newton-env] added {_added} hydroelastic collision pair(s) that the MJCF import "
+                  f"could not know about ({len(_pairs)} pairs total)")
+            _pairs = mujoco_legal_shape_pairs(self.solver, _pairs)
             self.collision_pipeline = CollisionPipeline(
               self.nmodel, reduce_contacts=True, broad_phase="explicit",
               shape_pairs_filtered=_wp.array(_pairs, dtype=_wp.vec2i, device=device),
-              sdf_hydroelastic_config=_hydro_cfg)
+              sdf_hydroelastic_config=_hydro_cfg,
+              max_triangle_pairs=_max_tri)
           else:
+            import warp as _wp
             self.collision_pipeline = CollisionPipeline(
               self.nmodel, reduce_contacts=True, broad_phase=broad_phase,
-              sdf_hydroelastic_config=_hydro_cfg)
+              sdf_hydroelastic_config=_hydro_cfg,
+              max_triangle_pairs=_max_tri)
             print(f"[newton-env] broad phase '{broad_phase}': pairs come from the model's own "
                   f"contact-pair table, not the explicit list")
           self.contacts = self.collision_pipeline.contacts()
@@ -345,9 +383,11 @@ class NewtonVecEnv:
               if _nid >= 0 and int(_weld[_bi]) == 0:
                 _sw.append(_wi); _sbi.append(_bi); _sn.append(_nid)
           _n_hyd_mapped = sum(1 for _nid in _sn if _nid in _hyd_bodies)
-          if _n_hyd_mapped == 0:
+          if _n_hyd_mapped == 0 and hydro_object_table:
             raise RuntimeError("no MuJoCo body maps to a hydroelastic shape; the pose sync would "
                                "be a no-op and every SDF contact would be missed")
+          if not _sn:
+            raise RuntimeError("no world-welded body to sync; the table would sit at the origin")
           self._sync_n = _sn
           self._sync_w_wp = wp.array(_sw, dtype=wp.int32, device=device)
           self._sync_b_wp = wp.array(_sbi, dtype=wp.int32, device=device)
@@ -360,6 +400,16 @@ class NewtonVecEnv:
 
     # Reported every run because its absence is silent: with nsensor=0 the contact-gated reward
     # terms return exactly 0.0 forever instead of erroring, which cost 3576 wasted iterations once.
+    # mujoco_warp defaults contact_sensor_maxmatch to 64 and mjlab plumbs it through
+    # cfg.sim.contact_sensor_maxmatch, which this env never touches because it builds its own
+    # solver. Newton's narrow phase emits more points per pair than MuJoCo's, and the native path
+    # logged "contact match overflow: please increase Option.contact_sensor_maxmatch to 98" on
+    # every step -- silently truncating the very contact sensors the grasp rewards gate on.
+    _mm = int(getattr(getattr(cfg, "sim", None), "contact_sensor_maxmatch", 0) or 0)
+    _mm = max(_mm, 256 if native_contacts else 64)
+    self.solver.mjw_model.opt.contact_sensor_maxmatch = _mm
+    print(f"[newton-env] contact_sensor_maxmatch = {_mm}")
+
     _ns = int(self.solver.mjw_model.nsensor)
     _nc = int((wp.to_torch(self.solver.mjw_model.sensor_type) == 42).sum()) if _ns else 0
     print(f"[newton-env] sensors: nsensor={_ns} contact={_nc} "
@@ -554,6 +604,7 @@ class NewtonVecEnv:
     self._video_steps = int(video_steps)
     self._video_size = video_size
     self._video_cam = video_cam
+    self._object_collider_view = object_collider_view
     self._viewer_gl = None
     self._video_frames: list = []
     self._cam_eye = self._cam_target = None
@@ -759,6 +810,26 @@ class NewtonVecEnv:
       if int((flags[idx] & VIS).sum()) == 0:
         flags[idx] |= VIS
         revealed += len(idx)
+
+    # Draw the object as the shape the physics actually collides, not the shape it is authored
+    # to look like. The two are different objects: the visual is mjlab's authored geom, the
+    # collider is the real STL we swapped in and built the SDF from.
+    if self._object_collider_view:
+      COLL = int(newton.ShapeFlags.COLLIDE_SHAPES)
+      HYD = int(newton.ShapeFlags.HYDROELASTIC)
+      lbls = list(self.nmodel.shape_label)
+      obj_bodies = {int(sbody[i]) for i in range(len(lbls))
+                    if int(flags[i]) & HYD and "table" not in (lbls[i] or "").lower()}
+      swapped = 0
+      for bid in obj_bodies:
+        for i in (sbody == bid).nonzero(as_tuple=True)[0].tolist():
+          if int(flags[i]) & COLL:
+            flags[i] |= VIS
+          else:
+            flags[i] &= ~VIS
+          swapped += 1
+      print(f"[newton-env] object drawn as its collider: {swapped} shape(s) on "
+            f"{len(obj_bodies)} body/bodies re-flagged")
 
     self._viewer_gl.set_model(self.nmodel)
 

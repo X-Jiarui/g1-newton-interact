@@ -373,3 +373,47 @@ MuJoCo already convexifies every mesh geom for collision.
 **The halved step is no longer needed.** The NaN was never about stiffness or step size -- it was
 the explicit broad phase. With `nxn`, dt 0.005 survived 600 steps twice out of two, object at
 +0.001 mm penetration with 30-33 contacts, and per-world contacts fell to 48-79.
+
+## The object/table pair does not need hydroelastic
+
+It was the only consumer of it: the hand collides with the object through the rigid narrow phase,
+against the object's real STL collider, and that is what the grasp actually depends on. The SDF
+pressure field was buying resting accuracy on a contact surface the task does not care about.
+
+Measured at 1024 env, 600-step no-reset runs, twice each:
+
+| object/table contact | pair contacts | per-world total | resting penetration | env-steps/s |
+|---|---|---|---|---|
+| hydroelastic | 30-37 | 48-79 | 0.001 mm | 15142 |
+| **rigid** | **4** | **19-25** | **0.110 mm** | **20011** |
+| (MuJoCo-contact path) | -- | -- | -- | 22095 |
+
+At 2048 env with the pair rigid: 63.1 ms/step, **32437 env-steps/s against the MuJoCo path's
+40429 -- 1.25x**. Training fits at 2048 env in 24.5 GiB and runs at ~15 s/iter; with the pair
+hydroelastic, 2048 could not be allocated at all.
+
+Two things that do NOT reduce the contact count, measured so they are not tried again:
+
+- **Lowering the table's SDF resolution.** Object 64 with table 32/16/8 all give 31-37 pair
+  contacts. Resting penetration stays sub-micron even at table resolution 8, so the table can be
+  made as coarse as one likes for the memory and build time -- but the contact patch tessellation
+  follows the *object's* SDF, not the table's.
+- **Lowering both resolutions.** 64 -> 32 gives 32 -> 31 contacts, no change. 64 -> 16 does halve
+  them to 18, but the object then rests 2.731 mm into the table instead of 0.001 mm.
+
+## Five defects that only appear at training scale
+
+Every one of these passed a one-env probe and failed on launch at 2048:
+
+1. The hydroelastic pair-completion loop was O(n^2) over *all* worlds' hydroelastic shapes: 4096
+   shapes, 8.4 M pairs, nearly all of them cross-world. At one env it added 0 pairs.
+2. `nconmax`/`njmax` auto-raised to 4096/16384 -- correct for the 1500 contacts a scene-wide gap
+   produced, catastrophic as a *per-world* budget once the gap fix brought it to 61.
+3. `contact_sensor_maxmatch` defaults to 64 in mujoco_warp and mjlab plumbs it through
+   `cfg.sim`, which this env never reads because it builds its own solver. Newton emits more
+   points per pair, it overflowed to 98, and it silently truncates the contact sensors the grasp
+   rewards gate on.
+4. `CollisionPipeline(max_triangle_pairs=...)` defaults to 1e6 and this scene reached 2.18 M.
+   Everything past the cap is dropped -- missed contacts in the interaction being trained.
+5. `_hyd` was moved inside the explicit-broad-phase branch while the body-pose sync still needed
+   it (`UnboundLocalError`).
