@@ -27,6 +27,28 @@ import torch
 import warp as wp
 
 
+@wp.kernel
+def _sync_body_q_kernel(xpos: wp.array2d(dtype=wp.vec3),
+                        xquat: wp.array2d(dtype=wp.quat),
+                        world: wp.array(dtype=wp.int32),
+                        mjc_body: wp.array(dtype=wp.int32),
+                        newton_body: wp.array(dtype=wp.int32),
+                        body_q: wp.array(dtype=wp.transform)):
+  """MuJoCo pose -> Newton State.body_q, w-first quaternion to w-last.
+
+  A warp kernel rather than torch indexing because this runs inside the CUDA graph capture that
+  `--cuda-graph` performs. The torch version made capture fail outright ("operation would make
+  the legacy stream depend on a capturing blocking stream"), which silently cost the whole graph
+  speedup on the native path.
+  """
+  i = wp.tid()
+  w = world[i]
+  b = mjc_body[i]
+  p = xpos[w, b]
+  q = xquat[w, b]
+  body_q[newton_body[i]] = wp.transform(p, wp.quat(q[1], q[2], q[3], q[0]))
+
+
 def mujoco_legal_shape_pairs(solver, pairs):
   """Keep only the shape pairs MuJoCo itself would collide.
 
@@ -90,7 +112,7 @@ class NewtonVecEnv:
 
   def __init__(self, cfg, xml: str, num_envs: int, device: str = "cuda:0",
                njmax: int = 2048, nconmax: int = 256, object_entity: str = "apple",
-               sdf_object_stl: str | None = None, sdf_resolution: int = 128,
+               sdf_object_stl: str | None = None, sdf_resolution: int = 64,
                sdf_hydroelastic: bool = False, native_contacts: bool = False,
                hydro_kh: float | None = None, viser_port: int | None = None,
                render_every: int = 4, solver_kwargs: dict | None = None,
@@ -126,7 +148,10 @@ class NewtonVecEnv:
       # with gap=0 the pair never registers a contact at all -- measured, the hydroelastic counter
       # stayed at 0 for every step while the object fell straight through the table. The official
       # panda_hydro example uses gap=0.01 with a +/-1cm narrow band at resolution 64.
-      scene.default_shape_cfg.gap = 0.01
+      # Zero for everything; swap_collider_to_sdf gives the object and the table their own 0.01.
+      # See the note there: a scene-wide gap turned every knuckle pair inside the hand into a
+      # contact candidate and made 74% of the per-world contacts hand-against-itself.
+      scene.default_shape_cfg.gap = 0.0
     if hydro_kh is not None:
       # pressure = -kh * signed_depth, and the two sides combine in series
       # ((k_a*k_b)/(k_a+k_b)), so raising one alone leaves the softer side in control. Newton's
@@ -281,9 +306,10 @@ class NewtonVecEnv:
           if _n_hyd_mapped == 0:
             raise RuntimeError("no MuJoCo body maps to a hydroelastic shape; the pose sync would "
                                "be a no-op and every SDF contact would be missed")
-          self._sync_w = torch.tensor(_sw, dtype=torch.long, device=device)
-          self._sync_b = torch.tensor(_sbi, dtype=torch.long, device=device)
-          self._sync_n = torch.tensor(_sn, dtype=torch.long, device=device)
+          self._sync_n = _sn
+          self._sync_w_wp = wp.array(_sw, dtype=wp.int32, device=device)
+          self._sync_b_wp = wp.array(_sbi, dtype=wp.int32, device=device)
+          self._sync_n_wp = wp.array(_sn, dtype=wp.int32, device=device)
           print(f"[newton-env] syncing {len(_sn)} world-welded body pose(s) from MuJoCo every "
                 f"substep ({_n_hyd_mapped} of them carry a hydroelastic shape); the solver's own "
                 f"forward kinematics owns every other body")
@@ -835,13 +861,9 @@ class NewtonVecEnv:
     w-first; Newton's transform stores it w-last.
     """
     d = self.solver.mjw_data
-    xpos = wp.to_torch(d.xpos)
-    xquat = wp.to_torch(d.xquat)
-    bq = wp.to_torch(self.state_in.body_q)
-    bq[self._sync_n, 0:3] = xpos[self._sync_w, self._sync_b].to(bq.dtype)
-    q = xquat[self._sync_w, self._sync_b].to(bq.dtype)
-    bq[self._sync_n, 3:6] = q[:, 1:4]
-    bq[self._sync_n, 6] = q[:, 0]
+    wp.launch(_sync_body_q_kernel, dim=len(self._sync_n_wp),
+              inputs=[d.xpos, d.xquat, self._sync_w_wp, self._sync_b_wp, self._sync_n_wp],
+              outputs=[self.state_in.body_q], device=self.device)
 
   def _physics_step(self) -> None:
     """One solver substep, with Newton's contacts recomputed first when they are in use.

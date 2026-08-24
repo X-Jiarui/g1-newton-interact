@@ -71,6 +71,8 @@ def add_grab_object(builder, name: str, *, pos=(0.0, 0.0, 0.0), quat=(0.0, 0.0, 
 
 def swap_collider_to_sdf(builder, mj_reference, body_name: str, stl_path: str, *,
                          resolution: int = 128, hydroelastic: bool = False,
+                         hydro_gap: float = 0.01,
+                         sdf_narrow_band: tuple = (-0.01, 0.01),
                          verbose: bool = True) -> int:
   """Replace a body's imported collider with the object's real mesh, collided through an SDF.
 
@@ -105,9 +107,28 @@ def swap_collider_to_sdf(builder, mj_reference, body_name: str, stl_path: str, *
     builder.shape_flags[int(i)] = int(flags[int(i)]) & ~COLLIDE
 
   mesh = newton.Mesh.create_from_file(stl_path)
-  mesh.build_sdf(max_resolution=resolution)
+  # The narrow band and the AABB margin are what the sparse SDF grid actually stores, and those
+  # buffers are allocated per world: at the Newton defaults (band +-0.1 m, margin 0.05 m, res 128)
+  # a single world already carries a 91392-voxel grid and a 182784-entry iso buffer, and 2048
+  # worlds could not be allocated on a 32 GiB card at any contact budget. The official recipe in
+  # example_robot_panda_hydro.py is band +-0.01 with margin == gap, and a bisect in
+  # /root/minrepro.py showed our looser values change the physics not at all: object at rest,
+  # 0.000 mm penetration either way.
+  if hydroelastic:
+    mesh.build_sdf(max_resolution=resolution,
+                   narrow_band_range=sdf_narrow_band, margin=hydro_gap)
+  else:
+    mesh.build_sdf(max_resolution=resolution)
   from dataclasses import replace as _replace
-  cfg = _replace(builder.default_shape_cfg, is_hydroelastic=hydroelastic)
+  # `gap` belongs to the hydroelastic pair and nothing else. It is the band within which contact
+  # candidates are generated, and the SDF pressure field needs it; a rigid shape does not. With
+  # gap on every shape (0.01, copied from example_robot_panda_hydro.py, which is a two-finger
+  # gripper scene) the Wuji hand's own knuckles are all within 1 cm of each other and the pipeline
+  # emitted 699 contacts per world for the hand against itself alone -- 73.7% of a 949-contact
+  # total, against MuJoCo's whole per-world budget of 256. Those pairs are legal collisions in
+  # MuJoCo too; MuJoCo just runs margin 0, so nothing is generated until they actually penetrate.
+  cfg = _replace(builder.default_shape_cfg, is_hydroelastic=hydroelastic,
+                 gap=(hydro_gap if hydroelastic else builder.default_shape_cfg.gap))
   shape = builder.add_shape_mesh(body=newton_body, mesh=mesh, cfg=cfg,
                                  label=f"{body_name}_sdf")
   if verbose:

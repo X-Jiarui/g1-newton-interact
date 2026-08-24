@@ -300,3 +300,45 @@ and the robot stays kinematically pinned for the whole run. Several videos showe
 The robot sinking after release (root_z 0.80 -> 0.57 over 90 steps) is not a defect: the
 MuJoCo-contact baseline sinks at the same rate (0.8153 -> 0.7295 over 62 steps). With no policy
 it simply squats.
+
+## Native SDF path: what it costs at training scale
+
+Measured on an idle RTX 5090, mug scene, `--cuda-graph`, against the config the VAST_MUG runs
+actually train with (MuJoCo contacts, dt 0.005, 2048 env).
+
+| config, 2048 env | ms/step | env-steps/s | vs training |
+|---|---|---|---|
+| MuJoCo contacts, dt 0.005 | 50.7 | 40429 | 1x |
+| native, dt 0.005 | 1501 | 1364 | 29.6x slower |
+| native, dt 0.0025 (needed for stability) | 2111 | 970 | 41.7x slower |
+
+At ~20 s/iter today that is roughly 14 minutes per iteration. Scaling is healthy (801 -> 901 ->
+970 env-steps/s from 512 to 2048 env), so this is compute, not launch overhead.
+
+Getting there from the first measurement (322x slower, OOM above 512 env) took three fixes:
+
+1. **`gap` belongs to the hydroelastic pair only.** Scene-wide `gap = 0.01`, copied from the
+   two-finger panda example, made every knuckle of the Wuji hand a contact candidate. Per-world
+   contacts by category, stapler scene, hard hold released:
+
+   | | before | after |
+   |---|---|---|
+   | hand against itself | 699.2 (73.7%) | 19.6 |
+   | hand <-> leg | 131.9 | 0 |
+   | arm <-> hand | 49.5 | 0 |
+   | **object <-> table** | **35.9** | **31.5** |
+   | ground <-> leg | 13.5 | 6.8 |
+   | **total** | **949** | **61.4** |
+
+   MuJoCo's whole per-world budget is 256. These pairs are legal collisions in MuJoCo too -- it
+   simply runs margin 0, so nothing is generated until they actually penetrate.
+2. **The pose sync had to be a warp kernel.** As torch indexing it made CUDA graph capture fail
+   outright, silently costing the entire graph speedup on the native path.
+3. **The SDF sparse grid is allocated per world.** At Newton's defaults (band +-0.1, margin 0.05,
+   res 128) one world already carries a 91392-voxel grid and a 182784-entry iso buffer, and 2048
+   worlds could not be allocated at any contact budget. The official recipe (res 64, band +-0.01,
+   margin == gap) fits, and the bisect showed those values change the physics not at all.
+
+`nconmax`/`njmax` are **per world**, not totals. Raising them to 4096/16384 for a one-env probe
+is what caused the first 2.2 GiB OOM at 2048 env; 512/2048 is right-sized now that the gap fix
+brought the per-world count to 61.
