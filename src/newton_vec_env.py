@@ -27,13 +27,72 @@ import torch
 import warp as wp
 
 
+def mujoco_legal_shape_pairs(solver, pairs):
+  """Keep only the shape pairs MuJoCo itself would collide.
+
+  Newton's CollisionPipeline does not import MJCF's collision filtering, so with
+  use_mujoco_contacts=False the robot collides with itself everywhere MuJoCo forbids it. Measured
+  on this scene: 1566 contacts per step of which essentially all were adjacent links --
+  left_wrist_yaw <-> left_palm (86), right_wrist_yaw <-> right_palm (85), finger3_link4 <->
+  finger4_link4 (57), elbow <-> wrist_pitch (28). Every one of them carries kh=1e11, so the hand
+  was being blown apart from the inside and whatever it held was kicked away.
+
+  The rules are MuJoCo's own, in mj_collideGeoms order: welded bodies never collide, parent and
+  child never collide while mjDSBL_FILTERPARENT is off, <exclude> pairs never collide, and the two
+  geoms must pass the contype/conaffinity mask test. Explicit <pair> entries bypass all of it.
+  """
+  import mujoco
+  import numpy as np
+  import warp as wp
+
+  if solver.newton_shape_to_mjc_geom is None:
+    solver._create_inverse_shape_mapping()
+  s2g = wp.to_torch(solver.newton_shape_to_mjc_geom).cpu().numpy()
+  m = solver.mj_model
+  gb, weld, parent = m.geom_bodyid, m.body_weldid, m.body_parentid
+  contype, conaff = m.geom_contype, m.geom_conaffinity
+  filter_parent = not bool(m.opt.disableflags & mujoco.mjtDisableBit.mjDSBL_FILTERPARENT)
+  excluded = set()
+  for k in range(m.nexclude):
+    sig = int(m.exclude_signature[k])
+    b1, b2 = sig >> 16, sig & 0xFFFF
+    excluded.add((b1, b2)); excluded.add((b2, b1))
+  explicit = {(int(m.pair_geom1[k]), int(m.pair_geom2[k])) for k in range(m.npair)}
+  explicit |= {(b, a) for a, b in explicit}
+
+  kept, dropped, unmapped = [], 0, 0
+  for a, b in pairs:
+    ga, gbx = int(s2g[a]), int(s2g[b])
+    if ga < 0 or gbx < 0:
+      # Shapes we added ourselves after the MuJoCo conversion have no geom; never drop those.
+      unmapped += 1; kept.append([a, b]); continue
+    if (ga, gbx) in explicit:
+      kept.append([a, b]); continue
+    b1, b2 = int(gb[ga]), int(gb[gbx])
+    w1, w2 = int(weld[b1]), int(weld[b2])
+    if w1 == w2:
+      dropped += 1; continue
+    if filter_parent and w1 != 0 and w2 != 0 and (
+        int(weld[parent[w1]]) == w2 or int(weld[parent[w2]]) == w1):
+      dropped += 1; continue
+    if (b1, b2) in excluded:
+      dropped += 1; continue
+    if not ((int(contype[ga]) & int(conaff[gbx])) or (int(contype[gbx]) & int(conaff[ga]))):
+      dropped += 1; continue
+    kept.append([a, b])
+  print(f"[newton-env] MuJoCo collision filtering: {len(pairs)} pairs -> {len(kept)} "
+        f"({dropped} dropped as welded/parent-child/excluded/masked, {unmapped} kept unmapped)")
+  return kept
+
+
 class NewtonVecEnv:
   """Duck-types enough of mjlab's ManagerBasedRlEnv for `RslRlVecEnvWrapper`."""
 
   def __init__(self, cfg, xml: str, num_envs: int, device: str = "cuda:0",
                njmax: int = 2048, nconmax: int = 256, object_entity: str = "apple",
                sdf_object_stl: str | None = None, sdf_resolution: int = 128,
-               sdf_hydroelastic: bool = False, viser_port: int | None = None,
+               sdf_hydroelastic: bool = False, native_contacts: bool = False,
+               hydro_kh: float | None = None, viser_port: int | None = None,
                render_every: int = 4, solver_kwargs: dict | None = None,
                cuda_graph: bool = False, effortless_action: bool = False,
                table_under_object: bool = False, object_solref: str | None = None,
@@ -62,6 +121,18 @@ class NewtonVecEnv:
     scene = newton.ModelBuilder()
     SolverMuJoCo.register_custom_attributes(scene)
     scene.default_shape_cfg.gap = 0.0          # Newton's default of 0.1 needs 10cm of penetration
+    if native_contacts:
+      # Hydroelastic needs a contact margin: `gap` is what the SDF narrow band is built around, and
+      # with gap=0 the pair never registers a contact at all -- measured, the hydroelastic counter
+      # stayed at 0 for every step while the object fell straight through the table. The official
+      # panda_hydro example uses gap=0.01 with a +/-1cm narrow band at resolution 64.
+      scene.default_shape_cfg.gap = 0.01
+    if hydro_kh is not None:
+      # pressure = -kh * signed_depth, and the two sides combine in series
+      # ((k_a*k_b)/(k_a+k_b)), so raising one alone leaves the softer side in control. Newton's
+      # default is 1e10; the official panda_hydro grasping example uses 1e11.
+      scene.default_shape_cfg.kh = float(hydro_kh)
+      print(f"[newton-env] hydroelastic stiffness kh = {hydro_kh:.0e} on both contact sides")
     scene.add_mjcf(xml, collapse_fixed_joints=False, parse_mujoco_options=True)
 
     # Swap the object's collider before replicating, so every world gets it. mjlab authors the object
@@ -71,11 +142,33 @@ class NewtonVecEnv:
       from grab_objects import swap_collider_to_sdf
       swap_collider_to_sdf(scene, self._ref_mj_pre, f"{object_entity}/{object_entity}",
                            sdf_object_stl, resolution=sdf_resolution,
-                           hydroelastic=sdf_hydroelastic)
+                           hydroelastic=(sdf_hydroelastic or native_contacts))
 
     world = newton.ModelBuilder()
     SolverMuJoCo.register_custom_attributes(world)
     world.default_shape_cfg.gap = 0.0
+    # Hydroelastic contact is pairwise: narrow_phase.py routes a pair to the SDF pipeline only when
+    # BOTH shapes carry ShapeFlags.HYDROELASTIC, and otherwise falls through to the rigid path.
+    # With only the object flagged and use_mujoco_contacts=False, the object-table pair had no
+    # working contact at all -- filmed: the stapler sank into the table, stood up on its end and was
+    # ejected, and the state went NaN around step 110.
+    #
+    # Boxes need no SDF build; primitive shapes are configured through the flag alone, per
+    # newton/examples/robot/example_robot_panda_hydro.py.
+    if native_contacts:
+      # The table needs a mesh collider with an SDF, not just the flag: hydroelastic requires
+      # texture SDF data, which a box primitive does not carry. Same route the official
+      # panda_hydro example takes for its own table.
+      _table_stl = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                "assets/meshes/table_box.stl")
+      if not os.path.exists(_table_stl):
+        raise RuntimeError(f"missing {_table_stl}; generate it from the table's half-extents first")
+      swap_collider_to_sdf(scene, self._ref_mj_pre, "table/table", _table_stl,
+                           resolution=sdf_resolution, hydroelastic=True)
+      _n = sum(1 for f in scene.shape_flags if f & int(newton.ShapeFlags.HYDROELASTIC))
+      print(f"[newton-env] hydroelastic shapes before replicate: {_n} "
+            f"(object + table; a pair routes to SDF only when both sides are flagged)")
+
     world.replicate(scene, world_count=self.num_envs)
     self.nmodel = world.finalize()
 
@@ -102,9 +195,98 @@ class NewtonVecEnv:
       # action term performs during the startup hold are not overwritten from Newton's State.
         # SDF collision has its own solver parameters (sdf_iterations / sdf_initpoints) that
         # default to None; they are passed through here so they can be set for mesh colliders.
+        if native_contacts and nconmax <= 512:
+          # mjlab's SimulationCfg budget (nconmax 256) is sized for MuJoCo's own narrow phase,
+          # which emits a handful of points per pair. With use_mujoco_contacts=False every contact
+          # instead comes from Newton's CollisionPipeline -- measured 1486..1542 per step for this
+          # scene -- and everything past naconmax is silently dropped. The hydroelastic object-table
+          # contacts are generated last, so they were exactly the ones truncated: 46..56 contacts
+          # with correct +z normals, max|force| == 0, and the object in textbook free fall
+          # (per-step drop increment a constant 3.9 mm = g*dt^2) straight through the table.
+          nconmax, njmax = 4096, max(njmax, 16384)
+          print(f"[newton-env] native contacts: nconmax -> {nconmax}, njmax -> {njmax} "
+                f"(mjlab's 256 truncates Newton's own narrow phase)")
         _kw = dict(enable_multiccd=True, update_data_interval=0, njmax=njmax, nconmax=nconmax)
         _kw.update(solver_kwargs or {})
+        # Newton's own SDF hydroelastic contact, following
+        # newton/examples/robot/example_robot_panda_hydro.py: the CollisionPipeline computes the
+        # contacts and SolverMuJoCo integrates them, instead of MuJoCo doing its own collision.
+        # This is what makes `--sdf-object` mean something: building the SDF alone was never
+        # enough, because nothing consumed it.
+        self.collision_pipeline = None
+        self.contacts = None
+        if native_contacts:
+          from newton import CollisionPipeline
+          from newton.geometry import HydroelasticSDF
+          _kw.update(use_mujoco_contacts=False, solver="newton", integrator="implicitfast",
+                     cone="elliptic", impratio=1000.0)
         self.solver = SolverMuJoCo(self.nmodel, **_kw)
+        if native_contacts:
+          # The collision-pair table is built by add_mjcf from the ORIGINAL shapes. The SDF
+          # colliders are added afterwards, so no pair contains them and the broad phase never
+          # tests them -- measured: the object shape appeared in zero contacts and fell straight
+          # through the table, while the hydroelastic counter stayed at 0. MuJoCo's own collision
+          # path is unaffected because it works from the converted MuJoCo model, which is why this
+          # only shows up with use_mujoco_contacts=False.
+          import warp as _wp
+          _probe = CollisionPipeline(self.nmodel, reduce_contacts=True, broad_phase="explicit",
+                                     sdf_hydroelastic_config=HydroelasticSDF.Config())
+          _pairs = _wp.to_torch(_probe.shape_pairs_filtered).cpu().numpy().tolist()
+          _hyd = [int(i) for i, f in enumerate(wp.to_torch(self.nmodel.shape_flags).cpu().numpy())
+                  if int(f) & int(newton.ShapeFlags.HYDROELASTIC)]
+          _have = {(min(a, b), max(a, b)) for a, b in _pairs}
+          _added = 0
+          for _i in range(len(_hyd)):
+            for _j in range(_i + 1, len(_hyd)):
+              _k = (min(_hyd[_i], _hyd[_j]), max(_hyd[_i], _hyd[_j]))
+              if _k not in _have:
+                _pairs.append([_k[0], _k[1]])
+                _have.add(_k)
+                _added += 1
+          print(f"[newton-env] added {_added} hydroelastic collision pair(s) that the MJCF import "
+                f"could not know about ({len(_pairs)} pairs total)")
+          _pairs = mujoco_legal_shape_pairs(self.solver, _pairs)
+          self.collision_pipeline = CollisionPipeline(
+            self.nmodel, reduce_contacts=True, broad_phase="explicit",
+            shape_pairs_filtered=_wp.array(_pairs, dtype=_wp.vec2i, device=device),
+            sdf_hydroelastic_config=HydroelasticSDF.Config())
+          self.contacts = self.collision_pipeline.contacts()
+          _flags = wp.to_torch(self.nmodel.shape_flags)
+          _n = int(((_flags & int(newton.ShapeFlags.HYDROELASTIC)) != 0).sum())
+          print(f"[newton-env] Newton native contacts: {_n} hydroelastic shape(s) of "
+                f"{self.nmodel.shape_count}; MuJoCo collision disabled")
+          # SolverMuJoCo derives State.body_q from the joint coordinates by forward kinematics
+          # (its own docstring says so), so a body with no joint is NEVER written back. mjlab
+          # authors the table as a static body, so the collision pipeline saw it at the world
+          # origin: measured SDF boxes were table z -0.070..0.084 against object z 0.770..0.922.
+          # The two never overlapped, the hydroelastic broad phase returned 0 blocks for the pair
+          # on every combination of gap (0.5/3/10 mm), kh (1e10/1e11/5e11) and broad phase, and
+          # the object fell straight through to the floor. The pose has to be copied from MuJoCo.
+          _m2n = wp.to_torch(self.solver.mjc_body_to_newton).cpu().numpy()
+          _sb_all = wp.to_torch(self.nmodel.shape_body).cpu().numpy()
+          _hyd_bodies = {int(_sb_all[i]) for i in _hyd if int(_sb_all[i]) >= 0}
+          # ONLY the bodies welded to the world. Those are the ones forward kinematics never
+          # writes, which is the whole reason the table was stuck at the origin. Syncing every
+          # body instead overwrites the solver's own State output each substep with a pose that
+          # is one integration step ahead of it (measured: 0.9 mm apart at rest, 12.7 mm while
+          # falling), which breaks the contact matching the pipeline carries between calls.
+          _weld = self.solver.mj_model.body_weldid
+          _sw, _sbi, _sn = [], [], []
+          for _wi in range(_m2n.shape[0]):
+            for _bi in range(_m2n.shape[1]):
+              _nid = int(_m2n[_wi, _bi])
+              if _nid >= 0 and int(_weld[_bi]) == 0:
+                _sw.append(_wi); _sbi.append(_bi); _sn.append(_nid)
+          _n_hyd_mapped = sum(1 for _nid in _sn if _nid in _hyd_bodies)
+          if _n_hyd_mapped == 0:
+            raise RuntimeError("no MuJoCo body maps to a hydroelastic shape; the pose sync would "
+                               "be a no-op and every SDF contact would be missed")
+          self._sync_w = torch.tensor(_sw, dtype=torch.long, device=device)
+          self._sync_b = torch.tensor(_sbi, dtype=torch.long, device=device)
+          self._sync_n = torch.tensor(_sn, dtype=torch.long, device=device)
+          print(f"[newton-env] syncing {len(_sn)} world-welded body pose(s) from MuJoCo every "
+                f"substep ({_n_hyd_mapped} of them carry a hydroelastic shape); the solver's own "
+                f"forward kinematics owns every other body")
     finally:
       _mj.MjSpec.compile = _orig_compile
 
@@ -420,11 +602,11 @@ class NewtonVecEnv:
     if self._graphs[parity] is None:
       if self._graph_warmup > 0:
         self._graph_warmup -= 1
-        self.solver.step(self.state_in, self.state_out, self.control, None, self.physics_dt)
+        self._physics_step()
         return
       try:
         with wp.ScopedCapture() as cap:
-          self.solver.step(self.state_in, self.state_out, self.control, None, self.physics_dt)
+          self._physics_step()
         self._graphs[parity] = cap.graph
         print(f"[newton-env] captured CUDA graph for substep parity {parity}")
         # Capture records the launches without running them, so this substep's physics has not
@@ -436,7 +618,7 @@ class NewtonVecEnv:
         print(f"[newton-env] CUDA graph capture failed ({type(e).__name__}: {e}); "
               "continuing without it")
         self._use_cuda_graph = False
-        self.solver.step(self.state_in, self.state_out, self.control, None, self.physics_dt)
+        self._physics_step()
         return
 
     wp.capture_launch(self._graphs[parity])
@@ -597,14 +779,22 @@ class NewtonVecEnv:
     # pose never enters State -- without this sync it renders at the origin. Newton body i is
     # MuJoCo body i+1 (MuJoCo body 0 is the world), and Newton stores quaternions xyzw against
     # MuJoCo's wxyz; both conventions were measured, not assumed.
-    bq = wp.to_torch(self.state_in.body_q)
-    xp = wp.to_torch(self.solver.mjw_data.xpos)
-    xq = wp.to_torch(self.solver.mjw_data.xquat)
-    nworld = xp.shape[0]
-    per_world = bq.shape[0] // nworld
-    bqv = bq.view(nworld, per_world, 7)
-    bqv[:, :, 0:3] = xp[:, 1:1 + per_world]
-    bqv[:, :, 3:7] = xq[:, 1:1 + per_world][:, :, [1, 2, 3, 0]]
+    if getattr(self, "_sync_n", None) is not None:
+      # On the native-contacts path State.body_q is live physics input, not just something to draw:
+      # the next substep's collide() reads this exact buffer. Writing it from the i+1 assumption
+      # below while the collision pipeline's table pose came from mjc_body_to_newton meant two
+      # mappings disagreed -- filmed as the stapler resting correctly for 51 steps and then being
+      # knocked to the floor. Use the same map the physics uses.
+      self._sync_body_q_from_mujoco()
+    else:
+      bq = wp.to_torch(self.state_in.body_q)
+      xp = wp.to_torch(self.solver.mjw_data.xpos)
+      xq = wp.to_torch(self.solver.mjw_data.xquat)
+      nworld = xp.shape[0]
+      per_world = bq.shape[0] // nworld
+      bqv = bq.view(nworld, per_world, 7)
+      bqv[:, :, 0:3] = xp[:, 1:1 + per_world]
+      bqv[:, :, 3:7] = xq[:, 1:1 + per_world][:, :, [1, 2, 3, 0]]
 
     # Re-applied every frame. set_model rebuilds Camera, and the viewer refits it to the scene on
     # its first frame; either one silently discards a placement made at setup. That is why a
@@ -634,6 +824,37 @@ class NewtonVecEnv:
           f"({len(self._video_frames)} frames from Newton's own renderer)")
     self._video_path = None
 
+
+  def _sync_body_q_from_mujoco(self) -> None:
+    """Copy every mapped body's world pose from MuJoCo into State.body_q.
+
+    SolverMuJoCo derives State.body_q from the joint coordinates by forward kinematics, so a body
+    with no joint is never written back: the table is static, and the collision pipeline saw it at
+    the world origin. This is also the single writer of State.body_q outside the solver -- the
+    renderer used to write its own, from a different body mapping. MuJoCo stores the quaternion
+    w-first; Newton's transform stores it w-last.
+    """
+    d = self.solver.mjw_data
+    xpos = wp.to_torch(d.xpos)
+    xquat = wp.to_torch(d.xquat)
+    bq = wp.to_torch(self.state_in.body_q)
+    bq[self._sync_n, 0:3] = xpos[self._sync_w, self._sync_b].to(bq.dtype)
+    q = xquat[self._sync_w, self._sync_b].to(bq.dtype)
+    bq[self._sync_n, 3:6] = q[:, 1:4]
+    bq[self._sync_n, 6] = q[:, 0]
+
+  def _physics_step(self) -> None:
+    """One solver substep, with Newton's contacts recomputed first when they are in use.
+
+    Every call site goes through here. The first attempt patched only one of four `solver.step`
+    call sites and the other three kept passing None, which surfaces as
+    `NoneType has no attribute rigid_contact_max` -- from a site that looked unrelated.
+    """
+    if self.collision_pipeline is not None:
+      self._sync_body_q_from_mujoco()
+      self.collision_pipeline.collide(self.state_in, self.contacts)
+    self.solver.step(self.state_in, self.state_out, self.control, self.contacts, self.physics_dt)
+
   def step(self, action: torch.Tensor):
     self.extras["log"] = dict()
     self.action_manager.advance(action)
@@ -644,7 +865,7 @@ class NewtonVecEnv:
       if self._use_cuda_graph:
         self._physics_substep_graphed(i % 2)
       else:
-        self.solver.step(self.state_in, self.state_out, self.control, None, self.physics_dt)
+        self._physics_step()
       self.state_in, self.state_out = self.state_out, self.state_in
 
     self._env.episode_length_buf += 1

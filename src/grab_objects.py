@@ -115,3 +115,37 @@ def swap_collider_to_sdf(builder, mj_reference, body_name: str, stl_path: str, *
     print(f"[sdf] {body_name}: {len(existing)} imported collider(s) disabled, "
           f"replaced by {os.path.basename(stl_path)} ({len(v)} verts, sdf res {resolution})")
   return shape
+
+
+def flag_hydroelastic(builder, mj_reference, body_names) -> int:
+    """Mark every shape on the given bodies as hydroelastic, before the scene is replicated.
+
+    Hydroelastic contact is defined between two hydroelastic surfaces. Flagging only the object and
+    leaving the table and ground as plain rigid shapes produced a mixed pairing that injected a
+    large impulse: the stapler stood itself upright around step 110 with nothing touching it, was
+    ejected by step 135, and the state went partly non-finite in between.
+
+    Primitives need no SDF -- newton/examples/robot/example_robot_panda_hydro.py notes that meshes
+    require an explicit build_sdf while primitive SDFs come from the shape config -- so the table
+    box and the ground plane only need the flag.
+    """
+    import numpy as np
+    import mujoco
+    import newton
+
+    names = [mujoco.mj_id2name(mj_reference, mujoco.mjtObj.mjOBJ_BODY, i)
+             for i in range(mj_reference.nbody)]
+    sb = np.asarray(builder.shape_body)
+    flagged = 0
+    for want in body_names:
+        if want not in names:
+            raise RuntimeError(f"body {want!r} not in the reference model; "
+                               f"present: {[n for n in names if n]}")
+        newton_body = names.index(want) - 1        # MuJoCo body 0 is the world
+        idx = np.flatnonzero(sb == newton_body)
+        if len(idx) == 0:
+            raise RuntimeError(f"body {want!r} carries no shape to flag hydroelastic")
+        for i in idx:
+            builder.shape_flags[int(i)] |= int(newton.ShapeFlags.HYDROELASTIC)
+            flagged += 1
+    return flagged

@@ -30,6 +30,9 @@ ap.add_argument("--effortless-action", action="store_true",
                 help="drop the PD torque law from the action term; it is discarded on this backend and costs a host sync per substep")
 ap.add_argument("--object-solref", default="0.004,1.0",
                 help="solref for the object collider. Default 0.004,1.0: measured, the shared default of 0.02 lets the stapler settle 1.88mm into the table (and 11.6mm in transient) against mjlab's analytic sphere at 0.37mm; 0.004 gives 0.04mm for the stapler and 0.28mm for the mug. Pass an empty string to keep the scene default.")
+ap.add_argument("--native-contacts", action="store_true",
+                help="use Newton's SDF hydroelastic collision pipeline instead of "
+                     "MuJoCo's own collision (SolverMuJoCo still integrates)")
 ap.add_argument("--table-under-object", action="store_true",
                 help="move the mocap table so the object's true collider rests where the reference places it, instead of letting the object settle away from it")
 ap.add_argument("--newton-video", default=None,
@@ -121,6 +124,7 @@ if str(getattr(agent_cfg, "base_tracker_kind", "")).strip().lower() == "astra_on
 print(f"building {A.num_envs} Newton worlds ...")
 env = NewtonVecEnv(cfg, A.xml, num_envs=A.num_envs, device="cuda:0",
                    sdf_object_stl=A.sdf_object, sdf_resolution=A.sdf_resolution,
+                   native_contacts=A.native_contacts,
                    viser_port=A.viser_port, render_every=A.render_every,
                    cuda_graph=A.cuda_graph,
                    effortless_action=A.effortless_action,

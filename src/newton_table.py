@@ -25,7 +25,7 @@ import numpy as np
 # The object is dropped onto the table from this height. Small enough that the
 # settling is not visible and does not show up in object_mpjpe_mm, large enough
 # that the object does not start already interpenetrating the surface.
-DEFAULT_GAP = 0.0005
+DEFAULT_GAP = 0.003
 
 
 def _mesh_vertices(stl_path: str):
@@ -61,28 +61,30 @@ def object_bottom_at_rest(stl_path: str, reference_pkl: str, z_offset: float = 0
   return float(pos[2]) + float(z_offset) + float(v[:, 2].min())
 
 
-def _table_half_thickness(mj_model, table_body: str = "table/table") -> float:
-  """Half height of the table's colliding geom, from the compiled model."""
+def table_top_world(mj_model, mj_data, table_body: str = "table/table") -> float:
+  """World height of the table's colliding surface, from its transformed vertices.
+
+  Half-thickness was previously read from geom_size, then from a mesh's local z-extent. Both assume
+  an orientation: MuJoCo reorients mesh assets, so the box written with half-extents
+  (0.105, 0.105, 0.02) reported a z half of 0.105 -- five times too thick -- and the table was
+  placed 85mm low while the printed number looked correct. Transforming the vertices by the geom's
+  own world frame assumes nothing.
+  """
   import mujoco
+  import sys as _sys, os as _os
+  _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+  from newton_extents import body_collider_extreme_z
+
   bid = mujoco.mj_name2id(mj_model, mujoco.mjtObj.mjOBJ_BODY, table_body)
   if bid < 0:
-    # Newton's importer rewrites body names (`table/table` becomes something like
-    # `mjlab scene_worldbody_table_table`), so match on the flattened suffix.
     want = table_body.replace("/", "_")
-    cands = [i for i in range(mj_model.nbody)
-             if (mujoco.mj_id2name(mj_model, mujoco.mjtObj.mjOBJ_BODY, i) or "")
+    cands = [k for k in range(mj_model.nbody)
+             if (mujoco.mj_id2name(mj_model, mujoco.mjtObj.mjOBJ_BODY, k) or "")
              .replace("/", "_").endswith(want)]
     if len(cands) != 1:
-      names = [mujoco.mj_id2name(mj_model, mujoco.mjtObj.mjOBJ_BODY, i)
-               for i in range(mj_model.nbody)]
-      raise RuntimeError(f"cannot identify the table body: {table_body!r} matched {len(cands)} of "
-                         f"{[n for n in names if n and 'table' in n.lower()]}")
+      raise RuntimeError(f"cannot identify the table body: {table_body!r} matched {len(cands)}")
     bid = cands[0]
-  halves = [float(mj_model.geom_size[g][2]) for g in range(mj_model.ngeom)
-            if mj_model.geom_bodyid[g] == bid and mj_model.geom_contype[g] != 0]
-  if not halves:
-    raise RuntimeError("the table body has no colliding geom, so it has no surface")
-  return max(halves)
+  return body_collider_extreme_z(mj_model, mj_data, bid, "max")
 
 
 def install(mj_model, stl_path: str, reference_pkl: str, z_offset: float = 0.0,
@@ -104,13 +106,42 @@ def install(mj_model, stl_path: str, reference_pkl: str, z_offset: float = 0.0,
   if getattr(orig, "_newton_table_shift", False):
     raise RuntimeError("the table shift is already installed; installing twice would stack shifts")
 
-  half = _table_half_thickness(mj_model)
+  import mujoco as _mj
+  import sys as _sys, os as _os
+  _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+  from newton_extents import body_collider_extreme_z
+
+  # Measure the authored surface and the authored body height together, so the runtime surface can
+  # be tracked as "authored surface + however far the mocap pose has moved the body". Deriving the
+  # surface from a half-thickness is what put the table 85mm low: MuJoCo reorients mesh assets, so
+  # a box written with half-extents (0.105, 0.105, 0.02) reports a z half of 0.105.
+  _d = _mj.MjData(mj_model)
+  _mj.mj_forward(mj_model, _d)
+  _bid = _mj.mj_name2id(mj_model, _mj.mjtObj.mjOBJ_BODY, "table/table")
+  if _bid < 0:
+    _cands = [k for k in range(mj_model.nbody)
+              if (_mj.mj_id2name(mj_model, _mj.mjtObj.mjOBJ_BODY, k) or "")
+              .replace("/", "_").endswith("table_table")]
+    if len(_cands) != 1:
+      raise RuntimeError(f"cannot identify the table body; matched {len(_cands)}")
+    _bid = _cands[0]
+  authored_top = body_collider_extreme_z(mj_model, _d, _bid, "max")
+  authored_body_z = float(_d.xpos[_bid][2])
   desired_top = object_bottom_at_rest(stl_path, reference_pkl, z_offset) - float(gap)
+  # Temporary probe hook: reproduce an earlier table height exactly, to test whether contact
+  # behaved differently there rather than arguing from recollection.
+  import os as _os
+  _extra = float(_os.environ.get("TABLE_EXTRA_SHIFT", "0.0"))
+  if _extra:
+    desired_top += _extra
+    print(f"[newton-env] TABLE_EXTRA_SHIFT {_extra*1000:+.1f} mm applied for this probe")
+
   state = {"delta": None}
 
   def shifted(table, table_pose, env_ids=None):
     if state["delta"] is None:
-      current_top = float(table_pose[0, 2].item()) + half
+      # the authored surface moves with the mocap pose, so track the delta from it
+      current_top = authored_top + (float(table_pose[0, 2].item()) - authored_body_z)
       state["delta"] = desired_top - current_top
       if verbose:
         print(f"[newton-env] table top {current_top:.4f} -> {desired_top:.4f} "
