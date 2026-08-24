@@ -258,3 +258,45 @@ Featherstone 用 Newton 自己的 `State`/`Control`,布局完全不同。
 ```
 
 **任何阶段都保留当前 `SolverMuJoCo` 路径可运行**,它是新路径唯一的参照系。
+
+## Native SDF path: stability requires a halved physics step
+
+Established 2026-08-24, with the robot actually simulated (see the harness trap below).
+
+The native path went NaN in 6 of 7 runs between step 49 and 72, always while the robot was
+collapsing and the contact count spiking. Bisected one variable at a time, two runs each,
+600 steps, all at `kh = 1e11` unless stated:
+
+| variant | run a | run b |
+|---|---|---|
+| control (`dt = 0.005`) | NaN @72 | NaN @69 |
+| `kh = 1e10` | NaN @55 | NaN @49 |
+| `kh = 1e9` | NaN @58 | NaN @56 |
+| `kh = 1e8` | survived 600 | NaN @164 |
+| `iterations=15, ls_iterations=100` | NaN @53 | survived 600 |
+| `enable_multiccd=False` | NaN @54 | NaN @53 |
+| **`dt = 0.0025`, decimation 4 -> 8** | **survived 600** | **survived 600** |
+
+Softening the contact made it *worse*, not better, so stiffness is not the driver. The step size
+is the last remaining difference from `newton/examples/robot/example_robot_panda_hydro.py`, which
+runs `sim_dt = 1/600`. mjlab uses 0.005.
+
+Confirmed afterwards over 450 steps with video: object penetration `-0.00 mm`, 34-38 stable
+contacts every sample, robot falls over naturally and the object stays put.
+
+**Open decision:** halving the step doubles the physics cost per control step. Before adopting it
+for training, measure the throughput hit and check whether it changes the mjlab-parity baseline,
+since the MuJoCo-contact path is stable at 0.005 and the acceptance criterion is parity with it.
+
+### Harness trap: `episode_length_buf`
+
+`apple_eat/mdp.py:1405` writes the robot's root pose and every joint straight into sim while
+`episode_length_buf <= 30`. That counter is incremented inside `NewtonVecEnv.step`, so a probe
+that bypasses `step()` and drives `apply_actions()` plus the physics loop directly leaves it at 0
+and the robot stays kinematically pinned for the whole run. Several videos showed a robot that
+"stood" for hundreds of steps and proved nothing about stability. Any such harness must advance
+`episode_length_buf`, `common_step_counter` and `_env.common_step_counter` by hand.
+
+The robot sinking after release (root_z 0.80 -> 0.57 over 90 steps) is not a defect: the
+MuJoCo-contact baseline sinks at the same rate (0.8153 -> 0.7295 over 62 steps). With no policy
+it simply squats.
