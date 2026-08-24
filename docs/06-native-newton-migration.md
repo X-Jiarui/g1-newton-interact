@@ -342,3 +342,34 @@ Getting there from the first measurement (322x slower, OOM above 512 env) took t
 `nconmax`/`njmax` are **per world**, not totals. Raising them to 4096/16384 for a one-env probe
 is what caused the first 2.2 GiB OOM at 2048 env; 512/2048 is right-sized now that the gap fix
 brought the per-world count to 61.
+
+## Correction: native is 2.1x, not 42x
+
+The 41.7x figure above is **retracted**. It was measured with two things wrong, both of them ours.
+
+**`broad_phase="explicit"` does no AABB culling at all.** It narrow-phases every listed pair,
+every call: 4513 pairs per world, 9.2 M at 2048 worlds, against 42-83 actual contacts. Profiled
+at 2048 env, `collide()` was 235 ms of a 254 ms substep while `solver.step()` was 19 ms -- so
+Newton's solver was already 2.1x faster than MuJoCo's whole step, and the collision pipeline was
+paying for tests nothing needed. `"nxn"` culls by AABB first. The official example gets away with
+`"explicit"` because its scene has about twenty shapes; ours has 232.
+
+**65 non-hydroelastic mesh colliders were never convex-hulled** (48 in the Wuji hand, up to 25662
+verts on one torso shape, 150 k verts per world). `example_robot_panda_hydro.py` hulls its
+non-finger shapes and we skipped it. This is parity with the baseline, not a fidelity loss:
+MuJoCo already convexifies every mesh geom for collision.
+
+| 2048 env | collide | env.step | env-steps/s |
+|---|---|---|---|
+| explicit, full meshes, dt 0.0025 | 235.23 | 2308 | 887 |
+| explicit + hulls | 4.31 | 480 | 4266 |
+| sap + hulls | 4.98 | 176 | 11631 |
+| nxn + hulls, dt 0.0025 | 4.75 | 173.7 | 11793 |
+| **nxn + hulls, dt 0.005** | **4.79** | **105.6** | **19402** |
+| MuJoCo contacts, dt 0.005 | -- | 50.7 | 40429 |
+
+**Native is 2.08x slower than the MuJoCo-contact path.** At ~20 s/iter today that is ~42 s/iter.
+
+**The halved step is no longer needed.** The NaN was never about stiffness or step size -- it was
+the explicit broad phase. With `nxn`, dt 0.005 survived 600 steps twice out of two, object at
++0.001 mm penetration with 30-33 contacts, and per-world contacts fell to 48-79.

@@ -114,7 +114,9 @@ class NewtonVecEnv:
                njmax: int = 2048, nconmax: int = 256, object_entity: str = "apple",
                sdf_object_stl: str | None = None, sdf_resolution: int = 64,
                sdf_hydroelastic: bool = False, native_contacts: bool = False,
-               hydro_kh: float | None = None, viser_port: int | None = None,
+               hydro_kh: float | None = None, hydro_grid_size: int | None = None,
+               broad_phase: str = "nxn",
+               viser_port: int | None = None,
                render_every: int = 4, solver_kwargs: dict | None = None,
                cuda_graph: bool = False, effortless_action: bool = False,
                table_under_object: bool = False, object_solref: str | None = None,
@@ -194,6 +196,27 @@ class NewtonVecEnv:
       print(f"[newton-env] hydroelastic shapes before replicate: {_n} "
             f"(object + table; a pair routes to SDF only when both sides are flagged)")
 
+      # Convex-hull every colliding mesh that is NOT hydroelastic, exactly as
+      # newton/examples/robot/example_robot_panda_hydro.py does for its non-finger shapes. This
+      # scene carries 65 such meshes per world -- 48 in the Wuji hand alone, up to 25662 verts on
+      # a single torso shape, 150k verts in total -- and Newton narrow-phases them as full meshes.
+      #
+      # This is parity with the baseline, not a loss of fidelity: MuJoCo already convexifies every
+      # mesh geom for collision (its convex-hull graph is what `graphadr` indexes), so the
+      # MuJoCo-contact path we are trying to match has been colliding hulls all along. The object
+      # and the table keep their real geometry, which is the whole point of the SDF path.
+      _H = int(newton.ShapeFlags.HYDROELASTIC)
+      _C = int(newton.ShapeFlags.COLLIDE_SHAPES)
+      _to_hull = [i for i in range(len(scene.shape_type))
+                  if int(scene.shape_type[i]) == int(newton.GeoType.MESH)
+                  and int(scene.shape_flags[i]) & _C
+                  and not (int(scene.shape_flags[i]) & _H)]
+      if _to_hull:
+        _done = scene.approximate_meshes(method="convex_hull", shape_indices=_to_hull,
+                                         keep_visual_shapes=True)
+        print(f"[newton-env] convex-hulled {len(_done)} of {len(_to_hull)} non-hydroelastic mesh "
+              f"collider(s); the object and table keep their real geometry")
+
     world.replicate(scene, world_count=self.num_envs)
     self.nmodel = world.finalize()
 
@@ -271,10 +294,29 @@ class NewtonVecEnv:
           print(f"[newton-env] added {_added} hydroelastic collision pair(s) that the MJCF import "
                 f"could not know about ({len(_pairs)} pairs total)")
           _pairs = mujoco_legal_shape_pairs(self.solver, _pairs)
-          self.collision_pipeline = CollisionPipeline(
-            self.nmodel, reduce_contacts=True, broad_phase="explicit",
-            shape_pairs_filtered=_wp.array(_pairs, dtype=_wp.vec2i, device=device),
-            sdf_hydroelastic_config=HydroelasticSDF.Config())
+          # grid_size is the hydroelastic working grid and it is charged per step regardless of
+          # how many contacts there actually are: profiled at 2048 env, collide() was 234.7 ms of
+          # a 253.9 ms substep while solver.step() was 19.2 ms, for 42 contacts per world.
+          _hydro_cfg = (HydroelasticSDF.Config(grid_size=int(hydro_grid_size))
+                        if hydro_grid_size else HydroelasticSDF.Config())
+          # "explicit" does no broad-phase pruning at all: it narrow-phases every listed pair
+          # every call. This scene lists 4513 pairs per world -- 9.2 M tests at 2048 worlds --
+          # and profiled at 123-235 ms per collide() against 19 ms for the whole solver step,
+          # with only 42-83 contacts per world to show for it. The official example gets away
+          # with "explicit" because its scene has about twenty shapes; ours has 232, of which
+          # 162 are meshes. "sap" prunes by AABB first and takes its pairs from the model's own
+          # contact-pair table, which already contains the object/table pair.
+          if broad_phase == "explicit":
+            self.collision_pipeline = CollisionPipeline(
+              self.nmodel, reduce_contacts=True, broad_phase="explicit",
+              shape_pairs_filtered=_wp.array(_pairs, dtype=_wp.vec2i, device=device),
+              sdf_hydroelastic_config=_hydro_cfg)
+          else:
+            self.collision_pipeline = CollisionPipeline(
+              self.nmodel, reduce_contacts=True, broad_phase=broad_phase,
+              sdf_hydroelastic_config=_hydro_cfg)
+            print(f"[newton-env] broad phase '{broad_phase}': pairs come from the model's own "
+                  f"contact-pair table, not the explicit list")
           self.contacts = self.collision_pipeline.contacts()
           _flags = wp.to_torch(self.nmodel.shape_flags)
           _n = int(((_flags & int(newton.ShapeFlags.HYDROELASTIC)) != 0).sum())
