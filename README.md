@@ -17,6 +17,28 @@ current number.
 
 ---
 
+## The recipe to start from
+
+For a new single-clip run, use the configuration in **[docs/RECIPE.md](docs/RECIPE.md)** rather
+than the `--native-contacts` defaults. The two solver options it sets (`cone=pyramidal`,
+`impratio=1`) are the only ones that differ between the two contact paths, and on the stapler clip
+they moved the first lift from "never cleanly" to iteration 542.
+
+To bring up a fresh box and start a sweep:
+
+```bash
+git clone https://github.com/X-Jiarui/g1-newton-interact.git && cd g1-newton-interact
+./tools/setup/bootstrap_box.sh --from user@source-box:/path      # deps + mjlab + data
+./tools/run/launch_clip_sweep.sh --top 8 --iterations 6000       # one clip per GPU
+./tools/run/monitor_runs.sh logs/monitor.txt 600 NAME1 NAME2 ...
+```
+
+`data/top100_travel.json` is the clip ranking the sweep draws from: every clip in the 1324-clip
+retarget set, sorted by how far the object actually travels, jitter-suspect clips dropped. Rebuild
+it with `tools/pipeline/rank_sequences_by_travel.py`.
+
+---
+
 ## 1. Install on a fresh box
 
 Everything below assumes a CUDA machine with a recent NVIDIA driver.
