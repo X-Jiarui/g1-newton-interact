@@ -1,86 +1,258 @@
 # G1 Wuji — mjlab → Newton port
 
-Runs an mjlab-trained residual grasping policy under [Newton](https://github.com/newton-physics/newton)
-1.5 and reproduces mjlab's behaviour.
+Trains and evaluates an mjlab residual grasping policy with [Newton](https://github.com/newton-physics/newton)
+1.5 doing the physics, and reproduces mjlab's behaviour.
 
-## Result
+Two contact paths are supported and are meant to be compared:
 
-The `apple_eat_1` checkpoint, unchanged, driven by Newton's `SolverMuJoCo`:
-
-| | mjlab @ mujoco_warp 3.8 | mjlab @ 3.11 | **Newton 1.5** |
+| | collision | object collider | status |
 |---|---|---|---|
-| peak object rise | 49.72 cm | 50.13 cm | **50.60 cm** |
-| min fingertip–object distance | 0.032 m | 0.035 m | **0.035 m** |
-| contact established | frame ~85 | frame ~85 | **frame ~85** |
-| hand–object during carry | 0.044–0.045 m | 0.044–0.045 m | **0.044–0.046 m** |
-| lift held to end of rollout | yes | yes | **yes** |
+| **MuJoCo contacts** (default) | MuJoCo's own narrow phase inside `SolverMuJoCo` | MuJoCo's convex hull (124 verts for the stapler) | the reference line; reaches `lift_success` 0.98 |
+| **Newton native** (`--native-contacts`) | Newton's `CollisionPipeline` | the real STL mesh (19991 verts) | 2.1x slower, learns more slowly on concave objects |
 
-The lift threshold is 3 cm; all three lift roughly 50. The mjlab 3.8 → 3.11 column is the control:
-it is the same code and the same checkpoint with only the mujoco_warp version changed, and it moves
-the answer by 0.4 cm. Newton sits 0.47 cm from mjlab 3.11, i.e. inside that noise floor.
+---
 
-Per-step agreement is not claimed and was never the target — two engines diverge within a few steps
-of contact-rich motion. What is claimed, and measured, is that the same weights produce the same
-behaviour.
+## 1. Install on a fresh box
 
-## What is Newton's and what is mjlab's
+Everything below assumes a CUDA machine with a recent NVIDIA driver.
 
-| | |
-|---|---|
-| **Newton** | builds the model (`ModelBuilder.add_mjcf` → `SolverMuJoCo`) and advances it (`solver.step`, dt = 0.005), including collision and control application |
-| **mjlab** | supplies the trained policy, the observation assembly (`ResidualFeatureGroupObs`, `AstraObs136`) and the action term (`Sonic53Action`) |
-| **this repo** | `src/newton_bridge.py`, which lets mjlab's code read and write Newton state |
+### 1.1 What must already exist
 
-The observation and action code is reused rather than reimplemented. The policy reads 1328 dims
-across 20 groups; re-deriving them is 1328 chances at a mistake that does not raise — as
-[docs/03-defects.md](docs/03-defects.md) shows, that failure mode cost this project several days.
+| | where it comes from | note |
+|---|---|---|
+| Python env with `mjlab`, `newton==1.5`, `warp==1.16`, `mujoco_warp`, `torch`, `viser` | project image or conda env | `newton` and `mujoco_warp` versions matter; 1.5 / 3.11 is what this was measured on |
+| **mjlab source** with the `residual_interact` and `apple_eat` tasks | the mjlab checkout this project pairs with | **verify it matches**, see 1.3 |
+| reference clips (`grab_g1_wuji_aligned`) | the GRAB retarget pipeline | 1324 clips, 17 GB |
+| object meshes (`scaled_grab_wuji_all_o70/meshes`, `scaled_grab_dataset_wuji/meshes`) | same | the second holds the full 41-object GRAB set |
+| an agent config to start from — a checkpoint directory containing `params/agent.yaml` and `params/env.yaml` | a previous sweep | see 1.4, this is not optional |
 
-One deviation is worth naming up front: the warp model is rebuilt from a **compiled** `MjModel`
-rather than Newton's reconstruction of one, because the reconstruction mislabels which bodies are
-"simple" and changes the mass matrix layout (defect 7). Stepping, contacts and control are still
-Newton's.
-
-## Repo map
-
-```
-docs/00-goal.md          acceptance criteria and why requirement 2 comes first
-docs/01-model-parity.md  the model comparison: what was checked and what it caught
-docs/02-baseline.md      the mjlab baseline — which checkpoint, and the environment it needs
-docs/03-defects.md       the eight silent defects, each with the measurement that found it
-docs/04-architecture.md  how the bridge works and what surface it covers
-docs/05-reproduce.md     exact commands
-docs/data/               machine-generated fact dumps (model fields, orderings, eval results)
-
-src/newton_bridge.py     mjlab's Entity/Env surface backed by mujoco_warp Data
-src/mjw_compat.py        lets mjlab's 3.8-era code run on mujoco_warp 3.11
-src/model_facts.py       field-level model extraction, shared by both sides
-
-tools/build/             mjlab MJCF out, Newton model in
-tools/run/               the port itself, and video rendering
-tools/verify/            parity checks: model fields, observations, lockstep stepping
-tools/eval/              the mjlab baseline these numbers are measured against
-tools/probes/            one-off investigations, kept because each settled a specific question
-```
-
-`assets/mjlab_scene/assets/` (48 MB of STL) is gitignored; `tools/build/collect_assets.py`
-regenerates it from the mjlab checkout.
-
-## Quick start
-
-See [docs/05-reproduce.md](docs/05-reproduce.md) for the full path. The short version, from a
-Python environment with both Newton and mjlab installed:
+### 1.2 Clone
 
 ```bash
-export APPLE_HAND_KIND=wuji APPLE_SCENE_Z_OFFSET=-0.03 ASTRA_BASE_BACKEND=torch
-export APPLE_EAT_PKL=$HOME/jiarui/scaled_grab_wuji_all_o70/s1/apple_eat_1.pkl
-python tools/run/run_newton.py --steps 400 --dump-qpos /tmp/newton_qpos.npz
+git clone https://github.com/X-Jiarui/g1-newton-interact.git
+cd g1-newton-interact
 ```
 
-The environment variables are not optional and none of them are defaults — the reference clip, the
-3 cm scene offset and the torch ASTRA backend all change the result. `docs/02-baseline.md` explains
-what each one does.
+### 1.3 Verify the mjlab you import is the one you think
 
-## Status
+The task code defines the observation layout and the reward weights. A mismatched checkout will
+train or evaluate a *different* agent without raising anything.
 
-Requirement 2 (infer the mjlab checkpoint in Newton) is met. Requirement 1 (train in Newton to
-mjlab's numbers at comparable iterations) has not been started.
+```bash
+python -c "import mjlab, os; print(os.path.dirname(mjlab.__file__))"
+# then compare against the box the checkpoints came from:
+cd $(python -c "import mjlab,os;print(os.path.dirname(mjlab.__file__))") && \
+  find tasks -name '*.py' | sort | xargs md5sum | md5sum
+```
+
+Run the same two lines on both machines and compare the final hash. This has caught a real
+mismatch in this project.
+
+### 1.4 Environment variables
+
+Every command below needs these. They are read at import time by the task modules, so exporting
+them after the process starts does nothing.
+
+```bash
+export APPLE_HAND_KIND=wuji
+export APPLE_SCENE_Z_OFFSET=-0.03
+export ASTRA_BASE_BACKEND=torch
+```
+
+`APPLE_EAT_PKL` is set for you by `--reference-pkl`. Configuration for this task lives in ~35
+`APPLE_*` environment variables; a run does not record which ones it used, so if a result is
+surprising, check the environment before the code.
+
+---
+
+## 2. Training
+
+### 2.1 Newton native contacts
+
+```bash
+python tools/run/train_newton.py \
+  --xml assets/scene_stapler/scene.xml \
+  --reference-pkl $DATA/grab_g1_wuji_aligned/s8/stapler_pass_1.pkl \
+  --sdf-object   $DATA/scaled_grab_wuji_all_o70/meshes/stapler.stl \
+  --native-contacts --rigid-object-table --table-under-object --cuda-graph \
+  --num-envs 2048 --iterations 6000 --seed 1 \
+  --run-name MY_RUN
+```
+
+### 2.2 The MuJoCo-contact control
+
+Identical minus two flags. Use this whenever you need a line that is known to learn:
+
+```bash
+python tools/run/train_newton.py \
+  --xml assets/scene_stapler/scene.xml \
+  --reference-pkl $DATA/grab_g1_wuji_aligned/s8/stapler_pass_1.pkl \
+  --sdf-object   $DATA/scaled_grab_wuji_all_o70/meshes/stapler.stl \
+  --table-under-object --cuda-graph \
+  --num-envs 2048 --iterations 6000 --seed 1 \
+  --run-name MY_CONTROL
+```
+
+### 2.3 Flags that matter, and why
+
+| flag | effect |
+|---|---|
+| `--native-contacts` | switches to Newton's `CollisionPipeline`. Also convex-hulls the robot's 65 mesh colliders, swaps the table to a mesh collider, raises `nconmax`/`njmax`/`contact_sensor_maxmatch`/`max_triangle_pairs`, and enables the world-welded body pose sync. It is a bundle, not one knob. |
+| `--rigid-object-table` | the object/table pair collides rigidly instead of through the hydroelastic SDF. Hydroelastic was that pair's only consumer; turning it off cut per-world contacts from 48-79 to 19-25 and took the path from 1.46x to 1.10x of the MuJoCo line. The object keeps its real mesh either way. |
+| `--table-under-object` | places the table under the object using the reference clip and the true collider extents. Without it the object starts in the air. |
+| `--cuda-graph` | 2.15x at 2048 env. The body-pose sync had to be written as a warp kernel to stay capturable. |
+| `--solver-kwargs '{"impratio": 1.0, "cone": "pyramidal"}'` | override the solver. The native default is `elliptic` / `impratio=1000`, copied from Newton's hydroelastic example; the MuJoCo line runs `pyramidal` / `impratio=1`. |
+| `--table-sdf-resolution` | free to lower — at 8 the resting penetration is still -0.002 mm. It does not change the contact count, which follows the *object's* resolution. |
+| `--resume` | warm-start from a checkpoint. rsl_rl keeps only the last five rolling checkpoints plus every 500th, so copy the one you want somewhere safe before using it. |
+
+### 2.4 Watching a run
+
+The numbers that carry information, in order of usefulness:
+
+- `Episode_Metrics/object_motion_frac` — the object is actually moving. The clearest early separator.
+- `Stage/physical_contact` — the hand is touching it.
+- `Episode_Metrics/lift_success` — fraction of *finished episodes* that ever lifted 3 cm and held 0.5 s.
+- `PhaseA/lift_success` — the same criterion sampled *every step over all envs*, so it is much lower
+  and rises as the policy lifts *earlier*. `lift` 0.97 with `liftA` 0.20 is not a contradiction.
+- `Health/nonfinite_worlds` — only logged when non-zero. Silence is good.
+
+Do not judge before ~4500 iterations. Both baselines sat at exactly zero contact and zero lift for
+4400 iterations and then turned on together, as a phase transition (stapler at 4447, mug at 5992),
+and one mug seed never lifted at all in 7295 iterations. Seed variance is large.
+
+---
+
+## 3. Headed evaluation
+
+Serves a live viser view of a rollout, with a dropdown that hot-swaps checkpoints.
+
+```bash
+python tools/run/run_newton.py \
+  --xml assets/scene_stapler/scene.xml \
+  --reference-pkl $DATA/grab_g1_wuji_aligned/s8/stapler_pass_1.pkl \
+  --sdf-object   $DATA/scaled_grab_wuji_all_o70/meshes/stapler.stl \
+  --agent-cfg-from $SWEEP/OF_00_apple_eat_1_SPHERE/model_7310.pt \
+  --table-under-object \
+  --checkpoint  $CK/model_2000.pt \
+  --checkpoints "$CK/model_2000.pt,$CK/model_1500.pt,$CK/model_1000.pt" \
+  --viser-port 8099 --steps 400 --start-frame 0
+```
+
+From your laptop:
+
+```bash
+ssh -N -L 8099:localhost:8099 <user>@<host>     # then open http://localhost:8099
+```
+
+The GUI panel carries the checkpoint dropdown, a *restart rollout* button, and a status line.
+Selecting a checkpoint reloads the policy into the existing runner and restarts from reference
+frame 0, so the comparison between checkpoints is fair.
+
+**`--agent-cfg-from` is required, not optional.** `train_newton.py` takes its agent config from a
+default checkpoint elsewhere and writes no `params/` into its own run directory. Pointing the eval
+at the checkpoint under evaluation would silently evaluate a different agent.
+
+Note this path runs **MuJoCo contacts** — `run_newton.py` builds its own solver and has no
+`--native-contacts`. A policy trained natively and evaluated here is being scored under a different
+contact engine.
+
+---
+
+## 4. Objects: SDF pipeline and gallery
+
+### 4.1 Build and validate a collider for every object
+
+```bash
+python tools/pipeline/build_object_sdfs.py \
+  --mesh-dir $DATA/scaled_grab_dataset_wuji/meshes \
+  --out artifacts/pipeline/sdf_manifest.json \
+  --cache-dir ~/.cache/sdf
+```
+
+Two stages. **build** bakes the SDF and records geometry facts; **drop test** puts the object on a
+table in a minimal Newton scene and measures how it settles. The second stage is the point: an SDF
+that bakes without error can still be unusable — at resolution 16 the stapler builds fine and then
+rests 2.7 mm inside the table.
+
+Result over the 41 GRAB objects: 41/41 built, 41/41 accepted, |penetration| median 0.0096 mm, worst
+0.4533 mm, 7.7 s total.
+
+Resolution is chosen **per object** from a 1 mm target voxel, not fixed. `max_resolution` divides
+the *longest* axis, so a fixed 64 gives a 22 cm knife a 3.8 mm voxel and its blade one or two voxels
+of thickness (knife 1.06 mm into the table, flute 1.17, gamecontroller 0.76). Raising it globally is
+wrong in the other direction: at 256 the stapler produced zero contacts where 64 and 128 rest at
+-0.0005 mm.
+
+### 4.2 Look at the colliders
+
+```bash
+python tools/pipeline/object_gallery.py \
+  --mesh-dir $DATA/scaled_grab_dataset_wuji/meshes \
+  --manifest artifacts/pipeline/sdf_manifest.json \
+  --port 8100
+ssh -N -L 8100:localhost:8100 <user>@<host>     # then open http://localhost:8100
+```
+
+Dropdown over all 41 objects, each resting on the table, drawn as the geometry the physics
+collides. A checkbox overlays the convex hull — what the MuJoCo path collides instead. On the
+stapler the hull fills in the cavity under the handle; that difference is the leading explanation
+for why the two contact paths learn this object at different rates.
+
+### 4.3 Rank clips by how far the object travels
+
+```bash
+python tools/pipeline/rank_sequences_by_travel.py \
+  --dataset $DATA/grab_g1_wuji_aligned \
+  --out artifacts/pipeline/top100.json --top 100 --exclude-jitter
+```
+
+Reports path length, net displacement, furthest-from-start and vertical range, and de-duplicates by
+`(subject, sequence)`. Path length alone is not enough: `stapler_lift` accumulates 1.853 m of path
+while never getting more than 0.124 m from its start, so it is flagged jitter-suspect rather than
+ranked above clips that genuinely move.
+
+---
+
+## 5. Things that will bite you
+
+Each cost real time here. [docs/03-defects.md](docs/03-defects.md) and
+[docs/06-native-newton-migration.md](docs/06-native-newton-migration.md) carry the full accounts.
+
+- **A metric reading exactly `0.0000` often means NaN.** `_safe_log` computes
+  `nan_to_num(value.mean(), nan=0.0)` — mean first — so one non-finite world zeroes a whole metric.
+- **Non-finite worlds do not heal.** The NaN sits in `qacc` and the solver warm start, which the
+  reset events never write. `_nonfinite_worlds` / `_clear_world_state` detect and clear them.
+- **`nconmax`, `njmax` and the SDF grid are all per world.** Sizes that are right for a one-env
+  probe OOM at 2048.
+- **Anything `O(n^2)` over shapes explodes after replication.** A pair-completion loop that added
+  0 pairs at one env generated 8.4 M at 2048.
+- **`contact_sensor_maxmatch` defaults to 64** and silently truncates the sensors the grasp rewards
+  read. It is raised to 256 on the native path.
+- **`broad_phase="explicit"` does no AABB culling.** It narrow-phased 9.2 M pairs per call for
+  42-83 actual contacts; `nxn` is the default now.
+- **The robot is hard-held for the first 30 steps** (`episode_length_buf <= 30`), and the reference
+  frame is driven by that same counter. Any probe that bypasses `env.step()` must advance it by hand.
+- **The table is placed by a reset event** and sits under the robot's feet before the first reset.
+- **Verify geometry by vertex count, not by log lines.** A log line here asserted the object kept
+  its real geometry while it was being hulled to 64 vertices.
+- **Never run a probe on a GPU that has a training process.** It has already OOM-killed a run.
+- **Never `pkill -f` / `pgrep -f` a pattern that appears in your own command line.** `ps` lists your
+  own process; the pattern matches itself. This killed the controlling ssh session three times and
+  left a liveness check permanently reporting "alive".
+
+---
+
+## 6. Repo map
+
+| path | what |
+|---|---|
+| `src/newton_vec_env.py` | the training env: builds the Newton model, both contact paths, the manager loop |
+| `src/newton_bridge.py` | lets mjlab's observation and action code read and write Newton state |
+| `src/grab_objects.py` | swaps an entity's collider for a real STL and bakes its SDF |
+| `src/newton_table.py`, `src/newton_extents.py` | table placement from measured collider extents |
+| `tools/run/train_newton.py` | training entry point |
+| `tools/run/run_newton.py` | rollout / headed eval with the checkpoint dropdown |
+| `tools/pipeline/build_object_sdfs.py` | per-object SDF build + drop-test validation |
+| `tools/pipeline/object_gallery.py` | viser gallery of collider geometry |
+| `tools/pipeline/rank_sequences_by_travel.py` | clip ranking by object travel |
+| `docs/` | goal, parity, baseline, defects, architecture, reproduction, native migration |
