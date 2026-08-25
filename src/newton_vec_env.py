@@ -281,7 +281,6 @@ class NewtonVecEnv:
           print(f"[newton-env] native contacts: nconmax -> {nconmax}, njmax -> {njmax} "
                 f"(mjlab's 256 is sized for MuJoCo's own narrow phase)")
         _kw = dict(enable_multiccd=True, update_data_interval=0, njmax=njmax, nconmax=nconmax)
-        _kw.update(solver_kwargs or {})
         # Newton's own SDF hydroelastic contact, following
         # newton/examples/robot/example_robot_panda_hydro.py: the CollisionPipeline computes the
         # contacts and SolverMuJoCo integrates them, instead of MuJoCo doing its own collision.
@@ -294,6 +293,11 @@ class NewtonVecEnv:
           from newton.geometry import HydroelasticSDF
           _kw.update(use_mujoco_contacts=False, solver="newton", integrator="implicitfast",
                      cone="elliptic", impratio=1000.0)
+        # Caller overrides go LAST. They used to be merged before this block, which silently
+        # discarded any attempt to change cone or impratio on the native path -- the very knobs
+        # most worth testing, since elliptic/1000 was copied from the hydroelastic example and we
+        # no longer run hydroelastic contact.
+        _kw.update(solver_kwargs or {})
         self.solver = SolverMuJoCo(self.nmodel, **_kw)
         if native_contacts:
           # The collision-pair table is built by add_mjcf from the ORIGINAL shapes. The SDF

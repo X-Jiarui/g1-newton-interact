@@ -26,6 +26,17 @@ from pathlib import Path
 import numpy as np, torch, yaml as _yaml
 
 ap = argparse.ArgumentParser()
+ap.add_argument("--agent-cfg-from", default=os.path.expanduser(
+  "~/sweep_ckpts_r2/OF_00_apple_eat_1_SPHERE/model_7310.pt"),
+  help="checkpoint whose params/agent.yaml supplies the agent config. Must match what the run "
+       "being evaluated trained with: train_newton.py takes its agent config from this same "
+       "default, and its own run directory contains no params/, so deriving the config from the "
+       "checkpoint under evaluation would silently evaluate a different agent.")
+ap.add_argument("--checkpoints", default=None,
+                help="comma-separated checkpoints to offer in a viser dropdown. The runner is "
+                     "built once from --checkpoint and reloaded in place on each selection, so "
+                     "the observation bridge and policy wrapper are constructed exactly once. "
+                     "Implies an endless rollout that restarts whenever the selection changes.")
 ap.add_argument("--checkpoint", default=os.path.expanduser(
   "~/sweep_ckpts_r2/OF_00_apple_eat_1_SPHERE/model_7310.pt"))
 ap.add_argument("--xml", default=os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets/mjlab_scene/scene.xml"))
@@ -287,7 +298,14 @@ TASK = "Mjlab-ResidualInteract-G1"
 ck = Path(A.checkpoint)
 env_cfg = load_env_cfg(TASK, play=True); env_cfg.scene.num_envs = 1
 agent_cfg = load_rl_cfg(TASK)
-_apply_cfg_mapping(agent_cfg, _yaml.unsafe_load((ck.parent / "params" / "agent.yaml").open()))
+_cfg_src = Path(A.agent_cfg_from).parent / "params" / "agent.yaml"
+if not _cfg_src.exists():
+  _cfg_src = ck.parent / "params" / "agent.yaml"
+if not _cfg_src.exists():
+  raise SystemExit(f"no agent.yaml at {Path(A.agent_cfg_from).parent / 'params'} nor "
+                   f"{ck.parent / 'params'}; evaluation would use a different agent than training")
+print(f"agent config from {_cfg_src}")
+_apply_cfg_mapping(agent_cfg, _yaml.unsafe_load(_cfg_src.open()))
 _act = getattr(env_cfg, "actions", None)
 _sonic_cfg = _act.get("sonic_action") if isinstance(_act, dict) else getattr(_act, "sonic_action")
 _sonic_cfg.tracking_start_assist_gain = 0.0      # every candidate trained with the assist disabled
@@ -441,6 +459,24 @@ if A.viser_port:
   viser_viewer.set_model(nmodel)
   print(f"viser serving this rollout on http://localhost:{A.viser_port}")
 
+_ck_state = None
+if A.checkpoints and viser_viewer is not None:
+  # ViewerViser keeps the raw viser.ViserServer on _server; the GUI goes there.
+  _paths = [p.strip() for p in A.checkpoints.split(",") if p.strip()]
+  _names = [os.path.basename(p) for p in _paths]
+  _srv = viser_viewer._server
+  _dd = _srv.gui.add_dropdown("checkpoint", tuple(_names), initial_value=_names[0])
+  _restart = _srv.gui.add_button("restart rollout")
+  _status = _srv.gui.add_text("status", initial_value="loading...")
+  _ck_state = {"paths": _paths, "names": _names, "dd": _dd, "restart": _restart,
+               "status": _status, "current": None, "want_restart": False}
+
+  @_restart.on_click
+  def _(_evt) -> None:
+    _ck_state["want_restart"] = True
+
+  print(f"checkpoint dropdown: {_names}")
+
 # ------------------------------------------------------------------- rollout
 nenv._force_reference_start_frame = int(A.start_frame)
 
@@ -517,107 +553,162 @@ print(f"\nstepping Newton: dt={DT} decimation={DECIMATION} -> control dt {DT*DEC
 print(f"\n{'step':>5} {'frame':>6} {'obj_z':>8} {'rise_cm':>8} {'h2o_m':>8} {'nefc':>7}")
 print("-" * 52)
 
-for k in range(A.steps):
-  obs = _obs_dict()
-  with torch.inference_mode():
-    action = policy(obs)
-  n_sync = _sync_residual_stats()
-  if k == 0:
-    print(f"  residual-stats attributes synced onto the Newton env: {n_sync}/"
-          f"{len(_RESIDUAL_STATS_ATTRS)}")
-  amgr.advance(action)          # keeps last_final_action / last_residual live, as mjlab does
-  action_term.process_actions(action)
+def _maybe_swap_checkpoint():
+  """Load the selected checkpoint into the existing runner. Returns True if it changed."""
+  global policy
+  if _ck_state is None:
+    return False
+  want = _ck_state["dd"].value
+  if want == _ck_state["current"]:
+    return False
+  path = _ck_state["paths"][_ck_state["names"].index(want)]
+  _ck_state["status"].value = f"loading {want} ..."
+  runner.load(path)
+  policy = runner.get_inference_policy(device="cuda:0")
+  policy = _maybe_wrap_residual_action_stats_policy(TASK, runner, policy)
+  _ck_state["current"] = want
+  _ck_state["status"].value = f"running {want}"
+  print(f"[dropdown] loaded {want}")
+  return True
 
-  # apply_actions() goes INSIDE the decimation loop, exactly as mjlab's step() does:
-  #   for _ in range(decimation): apply_action(); write_data_to_sim(); sim.step(); scene.update()
-  # It is not just a ctrl write. Every call re-applies the startup root/joint hold, the table pose
-  # and the reference object tracking, so calling it once per control step instead of once per
-  # substep runs all of that at a quarter of its intended rate.
-  for _ in range(DECIMATION):
-    action_term.apply_actions()
-    solver.step(state_in, state_out, control, None, DT)
-    state_in, state_out = state_out, state_in
 
-  nenv.episode_length_buf += 1
+def _reset_rollout():
+  """Put the Newton scene back to the reference start so a new checkpoint is judged fairly."""
+  global z0, peak
+  z0 = None
+  peak = {"rise": -99.0, "min_h2o": 9.9, "contact": 0.0}
+  # Re-run mjlab's OWN reset event, the same call the script uses once at line ~491 to place the
+  # robot, object and table at the reference start frame. NewtonEnv is a bridge and has no reset()
+  # of its own -- calling one silently placed nothing and the next checkpoint would have been
+  # judged from wherever the previous rollout happened to end.
+  # The reference frame is driven by the episode clock, not by the reset event:
+  #   apple_eat/mdp.py _tracking_frame -> start + (episode_length_buf - 36).clamp(min=0), clamped
+  #   to the clip end.
+  # Replaying the reset event alone left episode_length_buf at ~400 from the previous rollout, so
+  # the frame pinned to the clip's last row and the robot stood in the final pose with its hand a
+  # metre from the object -- which looks exactly like a policy that never learned to reach.
+  nenv.episode_length_buf.zero_()
+  if hasattr(nenv, "common_step_counter"):
+    nenv.common_step_counter = 0
+  nenv._force_reference_start_frame = int(A.start_frame)
+  reset_cfg.func(nenv, None, **reset_params)
 
-  if viewer is not None:
-    # Drive the render from mjw_data, not from whatever Newton's State happens to hold. The table is
-    # a mocap body: its pose is written to mocap_pos and never enters State, so it renders at the
-    # origin and the apple appears to float in mid-air with nothing under it. Syncing every body
-    # makes the picture match the simulation by construction rather than by coincidence.
-    #
-    # Both conventions here were measured, not assumed (tools/probes/probe_bodymap.py):
-    # Newton body i is MuJoCo body i+1 (MuJoCo's body 0 is the world), and Newton stores quaternions
-    # xyzw against MuJoCo's wxyz.
-    _bq = wp.to_torch(state_in.body_q)
-    _xp = wp.to_torch(solver.mjw_data.xpos)[0]
-    _xq = wp.to_torch(solver.mjw_data.xquat)[0]
-    _n = _bq.shape[0]
-    _bq[:, 0:3] = _xp[1:1 + _n]
-    _bq[:, 3:7] = _xq[1:1 + _n][:, [1, 2, 3, 0]]
-    viewer.begin_frame(k * DT * DECIMATION)
-    viewer.log_state(state_in)
-    viewer.end_frame()
-    img = viewer.get_frame()
-    frames.append(np.asarray(img.numpy() if hasattr(img, "numpy") else img).copy())
 
-  for _sensor in nenv.scene.values():
-    if hasattr(_sensor, "update"):
-      _sensor.update(DT * DECIMATION)
+_endless = _ck_state is not None
+while True:
+  _maybe_swap_checkpoint()
+  if _endless:
+    _reset_rollout()
+  for k in range(A.steps):
+    if _endless and (_ck_state["dd"].value != _ck_state["current"]
+                     or _ck_state["want_restart"]):
+      _ck_state["want_restart"] = False
+      break
+    obs = _obs_dict()
+    with torch.inference_mode():
+      action = policy(obs)
+    n_sync = _sync_residual_stats()
+    if k == 0:
+      print(f"  residual-stats attributes synced onto the Newton env: {n_sync}/"
+            f"{len(_RESIDUAL_STATS_ATTRS)}")
+    amgr.advance(action)          # keeps last_final_action / last_residual live, as mjlab does
+    action_term.process_actions(action)
 
-  if os.environ.get("SENSOR_PROBE") and k % 20 == 0:
-    from mjlab.tasks.residual_interact import mdp as _rm
-    _c, _g, _f = _rm._physical_contact(nenv)
-    _found = nenv.scene["hand_apple_contact"].data.found
-    print(f"LIVE step={k:4d} contact={float(_c.float().mean()):.3f} "
-          f"grasp2tips={float(_g.float().mean()):.3f} closeforce={float(_f.float().mean()):.3f} "
-          f"tips_touching={int((_found > 0).sum())}")
+    # apply_actions() goes INSIDE the decimation loop, exactly as mjlab's step() does:
+    #   for _ in range(decimation): apply_action(); write_data_to_sim(); sim.step(); scene.update()
+    # It is not just a ctrl write. Every call re-applies the startup root/joint hold, the table pose
+    # and the reference object tracking, so calling it once per control step instead of once per
+    # substep runs all of that at a quarter of its intended rate.
+    for _ in range(DECIMATION):
+      action_term.apply_actions()
+      solver.step(state_in, state_out, control, None, DT)
+      state_in, state_out = state_out, state_in
 
-  if viser_viewer is not None:
-    # Same body-transform sync as the video path: mjw_data is authoritative and the table is a
-    # mocap body whose pose never enters State, so without this it renders at the origin.
-    _bq = wp.to_torch(state_in.body_q)
-    _xp = wp.to_torch(solver.mjw_data.xpos)[0]
-    _xq = wp.to_torch(solver.mjw_data.xquat)[0]
-    _n = _bq.shape[0]
-    _bq[:, 0:3] = _xp[1:1 + _n]
-    _bq[:, 3:7] = _xq[1:1 + _n][:, [1, 2, 3, 0]]
-    viser_viewer.begin_frame(k * DT * DECIMATION)
-    viser_viewer.log_state(state_in)
-    viser_viewer.end_frame()
+    nenv.episode_length_buf += 1
 
-  z = float(obj.data.root_link_pos_w[0, 2])
-  if z0 is None:
-    z0 = z
-  rise = (z - z0) * 100.0
-  peak["rise"] = max(peak["rise"], rise)
+    if viewer is not None:
+      # Drive the render from mjw_data, not from whatever Newton's State happens to hold. The table is
+      # a mocap body: its pose is written to mocap_pos and never enters State, so it renders at the
+      # origin and the apple appears to float in mid-air with nothing under it. Syncing every body
+      # makes the picture match the simulation by construction rather than by coincidence.
+      #
+      # Both conventions here were measured, not assumed (tools/probes/probe_bodymap.py):
+      # Newton body i is MuJoCo body i+1 (MuJoCo's body 0 is the world), and Newton stores quaternions
+      # xyzw against MuJoCo's wxyz.
+      _bq = wp.to_torch(state_in.body_q)
+      _xp = wp.to_torch(solver.mjw_data.xpos)[0]
+      _xq = wp.to_torch(solver.mjw_data.xquat)[0]
+      _n = _bq.shape[0]
+      _bq[:, 0:3] = _xp[1:1 + _n]
+      _bq[:, 3:7] = _xq[1:1 + _n][:, [1, 2, 3, 0]]
+      viewer.begin_frame(k * DT * DECIMATION)
+      viewer.log_state(state_in)
+      viewer.end_frame()
+      img = viewer.get_frame()
+      frames.append(np.asarray(img.numpy() if hasattr(img, "numpy") else img).copy())
 
-  # fingertip-to-object distance, using mjlab's own helper so it means the same thing it does there
-  try:
-    d = rmdp._tip_distances(nenv)
-    h2o = float(d.min())
-  except Exception:
-    h2o = float("nan")
-  if h2o == h2o:
-    peak["min_h2o"] = min(peak["min_h2o"], h2o)
+    for _sensor in nenv.scene.values():
+      if hasattr(_sensor, "update"):
+        _sensor.update(DT * DECIMATION)
 
-  # mujoco_warp exposes no scalar contact count here (`contact` is a fixed 256-slot struct), so the
-  # active constraint-row count is reported instead. It is the quantity that actually matters for the
-  # budget: this is what overflowed njmax and silently dropped the table contact (defect 4).
-  _ne = solver.mjw_data.nefc
-  nefc = int(np.asarray(_ne.numpy() if hasattr(_ne, "numpy") else _ne).reshape(-1)[0])
-  if A.dump_qpos:
-    qpos_log.append(wp.to_torch(solver.mjw_data.qpos)[0].detach().cpu().numpy().copy())
-    # The table is a mocap body, so its pose lives outside qpos. Without it the render puts the
-    # table at the origin and the apple appears to float.
-    mocap_log.append((wp.to_torch(solver.mjw_data.mocap_pos)[0].detach().cpu().numpy().copy(),
-                      wp.to_torch(solver.mjw_data.mocap_quat)[0].detach().cpu().numpy().copy()))
-  frame = int(rmdp._tracking_frame(nenv, int(amdp._ref(str(nenv.device))["n_frames"]))[0])
-  rows.append(dict(step=k, frame=frame, obj_z=z, rise_cm=rise, h2o=h2o, nefc=nefc))
-  if k % A.every == 0 or k == A.steps - 1:
-    print(f"{k:5d} {frame:6d} {z:8.3f} {rise:8.2f} {h2o:8.3f} {nefc:7d}")
-  if A.until_ref_end and frame >= N_FRAMES - 1:
-    print(f"{k:5d} {frame:6d} {z:8.3f} {rise:8.2f} {h2o:8.3f} {nefc:7d}   <- reference end")
+    if os.environ.get("SENSOR_PROBE") and k % 20 == 0:
+      from mjlab.tasks.residual_interact import mdp as _rm
+      _c, _g, _f = _rm._physical_contact(nenv)
+      _found = nenv.scene["hand_apple_contact"].data.found
+      print(f"LIVE step={k:4d} contact={float(_c.float().mean()):.3f} "
+            f"grasp2tips={float(_g.float().mean()):.3f} closeforce={float(_f.float().mean()):.3f} "
+            f"tips_touching={int((_found > 0).sum())}")
+
+    if viser_viewer is not None:
+      # Same body-transform sync as the video path: mjw_data is authoritative and the table is a
+      # mocap body whose pose never enters State, so without this it renders at the origin.
+      _bq = wp.to_torch(state_in.body_q)
+      _xp = wp.to_torch(solver.mjw_data.xpos)[0]
+      _xq = wp.to_torch(solver.mjw_data.xquat)[0]
+      _n = _bq.shape[0]
+      _bq[:, 0:3] = _xp[1:1 + _n]
+      _bq[:, 3:7] = _xq[1:1 + _n][:, [1, 2, 3, 0]]
+      viser_viewer.begin_frame(k * DT * DECIMATION)
+      viser_viewer.log_state(state_in)
+      viser_viewer.end_frame()
+
+    z = float(obj.data.root_link_pos_w[0, 2])
+    if z0 is None:
+      z0 = z
+    rise = (z - z0) * 100.0
+    peak["rise"] = max(peak["rise"], rise)
+
+    # fingertip-to-object distance, using mjlab's own helper so it means the same thing it does there
+    try:
+      d = rmdp._tip_distances(nenv)
+      h2o = float(d.min())
+    except Exception:
+      h2o = float("nan")
+    if h2o == h2o:
+      peak["min_h2o"] = min(peak["min_h2o"], h2o)
+
+    # mujoco_warp exposes no scalar contact count here (`contact` is a fixed 256-slot struct), so the
+    # active constraint-row count is reported instead. It is the quantity that actually matters for the
+    # budget: this is what overflowed njmax and silently dropped the table contact (defect 4).
+    _ne = solver.mjw_data.nefc
+    nefc = int(np.asarray(_ne.numpy() if hasattr(_ne, "numpy") else _ne).reshape(-1)[0])
+    if A.dump_qpos:
+      qpos_log.append(wp.to_torch(solver.mjw_data.qpos)[0].detach().cpu().numpy().copy())
+      # The table is a mocap body, so its pose lives outside qpos. Without it the render puts the
+      # table at the origin and the apple appears to float.
+      mocap_log.append((wp.to_torch(solver.mjw_data.mocap_pos)[0].detach().cpu().numpy().copy(),
+                        wp.to_torch(solver.mjw_data.mocap_quat)[0].detach().cpu().numpy().copy()))
+    frame = int(rmdp._tracking_frame(nenv, int(amdp._ref(str(nenv.device))["n_frames"]))[0])
+    rows.append(dict(step=k, frame=frame, obj_z=z, rise_cm=rise, h2o=h2o, nefc=nefc))
+    if k % A.every == 0 or k == A.steps - 1:
+      print(f"{k:5d} {frame:6d} {z:8.3f} {rise:8.2f} {h2o:8.3f} {nefc:7d}")
+    if A.until_ref_end and frame >= N_FRAMES - 1:
+      print(f"{k:5d} {frame:6d} {z:8.3f} {rise:8.2f} {h2o:8.3f} {nefc:7d}   <- reference end")
+      break
+
+  if not _endless:
+    # Without --checkpoints this is a single rollout, exactly as before: run once and fall
+    # through to the summary, the qpos dump and the video writer below.
     break
 
 print("-" * 52)

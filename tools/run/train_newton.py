@@ -11,6 +11,7 @@ while the two states agree (both 0 through the startup hold) and diverges only w
 from __future__ import annotations
 
 import argparse
+import json as _json
 import os
 import sys
 from dataclasses import asdict
@@ -30,6 +31,13 @@ ap.add_argument("--effortless-action", action="store_true",
                 help="drop the PD torque law from the action term; it is discarded on this backend and costs a host sync per substep")
 ap.add_argument("--object-solref", default="0.004,1.0",
                 help="solref for the object collider. Default 0.004,1.0: measured, the shared default of 0.02 lets the stapler settle 1.88mm into the table (and 11.6mm in transient) against mjlab's analytic sphere at 0.37mm; 0.004 gives 0.04mm for the stapler and 0.28mm for the mug. Pass an empty string to keep the scene default.")
+ap.add_argument("--solver-kwargs", default=None,
+                help="JSON merged into the SolverMuJoCo kwargs, e.g. "
+                     "'{\"impratio\": 1.0, \"cone\": \"pyramidal\"}'. The native path defaults "
+                     "to cone=elliptic with impratio=1000, copied from Newton's hydroelastic "
+                     "example; that ratio makes the tangential (friction) constraints three "
+                     "orders softer than the normal ones, which is a candidate explanation for "
+                     "'the hand touches the object but the object does not move'.")
 ap.add_argument("--rigid-object-table", action="store_true",
                 help="With --native-contacts, collide the object and table rigidly instead of "
                      "through the hydroelastic SDF. Measured at 1024 env: object/table contacts "
@@ -145,7 +153,8 @@ env = NewtonVecEnv(cfg, A.xml, num_envs=A.num_envs, device="cuda:0",
                    object_solref=A.object_solref,
                    dump_qpos=A.dump_qpos, dump_steps=A.dump_steps,
                    newton_video=A.newton_video, video_size=A.video_size,
-                   video_steps=A.video_steps, video_cam=A.video_cam)
+                   video_steps=A.video_steps, video_cam=A.video_cam,
+                   solver_kwargs=(_json.loads(A.solver_kwargs) if A.solver_kwargs else None))
 
 if os.environ.get("HULL_PROBE"):
   import numpy as _np, mujoco as _mj
