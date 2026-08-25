@@ -5,10 +5,15 @@ Trains and evaluates an mjlab residual grasping policy with [Newton](https://git
 
 Two contact paths are supported and are meant to be compared:
 
-| | collision | object collider | status |
+| | collision | object collider | throughput at 2048 env |
 |---|---|---|---|
-| **MuJoCo contacts** (default) | MuJoCo's own narrow phase inside `SolverMuJoCo` | MuJoCo's convex hull (124 verts for the stapler) | the reference line; reaches `lift_success` 0.98 |
-| **Newton native** (`--native-contacts`) | Newton's `CollisionPipeline` | the real STL mesh (19991 verts) | 2.1x slower, learns more slowly on concave objects |
+| **MuJoCo contacts** (default) | MuJoCo's own narrow phase inside `SolverMuJoCo` | MuJoCo's convex hull, 124 verts for the stapler | 40429 env-steps/s |
+| **Newton native** (`--native-contacts --rigid-object-table`) | Newton's `CollisionPipeline` | the real STL mesh, 19991 verts | 32437 env-steps/s (1.25x slower) |
+
+Which one learns faster is **not settled** — see [Status](#status) before drawing a conclusion
+from either. Earlier revisions of this file quoted 2.1x and 1.10x for the native path; both were
+measured before `--rigid-object-table` or at a different env count. 1.25x at 2048 env is the
+current number.
 
 ---
 
@@ -98,7 +103,7 @@ python tools/run/train_newton.py \
 | flag | effect |
 |---|---|
 | `--native-contacts` | switches to Newton's `CollisionPipeline`. Also convex-hulls the robot's 65 mesh colliders, swaps the table to a mesh collider, raises `nconmax`/`njmax`/`contact_sensor_maxmatch`/`max_triangle_pairs`, and enables the world-welded body pose sync. It is a bundle, not one knob. |
-| `--rigid-object-table` | the object/table pair collides rigidly instead of through the hydroelastic SDF. Hydroelastic was that pair's only consumer; turning it off cut per-world contacts from 48-79 to 19-25 and took the path from 1.46x to 1.10x of the MuJoCo line. The object keeps its real mesh either way. |
+| `--rigid-object-table` | the object/table pair collides rigidly instead of through the hydroelastic SDF. Hydroelastic was that pair's only consumer; turning it off cut per-world contacts from 48-79 to 19-25 and took the path from 1.46x to 1.10x of the MuJoCo line at 1024 env (1.25x at 2048). The object keeps its real mesh either way. |
 | `--table-under-object` | places the table under the object using the reference clip and the true collider extents. Without it the object starts in the air. |
 | `--cuda-graph` | 2.15x at 2048 env. The body-pose sync had to be written as a warp kernel to stay capturable. |
 | `--solver-kwargs '{"impratio": 1.0, "cone": "pyramidal"}'` | override the solver. The native default is `elliptic` / `impratio=1000`, copied from Newton's hydroelastic example; the MuJoCo line runs `pyramidal` / `impratio=1`. |
@@ -116,9 +121,18 @@ The numbers that carry information, in order of usefulness:
   and rises as the policy lifts *earlier*. `lift` 0.97 with `liftA` 0.20 is not a contradiction.
 - `Health/nonfinite_worlds` — only logged when non-zero. Silence is good.
 
-Do not judge before ~4500 iterations. Both baselines sat at exactly zero contact and zero lift for
-4400 iterations and then turned on together, as a phase transition (stapler at 4447, mug at 5992),
-and one mug seed never lifted at all in 7295 iterations. Seed variance is large.
+`Episode_Metrics/ep_len` is **not** the average episode length. Its term uses the default
+`reduce="mean"`, which averages `episode_length_buf` over the steps *within* an episode, so for an
+episode of length L it reports about L/2; it is also averaged only over the envs being reset that
+step, which oversamples short episodes. Useful as a trend, misleading as an absolute.
+
+**Lift arrives as a phase transition, and when it arrives depends on the collider.** Two older
+baselines using mjlab's decimated `cir160` collider sat at exactly zero for ~4400 iterations and
+then turned contact and lift on together (stapler 4447, mug 5992) — and a second mug seed never
+lifted at all in 7295 iterations. A later control line on the same task, differing only in that
+the object is handed to MuJoCo as the real mesh (which MuJoCo then hulls to 124 verts), first
+lifted at **iteration 918**. So do not apply a fixed "wait 4500 iterations" rule: watch for the
+transition instead, and treat any single seed with suspicion.
 
 ---
 
@@ -212,6 +226,64 @@ while never getting more than 0.124 m from its start, so it is flagged jitter-su
 ranked above clips that genuinely move.
 
 ---
+
+---
+
+## Status
+
+Current as of the runs described below; **everything in this section is one seed per
+configuration and several runs are still going**, so treat it as the state of an investigation,
+not as a result.
+
+### The native path's default solver settings are probably wrong
+
+`--native-contacts` sets `cone="elliptic"` with `impratio=1000`, copied from
+`newton/examples/robot/example_robot_panda_hydro.py`. That example runs hydroelastic contact; we
+do not (`--rigid-object-table`). `impratio=1000` makes the tangential constraints three orders of
+magnitude softer than the normal ones.
+
+An audit of every contact-related parameter found that **these two options are the only solver
+settings that differ between the two paths** — the MuJoCo line already runs `pyramidal` with
+`impratio=1`, and every per-geom and per-contact parameter (friction, solref, solimp, condim,
+margin, gap) is identical on both. Setting the native path to the same two values makes every
+per-contact parameter match exactly.
+
+Three runs are testing it, all with `--solver-kwargs '{"impratio": 1.0, "cone": "pyramidal"}'`:
+
+| | iterations since the change | `lift_success` | same-iteration control |
+|---|---|---|---|
+| stapler, resumed from a native checkpoint at iter 2000 | 258 | 0.22 | 0.021 |
+| mug, resumed from a native checkpoint at iter 2000 | 181 | 0.006 | 0 |
+| stapler, from scratch | 326 | still 0 (too early) | — |
+
+The stapler resume went from 0.008 to 0.22 in 258 iterations while its unchanged twin moved from
+0.008 to 0.021 over the same span. That is a large effect and the direction has held for twelve
+consecutive samples, but it is one seed and `lift_success` is high-variance.
+
+### What is not explained by the solver settings
+
+With friction aligned, the native path's `object_motion_frac` is ~0.23 against the control's
+~0.64. Something still differs. The remaining candidates, in the order they are worth testing:
+
+1. **Object collider geometry** — real mesh vs 124-vertex convex hull. On the stapler the hull
+   fills in the cavity under the handle; `tools/pipeline/object_gallery.py` shows the difference.
+   This also fits the object dependence: the mug, a solid cylinder, shows no such gap between the
+   paths, while the concave stapler does.
+2. **Table collider** — the native path swaps the table to `assets/meshes/table_box.stl`; the
+   MuJoCo path keeps the scene's original geom. Same contact parameters, different shape.
+3. **The collision engine itself** — at one sampled step the native path held 30 hand/object
+   contact points against the control's 8, under identical friction parameters.
+
+### Ruled out by measurement, do not re-suspect
+
+- **Contact sensors.** The ratio of "sensor reports contact" to "hand is geometrically within
+  5 cm" tracks within 1% between the two paths across the whole run (0.910/0.921 at iteration 500,
+  0.952/0.963 at 1750). Newton's injected contacts are read faithfully by `mjSENS_CONTACT`.
+- **Reward definitions.** All 37 reward terms are present on both paths with the same weights;
+  both load the same `env.yaml`.
+- **Termination conditions.** The same set, both firing.
+- **Numerical stability.** `Health/nonfinite_worlds` has stayed at zero for every sample of every
+  run since the guard was added.
 
 ## 5. Things that will bite you
 
