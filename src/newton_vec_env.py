@@ -682,9 +682,11 @@ class NewtonVecEnv:
   def action_space(self):
     return None
 
-  def get_observations(self):
+  def get_observations(self, update_history: bool = False):
     if self.observation_manager is not None:
-      return self.observation_manager.compute()
+      # update_history=True must happen exactly once per control step: compute() caches, and that
+      # cache is what keeps a second call in the same step from pushing the buffers twice.
+      return self.observation_manager.compute(update_history=update_history)
     from tensordict import TensorDict
     return TensorDict({g: b(self._env) for g, b in self._obs_builders.items()},
                       batch_size=[self.num_envs])
@@ -1105,7 +1107,7 @@ class NewtonVecEnv:
     if len(done_ids) > 0:
       self._reset_idx(done_ids)
 
-    obs = self.get_observations()
+    obs = self.get_observations(update_history=True)
     # surface the task metrics so the runner logs them alongside the PPO curves
     self.extras.setdefault("log", {}).update(self._env.extras.get("log", {}))
     if self._dump_qpos_path is not None and len(self._qpos_log) < self._dump_steps:
