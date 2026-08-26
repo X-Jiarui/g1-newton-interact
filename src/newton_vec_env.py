@@ -322,12 +322,18 @@ class NewtonVecEnv:
     self.grad_contact_bar = float(os.environ.get("MIX_GRAD_CONTACT", "0.2"))
     self.grad_lift_bar = float(os.environ.get("MIX_GRAD_LIFT", "0.1"))
     self.grad_hold = int(os.environ.get("MIX_GRAD_HOLD", "3"))
+    # Windows to let the per-clip averages settle before any promotion is allowed. Without it a
+    # transient in the opening windows promotes a clip permanently: the very first mixed run
+    # promoted two clips at contact 0.0988 and 0.0249 against a 0.2 bar, and because a stage never
+    # falls back the hammer clip trained on half its environments for the rest of the run.
+    self.grad_warmup = int(os.environ.get("MIX_GRAD_WARMUP", "3"))
     self.grad_release = float(os.environ.get("MIX_GRAD_RELEASE", "0.5"))  # fraction given up per stage
     self._grad_contact = np.zeros(self.n_clips, dtype=np.float64)
     self._grad_lift = np.zeros(self.n_clips, dtype=np.float64)
     self._grad_hold_c = np.zeros(self.n_clips, dtype=np.int64)
     self._grad_hold_l = np.zeros(self.n_clips, dtype=np.int64)
     self._grad_stage = np.zeros(self.n_clips, dtype=np.int64)   # 0 none, 1 contact, 2 lift
+    self._grad_windows = 0
     self._pmcp_success = np.zeros(self.n_clips, dtype=np.float64)
     self._pmcp_seen = False
     self.nmodel = world.finalize()
@@ -900,8 +906,14 @@ class NewtonVecEnv:
           held[c] += per
         held[needy[0]] += freed - per * len(needy)
       else:
-        # nobody to give to; hand the remainder back proportionally so the block总数 holds
-        held[clips[0]] += freed
+        # Nobody to give to, because every clip in this object block has already graduated. Hand
+        # the freed environments back evenly across the block: piling them all on clips[0] left a
+        # two-clip block at 96/32 for no reason anyone chose, which is a curriculum decision made
+        # by an accident of ordering.
+        per_back = freed // len(clips)
+        for c in clips:
+          held[c] += per_back
+        held[clips[0]] += freed - per_back * len(clips)
       for c in clips:
         counts[c] = held[c]
       drift = total - int(sum(counts[c] for c in clips))
@@ -915,6 +927,7 @@ class NewtonVecEnv:
     log = self.extras.get("log") or {}
     changed = False
     a = self.pmcp_ema
+    self._grad_windows += 1
     for c in range(self.n_clips):
       cv = log.get(f"Stage/physical_contact/clip{c}")
       lv = log.get(f"PhaseA/lift_success/clip{c}")
@@ -924,6 +937,12 @@ class NewtonVecEnv:
         self._grad_lift[c] = (1 - a) * self._grad_lift[c] + a * float(lv)
       # hold counters -- a bar has to be met on consecutive windows, and a clip never falls back:
       # returning environments to a clip that dipped is what makes the allocation oscillate.
+      # Because a stage is permanent, the counters stay at zero through the warm-up: an average
+      # that has not settled yet must not be able to spend a decision that cannot be taken back.
+      if self._grad_windows <= self.grad_warmup:
+        self._grad_hold_c[c] = 0
+        self._grad_hold_l[c] = 0
+        continue
       self._grad_hold_c[c] = self._grad_hold_c[c] + 1 if self._grad_contact[c] >= self.grad_contact_bar else 0
       self._grad_hold_l[c] = self._grad_hold_l[c] + 1 if self._grad_lift[c] >= self.grad_lift_bar else 0
       stage = int(self._grad_stage[c])
@@ -936,18 +955,27 @@ class NewtonVecEnv:
   def _pmcp_update(self) -> None:
     """Track per-clip success, and on a rollout boundary re-derive the env split from it."""
     if os.environ.get("MIX_PMCP_RULE", "graduation") == "graduation":
-      changed = self._graduation_update()
+      # The window boundary gates the UPDATE, not just the reallocation. Calling it every step
+      # made `grad_hold` count steps, so three consecutive steps over the bar -- a transient the
+      # averages have not even absorbed yet -- promoted a clip for good.
       if self.common_step_counter % self.pmcp_every != 0:
         return
+      changed = self._graduation_update()
       counts = self.graduation_counts()
-      if np.array_equal(counts, self.clip_env_count):
+      moved = not np.array_equal(counts, self.clip_env_count)
+      if not (changed or moved):
         return
       before = self.clip_env_count.tolist()
-      self.set_clip_counts(counts)
+      if moved:
+        self.set_clip_counts(counts)
+      # A stage change that frees no environments -- a clip whose object block holds only itself,
+      # so there is nobody to hand them to -- still gets printed. Returning silently here is what
+      # let a promotion look like "the rule never fired".
+      tail = "" if moved else "  (stage only; no environment could be moved inside the object block)"
       print(f"[grad] step {self.common_step_counter} stage={self._grad_stage.tolist()} "
             f"contact={[round(float(x),4) for x in self._grad_contact]} "
             f"lift={[round(float(x),4) for x in self._grad_lift]} "
-            f"envs {before} -> {counts.tolist()}", flush=True)
+            f"envs {before} -> {counts.tolist()}{tail}", flush=True)
       return
 
     forced = os.environ.get("MIX_PMCP_FORCE", "").strip()
