@@ -77,6 +77,12 @@ ap.add_argument("--agent-cfg-from", default=os.path.expanduser(
   "~/sweep_ckpts_r2/OF_00_apple_eat_1_SPHERE/model_7310.pt"),
   help="checkpoint whose params/agent.yaml supplies the agent config (tracker, residual gains)")
 ap.add_argument("--resume", default=None, help="checkpoint to warm-start from")
+ap.add_argument("--rollout-steps", type=int, default=0,
+                help="instead of training, roll the loaded checkpoint out for this many steps and "
+                     "exit. Reuses the env and runner built above, so the contact recipe, object "
+                     "mesh, table and reference are the ones the run was TRAINED with -- a "
+                     "separate eval script re-deriving those flags is how earlier rollouts came "
+                     "to be judged in a scene the policy never saw. Pair with --dump-qpos.")
 ap.add_argument("--run-name", default="NEWTON_NATIVE")
 ap.add_argument("--log-root", default=os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "logs/rsl_rl"))
 ap.add_argument("--seed", type=int, default=42)
@@ -400,6 +406,32 @@ runner = runner_cls(wrapped, asdict(agent_cfg), log_dir=str(log_dir), device="cu
 if A.resume:
   runner.load(A.resume)
   print(f"warm-started from {A.resume}")
+
+if A.rollout_steps:
+  # Deterministic inference, not the stochastic rollout `learn` would collect: the point is to see
+  # what the policy does, not what it explores.
+  import torch as _rt
+  from mjlab.scripts.play import _maybe_wrap_residual_action_stats_policy as _wrap_stats
+  if not A.resume:
+    raise SystemExit("--rollout-steps needs --resume; there is nothing to roll out otherwise")
+  _pol = runner.get_inference_policy(device="cuda:0")
+  # Without this wrapper a working checkpoint silently produces a policy that does nothing --
+  # the residual action statistics live outside the actor and have to be reattached.
+  _pol = _wrap_stats(TASK, runner, _pol)
+  # Judge every checkpoint from the same place: the reference start. The RSI window would
+  # otherwise drop each rollout at a random frame and the clips would not be comparable.
+  env._env._force_reference_start_frame = 0
+  env.reset()
+  _obs = env.get_observations()
+  print(f"[rollout] {A.rollout_steps} deterministic steps from reference frame 0")
+  for _k in range(int(A.rollout_steps)):
+    with _rt.inference_mode():
+      _act = _pol(_obs)
+    _obs, _rw, _tm, _to, _ex = env.step(_act)
+    if _k % 100 == 0:
+      print(f"[rollout] step {_k}", flush=True)
+  print("[rollout] done")
+  raise SystemExit(0)
 
 print(f"training for {A.iterations} iterations -> {log_dir}")
 
