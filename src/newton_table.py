@@ -87,8 +87,9 @@ def table_top_world(mj_model, mj_data, table_body: str = "table/table") -> float
   return body_collider_extreme_z(mj_model, mj_data, bid, "max")
 
 
-def install(mj_model, stl_path: str, reference_pkl: str, z_offset: float = 0.0,
-            gap: float = DEFAULT_GAP, verbose: bool = True) -> None:
+def install(mj_model, stl_path, reference_pkl, z_offset: float = 0.0,
+            gap: float = DEFAULT_GAP, verbose: bool = True,
+            clip_id=None) -> None:
   """Move the mocap table so the object's true collider rests where the reference places it.
 
   The shift is measured on the first table write rather than computed in advance. The table is a
@@ -127,7 +128,15 @@ def install(mj_model, stl_path: str, reference_pkl: str, z_offset: float = 0.0,
     _bid = _cands[0]
   authored_top = body_collider_extreme_z(mj_model, _d, _bid, "max")
   authored_body_z = float(_d.xpos[_bid][2])
-  desired_top = object_bottom_at_rest(stl_path, reference_pkl, z_offset) - float(gap)
+  # One entry per clip. The single-clip spelling passes plain strings and lands on a list of one.
+  _stls = list(stl_path) if isinstance(stl_path, (list, tuple)) else [stl_path]
+  _pkls = list(reference_pkl) if isinstance(reference_pkl, (list, tuple)) else [reference_pkl]
+  if len(_pkls) == 1 and len(_stls) > 1:
+    _pkls = _pkls * len(_stls)
+  if len(_stls) != len(_pkls):
+    raise ValueError(f"{len(_stls)} object mesh(es) but {len(_pkls)} reference clip(s)")
+  desired_tops = [object_bottom_at_rest(a, b, z_offset) - float(gap) for a, b in zip(_stls, _pkls)]
+  desired_top = desired_tops[0]
   # Temporary probe hook: reproduce an earlier table height exactly, to test whether contact
   # behaved differently there rather than arguing from recollection.
   import os as _os
@@ -139,16 +148,66 @@ def install(mj_model, stl_path: str, reference_pkl: str, z_offset: float = 0.0,
   state = {"delta": None}
 
   def shifted(table, table_pose, env_ids=None):
+    import torch as _torch
     if state["delta"] is None:
-      # the authored surface moves with the mocap pose, so track the delta from it
-      current_top = authored_top + (float(table_pose[0, 2].item()) - authored_body_z)
-      state["delta"] = desired_top - current_top
+      # The authored surface moves with the mocap pose, so the delta is measured against the first
+      # pose actually written rather than against a fresh MjData (which reports the authored z=0).
+      # The baseline is per clip, not global: mjlab derives table_top from each clip's own object
+      # rest height, so each clip must be measured against a row that belongs to it.
+      if clip_id is None:
+        current_top = authored_top + (float(table_pose[0, 2].item()) - authored_body_z)
+        deltas = [desired_tops[0] - current_top]
+        state["delta"] = deltas[0]
+      else:
+        cid_all = _torch.as_tensor(clip_id, device=table_pose.device, dtype=_torch.long)
+        rows = _torch.arange(table_pose.shape[0], device=table_pose.device)
+        cid_rows = cid_all if env_ids is None else cid_all[env_ids]
+        deltas = []
+        for k, want in enumerate(desired_tops):
+          sel = rows[cid_rows == k]
+          if sel.numel() == 0:
+            raise RuntimeError(
+              f"clip {k} has no environment in the first table write, so its shift cannot be "
+              "measured; the first write must cover every clip")
+          cur = authored_top + (float(table_pose[sel[0], 2].item()) - authored_body_z)
+          deltas.append(want - cur)
+        state["delta"] = _torch.as_tensor(deltas, device=table_pose.device,
+                                          dtype=table_pose.dtype)[cid_all]
       if verbose:
-        print(f"[newton-env] table top {current_top:.4f} -> {desired_top:.4f} "
-              f"({1000.0 * state['delta']:+.1f} mm) so the object's true collider rests where the "
-              f"reference places it")
+        d = state["delta"]
+        for i, top in enumerate(desired_tops):
+          shift = float(d) if not _torch.is_tensor(d) else float(deltas[i])
+          tag = "" if len(desired_tops) == 1 else f" [clip {i}]"
+          print(f"[newton-env] table top -> {top:.4f} ({1000.0 * shift:+.1f} mm){tag} "
+                f"so the object's true collider rests where the reference places it")
     pose = table_pose.clone()
-    pose[:, 2] += state["delta"]
+    import os as _os2
+    if _os2.environ.get("TABLE_WRITE_TRACE"):
+      st = state.setdefault("_trace", {"n": 0})
+      st["n"] += 1
+      if st["n"] <= 3 or st["n"] % 500 == 0:
+        try:
+          _ca = _torch.as_tensor(clip_id, device=table_pose.device, dtype=_torch.long)
+          _cr = _ca if env_ids is None else _ca[env_ids]
+          msg = []
+          for k in range(int(_ca.max().item()) + 1):
+            m = _cr == k
+            if not bool(m.any()):
+              continue
+            vv = sorted(set(round(float(x), 4) for x in table_pose[m, 2].tolist()))
+            msg.append("c%d n=%d nz=%d %s" % (k, int(m.sum()), len(vv), vv[:3]))
+          print("[TWTRACE %d] env_ids=%s rows=%d | %s" % (
+            st["n"], "None" if env_ids is None else len(env_ids),
+            table_pose.shape[0], " | ".join(msg)), flush=True)
+        except Exception as _te:
+          print("[TWTRACE] failed %s: %s" % (type(_te).__name__, _te), flush=True)
+    d = state["delta"]
+    if _torch.is_tensor(d):
+      # env_ids selects the rows being written; the shift has to follow the same selection or the
+      # clips get each other's table heights on every reset.
+      pose[:, 2] += d if env_ids is None else d[env_ids]
+    else:
+      pose[:, 2] += d
     return orig(table, pose, env_ids=env_ids)
 
   shifted._newton_table_shift = True

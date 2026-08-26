@@ -90,9 +90,46 @@ ap.add_argument("--render-every", type=int, default=4,
                 help="control steps between rendered frames; rendering every step costs throughput")
 ap.add_argument("--reference-pkl", default=None,
                 help="sets APPLE_EAT_PKL before the task modules read it")
+ap.add_argument("--reference-pkls", default=None,
+                help="comma-separated clips for mixed training; sets APPLE_EAT_PKL_MIX. Each env "
+                     "trains on exactly one of them, so the batch carries several tasks at once.")
+ap.add_argument("--clip-env-counts", default=None,
+                help="comma-separated env count per clip, in --reference-pkls order. Must sum to "
+                     "--num-envs. This is how a PMCP segment starts from the previous segment's "
+                     "allocation; without it the split is equal.")
+ap.add_argument("--sdf-objects", default=None,
+                help="comma-separated object meshes, one per --reference-pkls entry IN THE SAME "
+                     "ORDER. Checked against each clip's own obj_name rather than trusted.")
 A = ap.parse_args()
 
-if A.reference_pkl:
+MIX_PKLS: list[str] = []
+MIX_STLS: list[str] = []
+if A.reference_pkls:
+  import pickle as _pickle
+  MIX_PKLS = [x.strip() for x in A.reference_pkls.split(",") if x.strip()]
+  MIX_STLS = [x.strip() for x in (A.sdf_objects or "").split(",") if x.strip()]
+  if len(MIX_PKLS) < 2:
+    raise SystemExit("--reference-pkls needs at least two clips; use --reference-pkl for one")
+  if len(MIX_STLS) != len(MIX_PKLS):
+    raise SystemExit(f"--sdf-objects has {len(MIX_STLS)} entries for {len(MIX_PKLS)} clip(s)")
+  # Pairing the wrong mesh with a clip does not crash -- the robot just reaches for a shape that is
+  # not there, and the clip never learns. Each pkl records its own object, so check rather than
+  # trust the order the caller typed.
+  for _pkl, _stl in zip(MIX_PKLS, MIX_STLS):
+    with open(_pkl, "rb") as _f:
+      _want = str(_pickle.load(_f).get("obj_name", "")).strip().lower()
+    _got = os.path.splitext(os.path.basename(_stl))[0].strip().lower()
+    if _want and _got != _want:
+      raise SystemExit(f"clip {os.path.basename(_pkl)} is about {_want!r} but was paired with "
+                       f"{os.path.basename(_stl)!r}; --reference-pkls and --sdf-objects must line up")
+  os.environ["APPLE_EAT_PKL_MIX"] = ",".join(MIX_PKLS)
+  # Several mjlab code paths still read the singular variable; point it at the first clip so they
+  # resolve to a real file rather than whatever was left in the environment.
+  os.environ["APPLE_EAT_PKL"] = MIX_PKLS[0]
+  print(f"[train] MIX: {len(MIX_PKLS)} clips " +
+        ", ".join(f"{os.path.basename(p)}->{os.path.basename(t)}"
+                  for p, t in zip(MIX_PKLS, MIX_STLS)))
+elif A.reference_pkl:
   # Has to be set before mjlab's task modules import: the clip path is read at module level.
   os.environ["APPLE_EAT_PKL"] = A.reference_pkl
 
@@ -143,6 +180,9 @@ if str(getattr(agent_cfg, "base_tracker_kind", "")).strip().lower() == "astra_on
 print(f"building {A.num_envs} Newton worlds ...")
 env = NewtonVecEnv(cfg, A.xml, num_envs=A.num_envs, device="cuda:0",
                    sdf_object_stl=A.sdf_object, sdf_resolution=A.sdf_resolution,
+                   sdf_object_stls=(MIX_STLS or None),
+                   clip_env_counts=([int(x) for x in A.clip_env_counts.split(",")]
+                                    if A.clip_env_counts else None),
                    native_contacts=A.native_contacts,
                    hydro_object_table=not A.rigid_object_table,
                    table_sdf_resolution=A.table_sdf_resolution,
@@ -363,4 +403,196 @@ if A.resume:
 
 print(f"training for {A.iterations} iterations -> {log_dir}")
 
+if os.environ.get("MIX_VERIFY"):
+  import torch as _t, numpy as _np
+  import mujoco as _mj
+  from mjlab.tasks.apple_eat import mdp as _am, object_pool as _op
+  _e = env._env
+  _ref = _am._ref(str(_e.device))
+  _n = int(_ref["n_frames"])
+  _cid = env.clip_id
+  print("\n[V] ===================== mixed-env verification =====================")
+
+  # (4) RSI: does each env start at a DIFFERENT frame of its own clip, or all at frame 0?
+  _sf = _am._reference_start_frame(_e, _n)
+  _lo, _hi = _am._clip_bounds(_e, _n)
+  _local = (_sf - _lo)
+  print(f"[V] start frame, local to each clip: {[int(x) for x in _local[:8]]}")
+  print(f"[V]   distinct local start frames  : {sorted(set(int(x) for x in _local))[:12]}")
+  print(f"[V]   per-clip band [lo,hi]        : {[(int(a),int(b)) for a,b in zip(_lo[:4],_hi[:4])]}")
+
+  # (5) object mass per world: does each clip's object carry its own mass?
+  _mm = env.solver.mj_model
+  _oid = [g for g in range(_mm.nbody)
+          if "apple" in (_mj.mj_id2name(_mm, _mj.mjtObj.mjOBJ_BODY, g) or "")]
+  print(f"[V] object bodies in mj_model: {[_mj.mj_id2name(_mm,_mj.mjtObj.mjOBJ_BODY,g) for g in _oid]}")
+  for _b in _oid:
+    print(f"[V]   body {_b} mass={float(_mm.body_mass[_b]):.5f} kg "
+          f"inertia={[round(float(x),6) for x in _mm.body_inertia[_b]]}")
+  try:
+    import warp as _wp
+    _bm = _wp.to_torch(env.solver.mjw_model.body_mass)
+    print(f"[V] mjw_model.body_mass shape {tuple(_bm.shape)}")
+    if _bm.ndim == 2:
+      for _b in _oid:
+        _col = _bm[:, _b]
+        print(f"[V]   per-world mass of body {_b}: first8={[round(float(x),5) for x in _col[:8]]} "
+              f"distinct={sorted(set(round(float(x),5) for x in _col))[:6]}")
+    else:
+      print(f"[V]   body_mass is shared across worlds (ndim={_bm.ndim}) -> every clip uses the same mass")
+  except Exception as _ex:
+    print(f"[V]   mjw body_mass read failed: {type(_ex).__name__}: {_ex}")
+
+  # object collider extent per world, as an independent check that the MESH really differs
+  try:
+    _gid = [g for g in range(_mm.ngeom)
+            if "apple" in (_mj.mj_id2name(_mm, _mj.mjtObj.mjOBJ_GEOM, g) or "")]
+    for _g in _gid:
+      print(f"[V] geom {_mj.mj_id2name(_mm,_mj.mjtObj.mjOBJ_GEOM,_g)} type={int(_mm.geom_type[_g])} "
+            f"size={[round(float(x),4) for x in _mm.geom_size[_g]]} "
+            f"rbound={float(_mm.geom_rbound[_g]):.4f}")
+  except Exception as _ex:
+    print(f"[V]   geom read failed: {type(_ex).__name__}")
+  raise SystemExit(0)
+if os.environ.get("MIX_FAR_STATS"):
+  import torch as _st
+  from mjlab.tasks.residual_interact import omnigrasp_faithful_mdp as _ofm
+  from mjlab.tasks.apple_eat import mdp as _sam, object_pool as _sop
+  from mjlab.tasks.residual_interact import mdp as _srm
+  _orig_far = _ofm.og_object_far_termination
+  _st_state = {"n": 0}
+  def _far_stats(env, *a, **kw):
+    out = _orig_far(env, *a, **kw)
+    try:
+      _st_state["n"] += 1
+      if _st_state["n"] % 200 == 0:
+        ref = _sam._ref(str(env.device))
+        cid = _sam._clip_id(env)
+        obj = _sop.active(env)
+        fr = _sam._tracking_frame(env, ref["n_frames"])
+        rp = _srm._reference_object_pos_w(env, ref, fr)
+        d = (obj.data.root_link_pos_w - rp).norm(dim=-1)
+        nc = int(cid.max().item()) + 1
+        lines = []
+        for c in range(nc):
+          m = cid == c
+          if not bool(m.any()): continue
+          fires = out[m]
+          lines.append("c%d fire=%.4f d_mean=%.3f d_p95=%.3f d_max=%.3f elb=%.1f" % (
+            c, fires.float().mean().item(), d[m].mean().item(),
+            d[m].quantile(0.95).item(), d[m].max().item(),
+            env.episode_length_buf[m].float().mean().item()))
+        print("[FARSTAT %d] " % _st_state["n"] + " | ".join(lines), flush=True)
+        if _st_state["n"] == 200:
+          try:
+            _m = getattr(obj.data, "default_mass", None)
+            print("[FARSTAT mass] shape=%s" % (None if _m is None else tuple(_m.shape),), flush=True)
+            if _m is not None and _m.ndim >= 2:
+              _pm = _m.flatten(1).sum(dim=-1)
+              for c in range(nc):
+                mm = cid == c
+                vv = sorted(set(round(float(x), 5) for x in _pm[mm].tolist()))
+                print("[FARSTAT mass] clip %d n=%d distinct=%s" % (c, int(mm.sum()), vv[:5]), flush=True)
+          except Exception as _e2:
+            print("[FARSTAT mass] failed %s: %s" % (type(_e2).__name__, _e2), flush=True)
+          try:
+            base = env._reference_start_frame
+            for c in range(nc):
+              mm = cid == c
+              vv = sorted(set(int(x) for x in base[mm].tolist()))
+              print("[FARSTAT rsi] clip %d n=%d ndistinct=%d %s" % (c, int(mm.sum()), len(vv), vv[:8]), flush=True)
+          except Exception as _e3:
+            print("[FARSTAT rsi] failed %s: %s" % (type(_e3).__name__, _e3), flush=True)
+          try:
+            for c in range(nc):
+              mm = cid == c
+              vv = sorted(set(round(float(x), 4) for x in d[mm].tolist()))
+              print("[FARSTAT dist] clip %d n=%d ndistinct=%d top=%s" % (c, int(mm.sum()), len(vv), vv[-6:]), flush=True)
+          except Exception as _e4:
+            print("[FARSTAT dist] failed %s: %s" % (type(_e4).__name__, _e4), flush=True)
+          try:
+            import torch as _T
+            hit = (d - 0.1216).abs() < 2e-4
+            print("[FARSTAT hit] n=%d of %d, clips=%s" % (
+              int(hit.sum()), d.numel(),
+              sorted(set(int(x) for x in cid[hit].tolist()))), flush=True)
+            _op_ = obj.data.root_link_pos_w
+            _eo = env.scene.env_origins
+            idx = _T.nonzero(hit).flatten()[:6]
+            for k in idx.tolist():
+              print("[FARSTAT hit] env=%d clip=%d frame=%d obj=%s ref=%s delta=%s origin=%s elb=%d" % (
+                k, int(cid[k]), int(fr[k]),
+                [round(float(x),4) for x in _op_[k].tolist()],
+                [round(float(x),4) for x in rp[k].tolist()],
+                [round(float(x),4) for x in (_op_[k]-rp[k]).tolist()],
+                [round(float(x),3) for x in _eo[k].tolist()],
+                int(env.episode_length_buf[k])), flush=True)
+            miss = ~hit
+            idx2 = _T.nonzero(miss).flatten()[:4]
+            for k in idx2.tolist():
+              print("[FARSTAT ok ] env=%d clip=%d frame=%d obj=%s ref=%s delta=%s origin=%s elb=%d" % (
+                k, int(cid[k]), int(fr[k]),
+                [round(float(x),4) for x in _op_[k].tolist()],
+                [round(float(x),4) for x in rp[k].tolist()],
+                [round(float(x),4) for x in (_op_[k]-rp[k]).tolist()],
+                [round(float(x),3) for x in _eo[k].tolist()],
+                int(env.episode_length_buf[k])), flush=True)
+          except Exception as _e5:
+            print("[FARSTAT hit] failed %s: %s" % (type(_e5).__name__, _e5), flush=True)
+          try:
+            import torch as _T
+            tb = env.scene["table"]
+            tz = tb.data.root_link_pos_w[:, 2]
+            hit = (d - 0.1216).abs() < 2e-4
+            for c in range(nc):
+              mm = cid == c
+              vv = sorted(set(round(float(x), 4) for x in tz[mm].tolist()))
+              nh = int((mm & hit).sum())
+              print("[FARSTAT table] clip %d n=%d nhit=%d distinct_tablez=%d %s" % (
+                c, int(mm.sum()), nh, len(vv), vv[:6]), flush=True)
+            print("[FARSTAT table] hit tablez mean=%.4f  ok tablez mean=%.4f" % (
+              float(tz[hit].mean()), float(tz[~hit].mean())), flush=True)
+            vz = obj.data.root_link_lin_vel_w[:, 2] if hasattr(obj.data, "root_link_lin_vel_w") else None
+            if vz is not None:
+              print("[FARSTAT table] hit objvz mean=%.3f  ok objvz mean=%.3f" % (
+                float(vz[hit].mean()), float(vz[~hit].mean())), flush=True)
+          except Exception as _e6:
+            print("[FARSTAT table] failed %s: %s" % (type(_e6).__name__, _e6), flush=True)
+    except Exception as _e:
+      print("[FARSTAT] failed: %s: %s" % (type(_e).__name__, _e), flush=True)
+    return out
+  _tm = env.termination_manager
+  _i = _tm._term_names.index("og_object_far")
+  _orig_far = _tm._term_cfgs[_i].func
+  _tm._term_cfgs[_i].func = _far_stats
+  print("[FARSTAT] installed on the live termination manager", flush=True)
+if os.environ.get("MIX_FAR_PROBE"):
+  import torch as _t
+  import mujoco as _mj
+  from mjlab.tasks.apple_eat import mdp as _am, object_pool as _op
+  from mjlab.tasks.residual_interact import mdp as _rmdp
+  _e = env._env
+  _ref = _am._ref(str(_e.device))
+  _n = int(_ref["n_frames"])
+  _cid = env.clip_id
+  _obj = _op.active(_e)
+  _names = [os.path.basename(p) for p in os.environ.get("APPLE_EAT_PKL_MIX", "").split(",")]
+  _act = _t.zeros((_e.num_envs, env.action_manager.total_action_dim), device=_e.device)
+  print("\n[FAR] step | clip | localframe | objz | refz | dist(mm) | elb")
+  for _k in range(24):
+    _fr = _am._tracking_frame(_e, _n)
+    _lf = _am.local_tracking_frame(_e, _n)
+    _rp = _rmdp._reference_object_pos_w(_e, _ref, _fr)
+    _op_w = _obj.data.root_link_pos_w
+    _d = (_op_w - _rp).norm(dim=-1)
+    if _k in (0, 1, 2, 3, 5, 8, 12, 20, 23):
+      for _i in range(_e.num_envs):
+        _c = int(_cid[_i])
+        _flag = "  <-- FAR" if float(_d[_i]) > 0.12 else ""
+        print(f"[FAR] {_k:3d} | {_c} {_names[_c][:22]:<22} | {int(_lf[_i]):5d} | "
+              f"{float(_op_w[_i][2]):.4f} | {float(_rp[_i][2]):.4f} | "
+              f"{float(_d[_i])*1000:8.1f}{_flag}   elb={int(_e.episode_length_buf[_i])}")
+      print()
+    env.step(_act)
+  raise SystemExit(0)
 runner.learn(num_learning_iterations=A.iterations, init_at_random_ep_len=True)

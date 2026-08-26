@@ -113,6 +113,8 @@ class NewtonVecEnv:
   def __init__(self, cfg, xml: str, num_envs: int, device: str = "cuda:0",
                njmax: int = 2048, nconmax: int = 256, object_entity: str = "apple",
                sdf_object_stl: str | None = None, sdf_resolution: int = 64,
+               sdf_object_stls: list[str] | None = None,
+               clip_env_counts: list[int] | None = None,
                sdf_hydroelastic: bool = False, native_contacts: bool = False,
                table_sdf_resolution: int | None = None,
                hydro_object_table: bool = True,
@@ -146,100 +148,188 @@ class NewtonVecEnv:
     self.max_episode_length = int(math.ceil(float(cfg.episode_length_s) / self.step_dt))
 
     # --- Newton model: one authored scene, replicated into parallel worlds -----
-    scene = newton.ModelBuilder()
-    SolverMuJoCo.register_custom_attributes(scene)
-    scene.default_shape_cfg.gap = 0.0          # Newton's default of 0.1 needs 10cm of penetration
-    if native_contacts:
-      # Hydroelastic needs a contact margin: `gap` is what the SDF narrow band is built around, and
-      # with gap=0 the pair never registers a contact at all -- measured, the hydroelastic counter
-      # stayed at 0 for every step while the object fell straight through the table. The official
-      # panda_hydro example uses gap=0.01 with a +/-1cm narrow band at resolution 64.
-      # Zero for everything; swap_collider_to_sdf gives the object and the table their own 0.01.
-      # See the note there: a scene-wide gap turned every knuckle pair inside the hand into a
-      # contact candidate and made 74% of the per-world contacts hand-against-itself.
-      scene.default_shape_cfg.gap = 0.0
-    if hydro_kh is not None:
-      # pressure = -kh * signed_depth, and the two sides combine in series
-      # ((k_a*k_b)/(k_a+k_b)), so raising one alone leaves the softer side in control. Newton's
-      # default is 1e10; the official panda_hydro grasping example uses 1e11.
-      scene.default_shape_cfg.kh = float(hydro_kh)
-      print(f"[newton-env] hydroelastic stiffness kh = {hydro_kh:.0e} on both contact sides")
-    scene.add_mjcf(xml, collapse_fixed_joints=False, parse_mujoco_options=True)
+    # Each clip trains on its own object, so the scene is authored once per distinct mesh and
+    # replicated into that clip's block of worlds. Everything below is identical between clips
+    # except the collider swapped in for `sdf_object_stl`.
+    def _author_scene(sdf_object_stl):
+      scene = newton.ModelBuilder()
+      SolverMuJoCo.register_custom_attributes(scene)
+      scene.default_shape_cfg.gap = 0.0          # Newton's default of 0.1 needs 10cm of penetration
+      if native_contacts:
+        # Hydroelastic needs a contact margin: `gap` is what the SDF narrow band is built around, and
+        # with gap=0 the pair never registers a contact at all -- measured, the hydroelastic counter
+        # stayed at 0 for every step while the object fell straight through the table. The official
+        # panda_hydro example uses gap=0.01 with a +/-1cm narrow band at resolution 64.
+        # Zero for everything; swap_collider_to_sdf gives the object and the table their own 0.01.
+        # See the note there: a scene-wide gap turned every knuckle pair inside the hand into a
+        # contact candidate and made 74% of the per-world contacts hand-against-itself.
+        scene.default_shape_cfg.gap = 0.0
+      if hydro_kh is not None:
+        # pressure = -kh * signed_depth, and the two sides combine in series
+        # ((k_a*k_b)/(k_a+k_b)), so raising one alone leaves the softer side in control. Newton's
+        # default is 1e10; the official panda_hydro grasping example uses 1e11.
+        scene.default_shape_cfg.kh = float(hydro_kh)
+        print(f"[newton-env] hydroelastic stiffness kh = {hydro_kh:.0e} on both contact sides")
+      scene.add_mjcf(xml, collapse_fixed_joints=False, parse_mujoco_options=True)
 
-    # Swap the object's collider before replicating, so every world gets it. mjlab authors the object
-    # as a 4 cm sphere and its own mesh path uses the *_cir160 convex hull instead of the real shape.
-    self._ref_mj_pre = mujoco.MjModel.from_xml_path(xml)
-    if sdf_object_stl:
-      from grab_objects import swap_collider_to_sdf
-      swap_collider_to_sdf(scene, self._ref_mj_pre, f"{object_entity}/{object_entity}",
-                           sdf_object_stl, resolution=sdf_resolution,
-                           hydroelastic=((sdf_hydroelastic or native_contacts) and hydro_object_table))
+      # Swap the object's collider before replicating, so every world gets it. mjlab authors the object
+      # as a 4 cm sphere and its own mesh path uses the *_cir160 convex hull instead of the real shape.
+      self._ref_mj_pre = mujoco.MjModel.from_xml_path(xml)
+      if sdf_object_stl:
+        from grab_objects import swap_collider_to_sdf
+        swap_collider_to_sdf(scene, self._ref_mj_pre, f"{object_entity}/{object_entity}",
+                             sdf_object_stl, resolution=sdf_resolution,
+                             hydroelastic=((sdf_hydroelastic or native_contacts) and hydro_object_table))
+
+      # Hydroelastic contact is pairwise: narrow_phase.py routes a pair to the SDF pipeline only when
+      # BOTH shapes carry ShapeFlags.HYDROELASTIC, and otherwise falls through to the rigid path.
+      # With only the object flagged and use_mujoco_contacts=False, the object-table pair had no
+      # working contact at all -- filmed: the stapler sank into the table, stood up on its end and was
+      # ejected, and the state went NaN around step 110.
+      #
+      # Boxes need no SDF build; primitive shapes are configured through the flag alone, per
+      # newton/examples/robot/example_robot_panda_hydro.py.
+      if native_contacts:
+        # The table needs a mesh collider with an SDF, not just the flag: hydroelastic requires
+        # texture SDF data, which a box primitive does not carry. Same route the official
+        # panda_hydro example takes for its own table.
+        _table_stl = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                  "assets/meshes/table_box.stl")
+        if not os.path.exists(_table_stl):
+          raise RuntimeError(f"missing {_table_stl}; generate it from the table's half-extents first")
+        # The table is a flat box that only ever meets the object on its top face, so its SDF
+        # carries no shape worth resolving -- but it does help set the tessellation of the contact
+        # patch, and object/table is half of every contact in the scene (30-37 of 48-79 per world).
+        # The object keeps its own resolution; only the table's is dialled down.
+        _tres = int(table_sdf_resolution or sdf_resolution)
+        swap_collider_to_sdf(scene, self._ref_mj_pre, "table/table", _table_stl,
+                             resolution=_tres, hydroelastic=hydro_object_table)
+        if _tres != sdf_resolution:
+          print(f"[newton-env] table SDF resolution {_tres}, object stays at {sdf_resolution}")
+        _n = sum(1 for f in scene.shape_flags if f & int(newton.ShapeFlags.HYDROELASTIC))
+        print(f"[newton-env] hydroelastic shapes before replicate: {_n} "
+              f"(object + table; a pair routes to SDF only when both sides are flagged)")
+
+        # Convex-hull every colliding mesh that is NOT hydroelastic, exactly as
+        # newton/examples/robot/example_robot_panda_hydro.py does for its non-finger shapes. This
+        # scene carries 65 such meshes per world -- 48 in the Wuji hand alone, up to 25662 verts on
+        # a single torso shape, 150k verts in total -- and Newton narrow-phases them as full meshes.
+        #
+        # This is parity with the baseline, not a loss of fidelity: MuJoCo already convexifies every
+        # mesh geom for collision (its convex-hull graph is what `graphadr` indexes), so the
+        # MuJoCo-contact path we are trying to match has been colliding hulls all along. The object
+        # and the table keep their real geometry, which is the whole point of the SDF path.
+        _H = int(newton.ShapeFlags.HYDROELASTIC)
+        _C = int(newton.ShapeFlags.COLLIDE_SHAPES)
+        # Exclude the object and the table by NAME, not by the hydroelastic flag. Keying off the
+        # flag meant that turning hydroelastic off (--rigid-object-table) silently swept them into
+        # the hull pass: the count went 65 -> 67 and the stapler's collider became a 64-vertex hull,
+        # coarser than the 68-vertex cir160 hull this whole path exists to get away from. The real
+        # mesh survived only as a visual. Verified by shape_source vertex counts, not by the log
+        # line -- which cheerfully claimed the object kept its real geometry either way.
+        _keep_real = ("_sdf",)
+        _to_hull = [i for i in range(len(scene.shape_type))
+                    if int(scene.shape_type[i]) == int(newton.GeoType.MESH)
+                    and int(scene.shape_flags[i]) & _C
+                    and not (int(scene.shape_flags[i]) & _H)
+                    and not any(k in (scene.shape_label[i] or "").lower() for k in _keep_real)]
+        if _to_hull and convex_hull_robot:
+          _done = scene.approximate_meshes(method="convex_hull", shape_indices=_to_hull,
+                                           keep_visual_shapes=True)
+          _kept = [scene.shape_label[i].split("/")[-1] for i in range(len(scene.shape_type))
+                   if int(scene.shape_type[i]) == int(newton.GeoType.MESH)
+                   and int(scene.shape_flags[i]) & _C and i not in _to_hull]
+          print(f"[newton-env] convex-hulled {len(_done)} of {len(_to_hull)} robot mesh collider(s); "
+                f"kept as real meshes: {_kept}")
+      return scene
 
     world = newton.ModelBuilder()
     SolverMuJoCo.register_custom_attributes(world)
     world.default_shape_cfg.gap = 0.0
-    # Hydroelastic contact is pairwise: narrow_phase.py routes a pair to the SDF pipeline only when
-    # BOTH shapes carry ShapeFlags.HYDROELASTIC, and otherwise falls through to the rigid path.
-    # With only the object flagged and use_mujoco_contacts=False, the object-table pair had no
-    # working contact at all -- filmed: the stapler sank into the table, stood up on its end and was
-    # ejected, and the state went NaN around step 110.
-    #
-    # Boxes need no SDF build; primitive shapes are configured through the flag alone, per
-    # newton/examples/robot/example_robot_panda_hydro.py.
-    if native_contacts:
-      # The table needs a mesh collider with an SDF, not just the flag: hydroelastic requires
-      # texture SDF data, which a box primitive does not carry. Same route the official
-      # panda_hydro example takes for its own table.
-      _table_stl = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                                "assets/meshes/table_box.stl")
-      if not os.path.exists(_table_stl):
-        raise RuntimeError(f"missing {_table_stl}; generate it from the table's half-extents first")
-      # The table is a flat box that only ever meets the object on its top face, so its SDF
-      # carries no shape worth resolving -- but it does help set the tessellation of the contact
-      # patch, and object/table is half of every contact in the scene (30-37 of 48-79 per world).
-      # The object keeps its own resolution; only the table's is dialled down.
-      _tres = int(table_sdf_resolution or sdf_resolution)
-      swap_collider_to_sdf(scene, self._ref_mj_pre, "table/table", _table_stl,
-                           resolution=_tres, hydroelastic=hydro_object_table)
-      if _tres != sdf_resolution:
-        print(f"[newton-env] table SDF resolution {_tres}, object stays at {sdf_resolution}")
-      _n = sum(1 for f in scene.shape_flags if f & int(newton.ShapeFlags.HYDROELASTIC))
-      print(f"[newton-env] hydroelastic shapes before replicate: {_n} "
-            f"(object + table; a pair routes to SDF only when both sides are flagged)")
 
-      # Convex-hull every colliding mesh that is NOT hydroelastic, exactly as
-      # newton/examples/robot/example_robot_panda_hydro.py does for its non-finger shapes. This
-      # scene carries 65 such meshes per world -- 48 in the Wuji hand alone, up to 25662 verts on
-      # a single torso shape, 150k verts in total -- and Newton narrow-phases them as full meshes.
-      #
-      # This is parity with the baseline, not a loss of fidelity: MuJoCo already convexifies every
-      # mesh geom for collision (its convex-hull graph is what `graphadr` indexes), so the
-      # MuJoCo-contact path we are trying to match has been colliding hulls all along. The object
-      # and the table keep their real geometry, which is the whole point of the SDF path.
-      _H = int(newton.ShapeFlags.HYDROELASTIC)
-      _C = int(newton.ShapeFlags.COLLIDE_SHAPES)
-      # Exclude the object and the table by NAME, not by the hydroelastic flag. Keying off the
-      # flag meant that turning hydroelastic off (--rigid-object-table) silently swept them into
-      # the hull pass: the count went 65 -> 67 and the stapler's collider became a 64-vertex hull,
-      # coarser than the 68-vertex cir160 hull this whole path exists to get away from. The real
-      # mesh survived only as a visual. Verified by shape_source vertex counts, not by the log
-      # line -- which cheerfully claimed the object kept its real geometry either way.
-      _keep_real = ("_sdf",)
-      _to_hull = [i for i in range(len(scene.shape_type))
-                  if int(scene.shape_type[i]) == int(newton.GeoType.MESH)
-                  and int(scene.shape_flags[i]) & _C
-                  and not (int(scene.shape_flags[i]) & _H)
-                  and not any(k in (scene.shape_label[i] or "").lower() for k in _keep_real)]
-      if _to_hull and convex_hull_robot:
-        _done = scene.approximate_meshes(method="convex_hull", shape_indices=_to_hull,
-                                         keep_visual_shapes=True)
-        _kept = [scene.shape_label[i].split("/")[-1] for i in range(len(scene.shape_type))
-                 if int(scene.shape_type[i]) == int(newton.GeoType.MESH)
-                 and int(scene.shape_flags[i]) & _C and i not in _to_hull]
-        print(f"[newton-env] convex-hulled {len(_done)} of {len(_to_hull)} robot mesh collider(s); "
-              f"kept as real meshes: {_kept}")
+    # One entry per clip. --sdf-objects wins; --sdf-object stays the single-clip spelling.
+    _stls = list(sdf_object_stls) if sdf_object_stls else [sdf_object_stl]
+    self.clip_object_stls = _stls
+    self.n_clips = len(_stls)
+    if clip_env_counts is None and self.num_envs % self.n_clips != 0:
+      raise ValueError(
+        f"num_envs {self.num_envs} must divide by the clip count {self.n_clips} for the default "
+        "equal split; pass --clip-env-counts to allocate unevenly on purpose")
+    _per_clip = self.num_envs // self.n_clips
 
-    world.replicate(scene, world_count=self.num_envs)
+    # replicate() appends worlds, so clip k owns worlds [k*_per_clip, (k+1)*_per_clip). That is a
+    # BLOCK layout; mjlab's own default is round-robin (arange % n_clips), so the mapping is handed
+    # to it explicitly further down rather than left to agree by luck.
+    # Group clips by object first: worlds are laid out one object-block at a time, so a clip can
+    # later be moved to any env whose world already carries its mesh.
+    self.clip_stls = list(_stls)
+    _order: list[str] = []
+    for _stl in _stls:
+      if (_stl or "") not in _order:
+        _order.append(_stl or "")
+    self.object_order = _order
+    self.clip_object = np.array([_order.index(x or "") for x in _stls], dtype=np.int64)
+    self.object_clips = {oi: [c for c in range(self.n_clips) if self.clip_object[c] == oi]
+                         for oi in range(len(_order))}
+
+    # Envs per object = its clips' share. Equal split to start with; the quota and the
+    # failure-weighted rule below only ever move envs BETWEEN clips of the same object, so these
+    # per-object totals stay fixed for the life of the run.
+    if clip_env_counts is not None:
+      _counts = np.asarray(clip_env_counts, dtype=np.int64)
+      if _counts.shape != (self.n_clips,):
+        raise ValueError(f"--clip-env-counts has {_counts.size} entries for {self.n_clips} clip(s)")
+      if int(_counts.sum()) != self.num_envs:
+        raise ValueError(f"--clip-env-counts sums to {int(_counts.sum())}, not --num-envs "
+                         f"{self.num_envs}")
+      if (_counts <= 0).any():
+        raise ValueError("--clip-env-counts must give every clip at least one env; a clip with "
+                         "zero envs produces no gradient and no metric, which reads as 'not "
+                         "learning' rather than 'not trained'")
+    else:
+      _counts = np.full(self.n_clips, _per_clip, dtype=np.int64)
+
+    self.object_env_count = np.zeros(len(_order), dtype=np.int64)
+    for _c in range(self.n_clips):
+      self.object_env_count[self.clip_object[_c]] += int(_counts[_c])
+
+    _scene_cache: dict = {}
+    for _oi, _key in enumerate(_order):
+      if _key not in _scene_cache:
+        _scene_cache[_key] = _author_scene(_key or None)
+      world.replicate(_scene_cache[_key], world_count=int(self.object_env_count[_oi]))
+    if self.n_clips > 1:
+      print(f"[newton-env] MIX: {self.n_clips} clips over {len(_order)} object(s); "
+            f"world blocks {self.object_env_count.tolist()} for "
+            f"{[os.path.basename(x or 'sphere') for x in _order]}")
+
+    # First env index of each object's block, so a clip can only ever be placed on a world whose
+    # mesh matches it.
+    self.object_env_start = np.concatenate([[0], np.cumsum(self.object_env_count)[:-1]])
+
+    # Equal counts to start; _apply_clip_counts writes the per-env assignment.
+    self.clip_env_count = _counts.copy()
+    self.clip_id_np = np.zeros(self.num_envs, dtype=np.int64)
+    self._write_clip_layout()
+
+    # PMCP: env-per-clip is re-derived from each clip's own success, on a rollout boundary.
+    self.pmcp_every = int(os.environ.get("MIX_PMCP_EVERY", "0"))      # control steps; 0 = off
+    self.pmcp_quota = int(os.environ.get("MIX_PMCP_QUOTA", "0"))      # 0 = equal-share floor
+    self.pmcp_tau = float(os.environ.get("MIX_PMCP_TAU", "8.0"))
+    self.pmcp_ema = float(os.environ.get("MIX_PMCP_EMA", "0.1"))
+    self.pmcp_metric = os.environ.get("MIX_PMCP_METRIC", "PhaseA/lift_success")
+    # Graduation bars. A clip releases environments once it holds a bar for `hold` windows.
+    self.grad_contact_bar = float(os.environ.get("MIX_GRAD_CONTACT", "0.2"))
+    self.grad_lift_bar = float(os.environ.get("MIX_GRAD_LIFT", "0.1"))
+    self.grad_hold = int(os.environ.get("MIX_GRAD_HOLD", "3"))
+    self.grad_release = float(os.environ.get("MIX_GRAD_RELEASE", "0.5"))  # fraction given up per stage
+    self._grad_contact = np.zeros(self.n_clips, dtype=np.float64)
+    self._grad_lift = np.zeros(self.n_clips, dtype=np.float64)
+    self._grad_hold_c = np.zeros(self.n_clips, dtype=np.int64)
+    self._grad_hold_l = np.zeros(self.n_clips, dtype=np.int64)
+    self._grad_stage = np.zeros(self.n_clips, dtype=np.int64)   # 0 none, 1 contact, 2 lift
+    self._pmcp_success = np.zeros(self.n_clips, dtype=np.float64)
+    self._pmcp_seen = False
     self.nmodel = world.finalize()
 
     # Newton drops <sensor> entirely, and 136 of this scene's sensors are the contact sensors the
@@ -443,7 +533,7 @@ class NewtonVecEnv:
     # It is also unnecessary here. The fix recovers MuJoCo's compressed mass-matrix layout for a body
     # that qualifies as "simple" -- a free body with isotropic, centred inertia. A real mesh is
     # neither, so nC=1102 is the correct answer for it rather than a defect to repair.
-    if sdf_object_stl:
+    if any(_stls):
       print(f"[newton-env] simple-body fix skipped: the object is a mesh collider, whose SDF lives "
             f"on the warp model the fix would replace (nC={int(self.solver.mjw_model.nC)})")
     else:
@@ -460,7 +550,7 @@ class NewtonVecEnv:
     # (solref 0.02 1.0): mjlab's analytic sphere settles 0.37mm into the table, the stapler's
     # convex-mesh collider settles 1.93mm and transiently 11.6mm -- deep enough to see. The knob
     # is scoped to the object geom so the robot's contacts keep mjlab's parameters exactly.
-    if object_solref and sdf_object_stl:
+    if object_solref and any(_stls):
       import mujoco as _mj
       _vals = [float(x) for x in object_solref.replace(" ", "").split(",")]
       _mm = self.solver.mj_model
@@ -485,6 +575,28 @@ class NewtonVecEnv:
                           physics_dt=self.physics_dt, decimation=self.decimation,
                           solver=self.solver, object_entity=object_entity)
     self._env.forward()
+
+    # Hand mjlab the block layout replicate() actually produced. Its own default is round-robin, so
+    # leaving this unset would pair each env's object with a different clip's reference silently.
+    # _clip_id() reads this attribute and only computes its own when it is missing.
+    import torch as _torch
+    self.clip_id = _torch.as_tensor(self.clip_id_np, device=device, dtype=_torch.long)
+    self._env._reference_clip_id = self.clip_id
+    if self.n_clips > 1:
+      from mjlab.tasks.apple_eat import mdp as _amdp
+      _got = _amdp._clip_id(self._env)
+      if not _torch.equal(_got, self.clip_id):
+        raise RuntimeError(
+          "mjlab did not take the clip assignment handed to it: "
+          f"{_got[:8].tolist()} vs {self.clip_id[:8].tolist()}")
+      _ref = _amdp._ref(str(device))
+      _n = int(_ref.get("n_clips", 1))
+      if _n != self.n_clips:
+        raise RuntimeError(
+          f"{self.n_clips} object mesh(es) but the reference carries {_n} clip(s); "
+          "--sdf-objects and APPLE_EAT_PKL_MIX must list the same clips in the same order")
+      _counts = [int((self.clip_id == c).sum()) for c in range(self.n_clips)]
+      print(f"[newton-env] MIX: clip->env assignment verified against mjlab, blocks {_counts}")
     # Termination terms read these off the env the managers were built with, not off this wrapper.
     self._env.max_episode_length = self.max_episode_length
     self._env.max_episode_length_s = float(cfg.episode_length_s)
@@ -511,16 +623,26 @@ class NewtonVecEnv:
     # the scene was authored around a 4cm sphere, so a real collider does not rest where the
     # reference puts the object unless the table moves to meet it.
     if table_under_object:
-      if not sdf_object_stl:
-        raise RuntimeError("--table-under-object needs the object mesh (--sdf-object) to know "
-                           "where the real collider bottom is")
+      # The guard is about having a real collider at all, which in mixed training comes from
+      # --sdf-objects rather than the singular flag.
+      if not all(_stls):
+        raise RuntimeError("--table-under-object needs every clip's object mesh (--sdf-object or "
+                           "--sdf-objects) to know where the real collider bottom is")
       from newton_table import install as _install_table
       _ref_pkl = os.environ.get("APPLE_EAT_PKL")
       if not _ref_pkl:
         raise RuntimeError("--table-under-object needs APPLE_EAT_PKL: the object's resting height "
                            "is read from the reference clip, not guessed")
-      _install_table(self.solver.mj_model, sdf_object_stl, _ref_pkl,
-                     z_offset=float(os.environ.get("APPLE_SCENE_Z_OFFSET", 0.0)))
+      # One resting height per object. A single shift would leave every clip but one either
+      # hovering above the table or starting inside it -- silently.
+      _mix_env = os.environ.get("APPLE_EAT_PKL_MIX", "").strip()
+      _pkls = [x.strip() for x in _mix_env.split(",") if x.strip()] if _mix_env else [_ref_pkl]
+      if len(_pkls) != self.n_clips:
+        raise RuntimeError(f"{self.n_clips} object mesh(es) but {len(_pkls)} clip(s) in "
+                           "APPLE_EAT_PKL_MIX")
+      _install_table(self.solver.mj_model, _stls, _pkls,
+                     z_offset=float(os.environ.get("APPLE_SCENE_Z_OFFSET", 0.0)),
+                     clip_id=(self.clip_id_np if self.n_clips > 1 else None))
 
     self.action_term = _action_cls(sonic_cfg, self._env)
     self.action_manager = self._env.bind_action_manager(
@@ -682,9 +804,197 @@ class NewtonVecEnv:
   def action_space(self):
     return None
 
+  def _write_clip_layout(self) -> None:
+    """Lay `clip_env_count` out over the env indices, inside each object's own block."""
+    for oi, clips in self.object_clips.items():
+      cursor = int(self.object_env_start[oi])
+      for c in clips:
+        n = int(self.clip_env_count[c])
+        self.clip_id_np[cursor:cursor + n] = c
+        cursor += n
+      expected = int(self.object_env_start[oi] + self.object_env_count[oi])
+      if cursor != expected:
+        raise RuntimeError(
+          f"object {oi} block holds {self.object_env_count[oi]} envs but its clips sum to "
+          f"{cursor - int(self.object_env_start[oi])}; the two must agree or a clip would land on "
+          "a world carrying a different mesh")
+
+  def set_clip_counts(self, counts) -> None:
+    """Reassign envs between clips of the SAME object. No rebuild: the mesh in each world is
+    untouched, only which reference row an env reads."""
+    import numpy as _np
+    import torch as _torch
+
+    counts = _np.asarray(counts, dtype=_np.int64)
+    if counts.shape != (self.n_clips,):
+      raise ValueError(f"expected {self.n_clips} counts, got {counts.shape}")
+    for oi, clips in self.object_clips.items():
+      if int(counts[clips].sum()) != int(self.object_env_count[oi]):
+        raise ValueError(
+          f"clips of object {oi} were given {int(counts[clips].sum())} envs but that object's "
+          f"world block holds {int(self.object_env_count[oi])}; envs cannot move between objects "
+          "without rebuilding the scene")
+    self.clip_env_count = counts
+    self._write_clip_layout()
+    self.clip_id = _torch.as_tensor(self.clip_id_np, device=self.device, dtype=_torch.long)
+    self._env._reference_clip_id = self.clip_id
+    # The start frame is derived from the clip and cached on the env; drop it so it is rebuilt.
+    self._env._reference_start_frame = None
+    self._reset_idx(self._all)
+
+  def pmcp_reallocate(self, fail_rate, quota: int = 1, tau: float = 8.0) -> "np.ndarray":
+    """Failure-weighted counts, inside each object group, with a floor of `quota` envs per clip.
+
+    The floor is the part that matters: a pure argmax rule hands every spare env to the hardest
+    clip and the rest stop being trained at all.
+    """
+    import numpy as _np
+
+    fail = _np.asarray(fail_rate, dtype=_np.float64).reshape(self.n_clips)
+    counts = _np.zeros(self.n_clips, dtype=_np.int64)
+    for oi, clips in self.object_clips.items():
+      total = int(self.object_env_count[oi])
+      if quota * len(clips) > total:
+        raise ValueError(f"quota {quota} x {len(clips)} clips exceeds object {oi}'s {total} envs")
+      counts[clips] = quota
+      spare = total - quota * len(clips)
+      if spare <= 0:
+        continue
+      w = _np.exp(tau * (fail[clips] - fail[clips].max()))
+      w = w / w.sum() if w.sum() > 0 else _np.ones(len(clips)) / len(clips)
+      extra = _np.floor(w * spare).astype(_np.int64)
+      # hand the rounding remainder to the clips with the largest fractional part
+      rem = spare - int(extra.sum())
+      if rem > 0:
+        frac = w * spare - _np.floor(w * spare)
+        for idx in _np.argsort(-frac)[:rem]:
+          extra[idx] += 1
+      counts[clips] += extra
+    return counts
+
+  def graduation_counts(self) -> "np.ndarray":
+    """Per-clip env counts from the graduation rule, inside each object block.
+
+    A clip at stage k has given up `release^k` of its equal share; whatever is freed inside an
+    object block is split evenly among that block's clips that have not graduated. If every clip in
+    a block has graduated, the block goes back to an even split -- there is nobody left to help.
+    """
+    import numpy as _np
+
+    counts = _np.zeros(self.n_clips, dtype=_np.int64)
+    for oi, clips in self.object_clips.items():
+      total = int(self.object_env_count[oi])
+      quota = max(1, int(self.pmcp_quota) if self.pmcp_quota > 0 else total // (4 * len(clips)))
+      quota = min(quota, total // len(clips))
+      share = total // len(clips)
+      held, freed = {}, 0
+      for c in clips:
+        keep = int(round(share * (self.grad_release ** int(self._grad_stage[c]))))
+        keep = max(keep, quota)
+        held[c] = keep
+        freed += share - keep
+      needy = [c for c in clips if self._grad_stage[c] == 0]
+      if needy and freed > 0:
+        per = freed // len(needy)
+        for c in needy:
+          held[c] += per
+        held[needy[0]] += freed - per * len(needy)
+      else:
+        # nobody to give to; hand the remainder back proportionally so the block总数 holds
+        held[clips[0]] += freed
+      for c in clips:
+        counts[c] = held[c]
+      drift = total - int(sum(counts[c] for c in clips))
+      counts[clips[0]] += drift
+    return counts
+
+  def _graduation_update(self) -> bool:
+    """Advance each clip's stage from the metrics. Returns True if any stage changed."""
+    import numpy as _np
+
+    log = self.extras.get("log") or {}
+    changed = False
+    a = self.pmcp_ema
+    for c in range(self.n_clips):
+      cv = log.get(f"Stage/physical_contact/clip{c}")
+      lv = log.get(f"PhaseA/lift_success/clip{c}")
+      if cv is not None:
+        self._grad_contact[c] = (1 - a) * self._grad_contact[c] + a * float(cv)
+      if lv is not None:
+        self._grad_lift[c] = (1 - a) * self._grad_lift[c] + a * float(lv)
+      # hold counters -- a bar has to be met on consecutive windows, and a clip never falls back:
+      # returning environments to a clip that dipped is what makes the allocation oscillate.
+      self._grad_hold_c[c] = self._grad_hold_c[c] + 1 if self._grad_contact[c] >= self.grad_contact_bar else 0
+      self._grad_hold_l[c] = self._grad_hold_l[c] + 1 if self._grad_lift[c] >= self.grad_lift_bar else 0
+      stage = int(self._grad_stage[c])
+      if stage < 1 and self._grad_hold_c[c] >= self.grad_hold:
+        self._grad_stage[c] = 1; changed = True
+      if stage < 2 and self._grad_hold_l[c] >= self.grad_hold:
+        self._grad_stage[c] = 2; changed = True
+    return changed
+
+  def _pmcp_update(self) -> None:
+    """Track per-clip success, and on a rollout boundary re-derive the env split from it."""
+    if os.environ.get("MIX_PMCP_RULE", "graduation") == "graduation":
+      changed = self._graduation_update()
+      if self.common_step_counter % self.pmcp_every != 0:
+        return
+      counts = self.graduation_counts()
+      if np.array_equal(counts, self.clip_env_count):
+        return
+      before = self.clip_env_count.tolist()
+      self.set_clip_counts(counts)
+      print(f"[grad] step {self.common_step_counter} stage={self._grad_stage.tolist()} "
+            f"contact={[round(float(x),4) for x in self._grad_contact]} "
+            f"lift={[round(float(x),4) for x in self._grad_lift]} "
+            f"envs {before} -> {counts.tolist()}", flush=True)
+      return
+
+    forced = os.environ.get("MIX_PMCP_FORCE", "").strip()
+    if forced:
+      # e.g. MIX_PMCP_FORCE="0.9,0.1" -- a known signal, so a test can tell "the rule ran and
+      # decided not to move anything" apart from "the rule never ran".
+      self._pmcp_success[:] = np.asarray([float(x) for x in forced.split(",")], dtype=np.float64)
+      self._pmcp_seen = True
+      log = {}
+      vals = [None] * self.n_clips
+    else:
+      log = self.extras.get("log") or {}
+      vals = []
+      for c in range(self.n_clips):
+        key = f"{self.pmcp_metric}/clip{c}"
+        v = log.get(key)
+        vals.append(float(v) if v is not None else None)
+    if all(v is not None for v in vals):
+      cur = np.asarray(vals, dtype=np.float64)
+      if not self._pmcp_seen:
+        self._pmcp_success[:] = cur
+        self._pmcp_seen = True
+      else:
+        a = self.pmcp_ema
+        self._pmcp_success[:] = (1.0 - a) * self._pmcp_success + a * cur
+
+    if not self._pmcp_seen or self.common_step_counter % self.pmcp_every != 0:
+      return
+
+    quota = self.pmcp_quota
+    if quota <= 0:
+      # Default floor: half of an equal share. Enough that a clip nobody is failing on keeps
+      # producing gradient, small enough to leave most of the budget to reallocate.
+      quota = max(1, int(self.num_envs // self.n_clips // 2))
+    fail = 1.0 - self._pmcp_success
+    counts = self.pmcp_reallocate(fail, quota=quota, tau=self.pmcp_tau)
+    if np.array_equal(counts, self.clip_env_count):
+      return
+    before = self.clip_env_count.tolist()
+    self.set_clip_counts(counts)
+    print(f"[pmcp] step {self.common_step_counter}  success="
+          f"{[round(float(x), 4) for x in self._pmcp_success]}  "
+          f"envs {before} -> {counts.tolist()}", flush=True)
+
   def get_observations(self, update_history: bool = False):
     if self.observation_manager is not None:
-      # update_history=True must happen exactly once per control step: compute() caches, and that
+      # update_history=True must happen exactly once per control step: compute() caches, and the
       # cache is what keeps a second call in the same step from pushing the buffers twice.
       return self.observation_manager.compute(update_history=update_history)
     from tensordict import TensorDict
@@ -1119,6 +1429,9 @@ class NewtonVecEnv:
     self.extras["time_outs"] = time_out
     # mjlab's wrapper unpacks five values: terminated and truncated are separate, because a timeout
     # must bootstrap the value function while a real termination must not.
+    if getattr(self, "pmcp_every", 0) > 0 and self.n_clips > 1:
+      self._pmcp_update()
+
     return obs, reward, terminated, time_out, self.extras
 
   def _render(self) -> None:
