@@ -56,6 +56,10 @@ rsync -a --info=stats1 "$SRC_HOST:$SRC_PATH/mjlab-src/" "$MJLAB/src/"
 SITE=$("$VENV/bin/python" -c 'import site;print(site.getsitepackages()[0])')
 echo "$MJLAB/src" > "$SITE/mjlab.pth"
 "$VENV/bin/python" -c "import mjlab,os;print('mjlab ->',os.path.dirname(mjlab.__file__))"
+# mjlab is rsynced, not versioned, so a fix that lives only in one box's copy is lost on the next
+# bootstrap. Mixed-clip training is wrong without this one; it is idempotent and a no-op for
+# single-clip work.
+"$VENV/bin/python" "$(dirname "$0")/patch_mjlab.py" "$MJLAB/src"
 
 say "5/5 data from $FROM"
 mkdir -p "$DATA"
