@@ -576,6 +576,55 @@ class NewtonVecEnv:
             f"(resting penetration 0.04mm stapler / 0.28mm mug, against 1.88mm "
             f"at the shared default and 0.37mm for mjlab's sphere)")
 
+    # --- eval-only contact overrides -------------------------------------------------------
+    # Both are written the same way the object solref override is: into the compiled mj_model AND
+    # pushed into the warp model the solver actually integrates. Training sets neither; they exist
+    # to test what a fixed checkpoint's grasp is standing on.
+    def _push(_field, _mm_arr):
+      import warp as _w
+      _t = _w.to_torch(getattr(self.solver.mjw_model, _field))
+      _src = _w.to_torch(_w.array(_mm_arr, dtype=float))
+      if _t.shape == _src.shape:
+        _t[:] = _src
+      elif _t.dim() == _src.dim() + 1 and _t.shape[1:] == _src.shape:
+        _t[:] = _src.unsqueeze(0)
+      else:
+        raise RuntimeError(f"cannot push {_field}: mjw {tuple(_t.shape)} vs mj {tuple(_src.shape)}")
+      return tuple(_t.shape)
+
+    _ofr = os.environ.get("OBJECT_FRICTION", "").strip()
+    if _ofr:
+      import mujoco as _mjo
+      _mmo = self.solver.mj_model
+      _f = float(_ofr); _n = 0
+      for _g in range(_mmo.ngeom):
+        if "apple" not in (_mjo.mj_id2name(_mmo, _mjo.mjtObj.mjOBJ_GEOM, _g) or ""):
+          continue
+        _mmo.geom_friction[_g][0] = _f; _n += 1
+      if _n == 0:
+        raise RuntimeError("OBJECT_FRICTION matched no object geom")
+      _sh = _push("geom_friction", _mmo.geom_friction)
+      print(f"[newton-env] OBJECT_FRICTION -> slide={_f} on {_n} geom(s), mjw shape {_sh}", flush=True)
+
+    _hsr = os.environ.get("HAND_SOLREF", "").strip()
+    if _hsr:
+      # The object's solref was tuned so it rests on the table with 0.04mm penetration, but the
+      # FINGER geoms kept the scene default. MuJoCo mixes the two sides, so the softer finger wins
+      # and the hand sinks into the object -- measured 1.2mm mean, 8.7mm worst on the hammer.
+      import mujoco as _mjh
+      _vals = [float(x) for x in _hsr.replace(" ", "").split(",")]
+      _mmh = self.solver.mj_model
+      _n2 = 0
+      for _g in range(_mmh.ngeom):
+        _bn = _mjh.mj_id2name(_mmh, _mjh.mjtObj.mjOBJ_BODY, int(_mmh.geom_bodyid[_g])) or ""
+        if ("finger" not in _bn) and ("palm" not in _bn) and ("hand" not in _bn):
+          continue
+        _mmh.geom_solref[_g][:len(_vals)] = _vals; _n2 += 1
+      if _n2 == 0:
+        raise RuntimeError("HAND_SOLREF matched no hand geom")
+      _sh2 = _push("geom_solref", _mmh.geom_solref)
+      print(f"[newton-env] HAND_SOLREF -> {_vals} on {_n2} hand geom(s), mjw shape {_sh2}", flush=True)
+
     self._env = NewtonEnv(self.solver.mj_model, self.solver.mjw_data, self.num_envs, device,
                           control=self.control, rename_from=self._ref_mj,
                           physics_dt=self.physics_dt, decimation=self.decimation,

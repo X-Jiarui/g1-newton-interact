@@ -77,6 +77,14 @@ ap.add_argument("--agent-cfg-from", default=os.path.expanduser(
   "~/sweep_ckpts_r2/OF_00_apple_eat_1_SPHERE/model_7310.pt"),
   help="checkpoint whose params/agent.yaml supplies the agent config (tracker, residual gains)")
 ap.add_argument("--resume", default=None, help="checkpoint to warm-start from")
+ap.add_argument("--rollout-free-run", action="store_true",
+                help="record the policy without early termination: clears the termination terms and "
+                     "lifts the episode time limit, and sizes the rollout from the clip's own length "
+                     "instead of a fixed step count. A reset mid-grasp makes the video show a "
+                     "sequence of restarts rather than one attempt at the task.")
+ap.add_argument("--rollout-pad", type=float, default=1.2,
+                help="with --rollout-free-run, run this multiple of the clip length so the policy "
+                     "is still being watched after the reference ends")
 ap.add_argument("--rollout-steps", type=int, default=0,
                 help="instead of training, roll the loaded checkpoint out for this many steps and "
                      "exit. Reuses the env and runner built above, so the contact recipe, object "
@@ -182,6 +190,29 @@ _s.tracking_start_assist_steps = 0
 if str(getattr(agent_cfg, "base_tracker_kind", "")).strip().lower() == "astra_onnx":
   from mjlab.tasks.residual_interact.env_cfgs import set_astra_body_dynamics
   set_astra_body_dynamics(cfg)
+
+if A.rollout_free_run:
+  from mjlab.tasks.apple_eat import mdp as _fr_mdp
+  _fr_n = int(_fr_mdp._ref("cpu")["n_frames"])
+  # An explicit --rollout-steps wins; the clip-derived length is only the fallback. Every video
+  # being the same length makes them comparable side by side, which is usually what you want.
+  _fr_steps = int(A.rollout_steps) if int(A.rollout_steps) > 0 \
+      else max(1, int(round(_fr_n * float(A.rollout_pad))))
+  A.rollout_steps = _fr_steps
+  A.dump_steps = _fr_steps
+  A.video_steps = _fr_steps
+  # An episode that is never cut short is the whole point; both halves matter, because a time-out
+  # resets just as surely as a termination does.
+  _fr_terms = cfg.terminations if isinstance(cfg.terminations, dict) else vars(cfg.terminations)
+  _fr_dropped = sorted(_fr_terms.keys())
+  if isinstance(cfg.terminations, dict):
+    cfg.terminations = {}
+  else:
+    for _k in _fr_dropped:
+      setattr(cfg.terminations, _k, None)
+  cfg.episode_length_s = 1.0e9
+  print(f"[free-run] clip is {_fr_n} frames -> {_fr_steps} steps; "
+        f"terminations disabled: {_fr_dropped}", flush=True)
 
 print(f"building {A.num_envs} Newton worlds ...")
 env = NewtonVecEnv(cfg, A.xml, num_envs=A.num_envs, device="cuda:0",
@@ -424,12 +455,34 @@ if A.rollout_steps:
   env.reset()
   _obs = env.get_observations()
   print(f"[rollout] {A.rollout_steps} deterministic steps from reference frame 0")
+  # Calibration, not decoration: a rollout that merely *looks* wrong is an opinion, but a rollout
+  # whose contact/lift/stand disagree with the run's own training row is a measurement. Without
+  # this the first eval harness shipped a scene the policy never saw and nobody could tell.
+  _acc, _nacc, _dones = {}, 0, 0
   for _k in range(int(A.rollout_steps)):
     with _rt.inference_mode():
       _act = _pol(_obs)
     _obs, _rw, _tm, _to, _ex = env.step(_act)
+    _dones += int((_tm | _to).sum())
+    if _k in (0, 1, 5, 50, 200):
+      _a = _act.detach().float()
+      print(f"[rollout] action step={_k} shape={tuple(_a.shape)} "
+            f"absmean={_a.abs().mean().item():.5f} absmax={_a.abs().max().item():.5f} "
+            f"nonzero={(_a.abs() > 1e-8).float().mean().item():.3f}", flush=True)
+    _lg = (env.extras.get("log") or {})
+    for _kk, _vv in _lg.items():
+      try:
+        _acc[_kk] = _acc.get(_kk, 0.0) + float(_vv)
+      except (TypeError, ValueError):
+        continue
+    _nacc += 1
     if _k % 100 == 0:
       print(f"[rollout] step {_k}", flush=True)
+  print(f"[rollout] metrics over {_nacc} steps, {_dones} episode ends:", flush=True)
+  for _kk in sorted(_acc):
+    if any(_t in _kk for _t in ("physical_contact", "lift_success", "stable_not_fallen",
+                                "sequence_success", "Termination", "ep_len", "object_mpjpe")):
+      print(f"[rollout]   {_kk} = {_acc[_kk] / max(_nacc, 1):.4f}", flush=True)
   print("[rollout] done")
   raise SystemExit(0)
 
