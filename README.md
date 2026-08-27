@@ -24,6 +24,11 @@ than the `--native-contacts` defaults. The two solver options it sets (`cone=pyr
 `impratio=1`) are the only ones that differ between the two contact paths, and on the stapler clip
 they moved the first lift from "never cleanly" to iteration 542.
 
+Beyond the single-clip sweep: **[2.5 mixed-clip training](#25-mixed-clip-training-one-policy-many-clips-and-objects)**
+trains one policy over several clips and objects at once, **[2.6](#26-recording-a-video-per-run)**
+records a video per run inside Newton, and **[2.7](#27-comparing-checkpoints-in-the-browser)**
+compares checkpoints in a browser.
+
 To bring up a fresh box and start a sweep:
 
 ```bash
@@ -155,6 +160,142 @@ lifted at all in 7295 iterations. A later control line on the same task, differi
 the object is handed to MuJoCo as the real mesh (which MuJoCo then hulls to 124 verts), first
 lifted at **iteration 918**. So do not apply a fixed "wait 4500 iterations" rule: watch for the
 transition instead, and treat any single seed with suspicion.
+
+---
+
+## 2.5 Mixed-clip training (one policy, many clips and objects)
+
+A single run can train across several clips with **different objects**. Each clip gets a
+contiguous block of environments, its own object mesh, and its own SDF collider; the object is
+replicated per world, so clip *i*'s worlds contain clip *i*'s object and nothing else.
+
+```bash
+python tools/run/train_newton.py \
+  --xml assets/scene_stapler/scene.xml \
+  --reference-pkls $DATA/grab_g1_wuji_aligned/s1/hammer_use_2.pkl,$DATA/grab_g1_wuji_aligned/s1/binoculars_lift.pkl \
+  --sdf-objects    $MESH/hammer.stl,$MESH/binoculars.stl \
+  --mix-env-split  1024,1024 \
+  --agent-cfg-from $SWEEP/OF_00_apple_eat_1_SPHERE/model_7310.pt \
+  --table-under-object --native-contacts --rigid-object-table \
+  --object-solref 0.004,1.0 \
+  --num-envs 2048 --iterations 6000 --run-name MIX2
+```
+
+`--reference-pkls` and `--sdf-objects` are **positionally paired** and validated at startup — a
+mismatched count or a mesh whose name does not appear in its clip's path aborts before the model is
+built. `--mix-env-split` must sum to `--num-envs`; omit it for an equal share.
+
+Every per-clip metric is logged under `PhaseA/<metric>/clip<i>`, in `--reference-pkls` order. Read
+those, not the aggregate: the aggregate is an env-count-weighted mean, so a curriculum that moves
+environments between clips changes it even when no clip improved.
+
+### The env → clip map has exactly one owner
+
+The map from environment index to clip is built once, in `newton_vec_env`, and everything else
+**reads** it. Recomputing it — even with what looks like the same formula — is how a mixed run once
+collapsed to 8-step episodes: mjlab's side derived `env_id % n_clips` while the env used contiguous
+blocks, so nearly every environment was scored against another clip's reference. `clip_frame0_rows`
+in mjlab's `apple_eat/mdp.py` now takes `env` and defers to `_clip_id(env)`, and raises if the
+length disagrees rather than broadcasting.
+
+mjlab is not versioned with this repo, so that patch ships as
+`tools/setup/patch_mjlab.py` and is applied by `bootstrap_box.sh` after the mjlab rsync. It is
+idempotent. **A fresh box that skips it will train a mixed run that looks alive and learns
+nothing.**
+
+### Curriculum: PMCP and graduation
+
+Off by default. Both reallocate environments between clips while training runs.
+
+| variable | default | what |
+|---|---|---|
+| `MIX_PMCP_EVERY` | `0` (off) | reallocation period, in control steps |
+| `MIX_PMCP_METRIC` | `PhaseA/lift_success` | the metric clips are ranked on |
+| `MIX_PMCP_QUOTA` | `0` | per-clip env floor; 0 means an equal share |
+| `MIX_PMCP_TAU` / `MIX_PMCP_EMA` | `8.0` / `0.1` | softmax temperature, metric smoothing |
+| `MIX_PMCP_RULE` | `graduation` | `graduation` moves envs off clips that have met their bar |
+| `MIX_GRAD_CONTACT` / `MIX_GRAD_LIFT` | `0.2` / `0.1` | the bars a clip must clear to graduate |
+| `MIX_GRAD_HOLD` | `3` | consecutive **windows** (not steps) the bars must hold |
+| `MIX_GRAD_WARMUP` | `3` | windows before any graduation can fire |
+| `MIX_GRAD_RELEASE` | `0.5` | fraction of a graduated clip's envs given up per stage |
+
+Three defects here were real and are fixed; the shapes are worth knowing because they all produced
+a run that looked healthy:
+
+- **`HOLD` counts windows, not steps.** Counting steps makes the bar trivially easy to clear.
+- **The window boundary gates the update, not just the reallocation.** Updating the hold counters
+  every step while only reallocating on the boundary lets a clip graduate off a single lucky step.
+- **A stage change that moves no environment is printed**, as `(stage only; no environment could be
+  moved inside the object block)`. It used to return silently, which made the `[grad]` lines vanish
+  and led to the wrong conclusion that graduation was never firing.
+
+Environments only move **within an object block** — worlds are built with a specific object mesh
+and cannot be reassigned to a clip that uses a different one. Give-back is distributed evenly
+rather than piled onto `clips[0]`.
+
+---
+
+## 2.6 Recording a video per run
+
+One command records every run on a box, through **Newton's own renderer**, with no early
+termination:
+
+```bash
+tools/run/record_runs.sh --out /root/nvideos                 # every live run on this box
+```
+
+```bash
+tools/run/record_runs.sh --out ~/nvideos --log-root logs/rsl_rl \
+  --runs RUN_A,RUN_B --pkl $DATA/s8/stapler_pass_1.pkl --stl $MESH/stapler.stl
+```
+
+```bash
+tools/run/record_runs.sh --out /workspace/nvideos --mix MIX8_BIG \
+  --data $DATA --mesh $MESH \
+  --clips s1/hammer_use_2:hammer,s1/binoculars_lift:binoculars      # one video per clip
+```
+
+Defaults to 500 frames / 10 s; `--steps N` changes it, `--python` picks the interpreter.
+
+**Both properties are load-bearing, and both were wrong in the first version:**
+
+*The scene must be Newton's.* Dumping `qpos` and replaying it through mjlab's MuJoCo model gives
+the right trajectory in the wrong world — mjlab's model carries the visual meshes while Newton's
+carries the real object mesh, the real table and the SDF colliders. The replay silently swaps the
+object and the collision geometry, so the video stops being evidence about the run. `--newton-video`
+draws the model the physics integrates. An analysis of finger penetration computed in the replay
+model was retracted for exactly this reason.
+
+*The episode must not be cut short.* With terminations live, a grasp that slips resets mid-clip and
+the video becomes a sequence of restarts. `--rollout-free-run` clears the termination terms **and**
+lifts `episode_length_s` — a time-out resets just as surely as a termination — and it must run
+before the env is built, because the video only flushes once `video_steps` frames exist.
+
+The rollout prints its own contact / lift / stand / sequence averages when it finishes. Compare
+those against the run's training row before trusting what the video looks like; a video that merely
+looks wrong is an opinion, those numbers are a measurement.
+
+`pyglet` is required for the headless `ViewerGL` and is not in every image.
+
+---
+
+## 2.7 Comparing checkpoints in the browser
+
+`tools/pipeline/policy_gallery.py` serves a viser page with a dropdown over recorded traces, so
+several runs (or several checkpoints of one run) can be stepped through side by side.
+
+```bash
+python tools/pipeline/policy_gallery.py --traces /root/traces --port 8099
+ssh -N -L 8099:localhost:8099 <user>@<host>      # then open http://localhost:8099
+```
+
+Start every evaluation at **reference frame 0**, and keep one viser alive at a time.
+
+A mocap body that the render scene does not have is skipped, not fatal — Newton's scene carries a
+terrain plane the render model lacks. A body matching *several* candidates still aborts: picking one
+is how the table once ended up drawn under the robot's feet. If **no** recorded mocap body maps into
+the scene the loader refuses outright, because that is the case where the table is silently drawn at
+the origin.
 
 ---
 
@@ -348,5 +489,8 @@ Each cost real time here. [docs/03-defects.md](docs/03-defects.md) and
 | `tools/run/run_newton.py` | rollout / headed eval with the checkpoint dropdown |
 | `tools/pipeline/build_object_sdfs.py` | per-object SDF build + drop-test validation |
 | `tools/pipeline/object_gallery.py` | viser gallery of collider geometry |
+| `tools/run/record_runs.sh` | one video per run, Newton's renderer, no early termination |
+| `tools/pipeline/policy_gallery.py` | viser dropdown over recorded traces, for comparing checkpoints |
 | `tools/pipeline/rank_sequences_by_travel.py` | clip ranking by object travel |
+| `tools/setup/patch_mjlab.py` | ships the env->clip map fix into the unversioned mjlab checkout |
 | `docs/` | goal, parity, baseline, defects, architecture, reproduction, native migration |
