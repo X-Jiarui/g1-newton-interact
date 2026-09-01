@@ -77,6 +77,14 @@ ap.add_argument("--agent-cfg-from", default=os.path.expanduser(
   "~/sweep_ckpts_r2/OF_00_apple_eat_1_SPHERE/model_7310.pt"),
   help="checkpoint whose params/agent.yaml supplies the agent config (tracker, residual gains)")
 ap.add_argument("--resume", default=None, help="checkpoint to warm-start from")
+ap.add_argument("--rollout-free-run", action="store_true",
+                help="record the policy without early termination: clears the termination terms and "
+                     "lifts the episode time limit, and sizes the rollout from the clip's own length "
+                     "instead of a fixed step count. A reset mid-grasp makes the video show a "
+                     "sequence of restarts rather than one attempt at the task.")
+ap.add_argument("--rollout-pad", type=float, default=1.2,
+                help="with --rollout-free-run, run this multiple of the clip length so the policy "
+                     "is still being watched after the reference ends")
 ap.add_argument("--rollout-steps", type=int, default=0,
                 help="instead of training, roll the loaded checkpoint out for this many steps and "
                      "exit. Reuses the env and runner built above, so the contact recipe, object "
@@ -182,6 +190,29 @@ _s.tracking_start_assist_steps = 0
 if str(getattr(agent_cfg, "base_tracker_kind", "")).strip().lower() == "astra_onnx":
   from mjlab.tasks.residual_interact.env_cfgs import set_astra_body_dynamics
   set_astra_body_dynamics(cfg)
+
+if A.rollout_free_run:
+  from mjlab.tasks.apple_eat import mdp as _fr_mdp
+  _fr_n = int(_fr_mdp._ref("cpu")["n_frames"])
+  # An explicit --rollout-steps wins; the clip-derived length is only the fallback. Every video
+  # being the same length makes them comparable side by side, which is usually what you want.
+  _fr_steps = int(A.rollout_steps) if int(A.rollout_steps) > 0 \
+      else max(1, int(round(_fr_n * float(A.rollout_pad))))
+  A.rollout_steps = _fr_steps
+  A.dump_steps = _fr_steps
+  A.video_steps = _fr_steps
+  # An episode that is never cut short is the whole point; both halves matter, because a time-out
+  # resets just as surely as a termination does.
+  _fr_terms = cfg.terminations if isinstance(cfg.terminations, dict) else vars(cfg.terminations)
+  _fr_dropped = sorted(_fr_terms.keys())
+  if isinstance(cfg.terminations, dict):
+    cfg.terminations = {}
+  else:
+    for _k in _fr_dropped:
+      setattr(cfg.terminations, _k, None)
+  cfg.episode_length_s = 1.0e9
+  print(f"[free-run] clip is {_fr_n} frames -> {_fr_steps} steps; "
+        f"terminations disabled: {_fr_dropped}", flush=True)
 
 print(f"building {A.num_envs} Newton worlds ...")
 env = NewtonVecEnv(cfg, A.xml, num_envs=A.num_envs, device="cuda:0",
@@ -424,12 +455,134 @@ if A.rollout_steps:
   env.reset()
   _obs = env.get_observations()
   print(f"[rollout] {A.rollout_steps} deterministic steps from reference frame 0")
+  # Calibration, not decoration: a rollout that merely *looks* wrong is an opinion, but a rollout
+  # whose contact/lift/stand disagree with the run's own training row is a measurement. Without
+  # this the first eval harness shipped a scene the policy never saw and nobody could tell.
+  if os.environ.get("CONTACT_PROBE"):
+    import mujoco as _mjf
+    _mmf = env.solver.mj_model
+    _ob = [b for b in range(_mmf.nbody)
+           if "apple" in (_mjf.mj_id2name(_mmf, _mjf.mjtObj.mjOBJ_BODY, b) or "")]
+    for _b in _ob:
+      _nm = _mjf.mj_id2name(_mmf, _mjf.mjtObj.mjOBJ_BODY, _b)
+      _jn = int(_mmf.body_jntnum[_b])
+      _jt = [int(_mmf.jnt_type[_mmf.body_jntadr[_b] + _j]) for _j in range(_jn)]
+      print(f"[object] body={_nm} mass={_mmf.body_mass[_b]:.4f} kg  weldid={int(_mmf.body_weldid[_b])} "
+            f"(0 means welded to the world) njnt={_jn} jnt_types={_jt} (0=free)", flush=True)
+    _sn = getattr(env._env if hasattr(env, "_env") else env, "_sync_n", None)
+    _sb = getattr(env._env if hasattr(env, "_env") else env, "_sync_b_wp", None)
+    if _sb is not None:
+      import warp as _wpf
+      _bids = sorted(set(_wpf.to_torch(_sb).cpu().numpy().tolist()))
+      _nms = [(_mjf.mj_id2name(_mmf, _mjf.mjtObj.mjOBJ_BODY, int(_i)) or "?") for _i in _bids]
+      print(f"[weld] bodies whose pose is written from MuJoCo every substep: {_nms}", flush=True)
+      print(f"[weld] object among them: "
+            f"{any('apple' in (n or '') for n in _nms)}   <- must be False", flush=True)
+  _acc, _nacc, _dones = {}, 0, 0
+  _CPROBE = []
+  _CTAB = []
+  import mujoco as _mjp
   for _k in range(int(A.rollout_steps)):
     with _rt.inference_mode():
       _act = _pol(_obs)
     _obs, _rw, _tm, _to, _ex = env.step(_act)
+    _dones += int((_tm | _to).sum())
+    if os.environ.get("CONTACT_PROBE"):
+      # Read the contacts NEWTON actually solved -- not a replay through another model. dist<0 is
+      # penetration; the normal impulse lives in efc_force at efc_address, and for a pyramidal cone
+      # the friction components follow it. If a "grasp" were geometric interlocking rather than
+      # friction we would see large negative dist; if it were adhesion we would see a negative
+      # normal force.
+      import warp as _cwp
+      _cd = env.solver.mjw_data
+      _nac = int(_cwp.to_torch(_cd.nacon).max().item()) if hasattr(_cd, "nacon") else 0
+      if _nac:
+        _cg = _cwp.to_torch(_cd.contact.geom)[:_nac]
+        _cdist = _cwp.to_torch(_cd.contact.dist)[:_nac]
+        _cadr = _cwp.to_torch(_cd.contact.efc_address)[:_nac]
+        _cfri = _cwp.to_torch(_cd.contact.friction)[:_nac]
+        _ef = _cwp.to_torch(_cd.efc.force) if hasattr(_cd.efc, "force") else None
+        _mm3 = env.solver.mj_model
+        _ogeoms = set(g for g in range(_mm3.ngeom)
+                      if "apple" in (_mjp.mj_id2name(_mm3, _mjp.mjtObj.mjOBJ_GEOM, g) or ""))
+        for _c in range(_nac):
+          _g1, _g2 = int(_cg[_c][0]), int(_cg[_c][1])
+          if _g1 not in _ogeoms and _g2 not in _ogeoms:
+            continue
+          _other = _g2 if _g1 in _ogeoms else _g1
+          _on = _mjp.mj_id2name(_mm3, _mjp.mjtObj.mjOBJ_BODY, int(_mm3.geom_bodyid[_other])) or "?"
+          if "table" in _on or "terrain" in _on:
+            _CTAB.append((_k, float(_cdist[_c])))
+            continue
+          _fn = _ft = float("nan")
+          if _ef is not None:
+            _a = int(_cadr[_c][0]) if _cadr.dim() > 1 else int(_cadr[_c])
+            if 0 <= _a < _ef.shape[-1]:
+              _row = _ef[0] if _ef.dim() > 1 else _ef
+              _fn = float(_row[_a])
+              _ft = float(_row[_a + 1:_a + 4].abs().max()) if _a + 4 <= _row.shape[0] else float("nan")
+          _CPROBE.append((_k, _on.split("/")[-1], float(_cdist[_c]), _fn, _ft,
+                          float(_cfri[_c][0])))
+    _lg = (env.extras.get("log") or {})
+    for _kk, _vv in _lg.items():
+      try:
+        _acc[_kk] = _acc.get(_kk, 0.0) + float(_vv)
+      except (TypeError, ValueError):
+        continue
+    _nacc += 1
     if _k % 100 == 0:
       print(f"[rollout] step {_k}", flush=True)
+  print(f"[rollout] metrics over {_nacc} steps, {_dones} episode ends:", flush=True)
+  for _kk in sorted(_acc):
+    if any(_t in _kk for _t in ("physical_contact", "lift_success", "stable_not_fallen",
+                                "sequence_success", "Termination", "ep_len", "object_mpjpe")):
+      print(f"[rollout]   {_kk} = {_acc[_kk] / max(_nacc, 1):.4f}", flush=True)
+  if os.environ.get("CONTACT_PROBE") and _CPROBE:
+    import numpy as _cnp
+    _d = _cnp.array([r[2] for r in _CPROBE])
+    _fn = _cnp.array([r[3] for r in _CPROBE])
+    _mu = _cnp.array([r[5] for r in _CPROBE])
+    print(f"[contact] {len(_CPROBE)} object-vs-hand contacts over {_nacc} steps", flush=True)
+    print(f"[contact] {len(_CTAB)} object-vs-table/terrain contacts (0 would mean the object "
+          f"never rests on anything)", flush=True)
+    print(f"[contact] penetration dist(mm): mean={1000*_d.mean():.3f} min={1000*_d.min():.3f} "
+          f"max={1000*_d.max():.3f}   (negative = interpenetrating)", flush=True)
+    _fin = _fn[_cnp.isfinite(_fn)]
+    if _fin.size:
+      print(f"[contact] normal force: mean={_fin.mean():.3f} min={_fin.min():.3f} "
+            f"max={_fin.max():.3f}   negative would mean ADHESION", flush=True)
+      print(f"[contact] negative-normal count: {int((_fin < -1e-9).sum())} / {_fin.size}", flush=True)
+    print(f"[contact] friction coeff seen: {sorted(set(_mu.round(3).tolist()))[:5]}", flush=True)
+    _bodies = {}
+    for r in _CPROBE:
+      _bodies[r[1]] = _bodies.get(r[1], 0) + 1
+    print(f"[contact] by body: {sorted(_bodies.items(), key=lambda x: -x[1])[:8]}", flush=True)
+    _pc = _cnp.percentile(_d, [50, 10, 1, 0.1])
+    print(f"[contact] penetration mm p50={1000*_pc[0]:.3f} p10={1000*_pc[1]:.3f} "
+          f"p1={1000*_pc[2]:.3f} p0.1={1000*_pc[3]:.3f}", flush=True)
+    for _thr in (1.0, 3.0, 5.0, 10.0):
+      _frac = float((_d < -_thr / 1000.0).mean())
+      print(f"[contact] deeper than {_thr:4.1f} mm: {100*_frac:5.1f}% of contacts", flush=True)
+    _ftv = _cnp.array([r[4] for r in _CPROBE])
+    _ok = _cnp.isfinite(_ftv) & _cnp.isfinite(_fn) & (_fn > 1e-6)
+    if _ok.sum():
+      _ratio = _ftv[_ok] / _fn[_ok]
+      _muk = _mu[_ok]
+      _rp = _cnp.percentile(_ratio, [50, 90, 99])
+      print(f"[contact] |Ft|/Fn  mean={_ratio.mean():.4f} p50={_rp[0]:.4f} "
+            f"p90={_rp[1]:.4f} p99={_rp[2]:.4f} max={_ratio.max():.4f}", flush=True)
+      _sat = float((_ratio >= 0.95 * _muk).mean())
+      print(f"[contact] at the friction cone boundary (|Ft|/Fn >= 0.95*mu): "
+            f"{100*_sat:5.1f}% of contacts   <- how much the grasp actually USES friction",
+            flush=True)
+    _bd = {}
+    for r in _CPROBE:
+      _bd.setdefault(r[1], []).append(r[2])
+    print("[contact] per-body mean/worst penetration mm:", flush=True)
+    for _bn, _vs in sorted(_bd.items(), key=lambda x: -len(x[1]))[:8]:
+      _va = _cnp.array(_vs)
+      print(f"[contact]    {_bn:28s} n={len(_vs):6d} mean={1000*_va.mean():8.3f} "
+            f"worst={1000*_va.min():8.3f}", flush=True)
   print("[rollout] done")
   raise SystemExit(0)
 
