@@ -118,3 +118,54 @@ Metric/staged_object_contact_gate  fraction of steps the object term was actuall
 **First check before trusting any of it:** `Metric/cf_local` must be a per-clip constant in the
 20–60 range. If it is 0 or equals `n_frames`, `gt_contact_frames` did not survive into the reference
 and every staged term is running with a degenerate gate.
+
+## Follow-up: the lift terms opened on a hard-coded frame 65
+
+Raised in review, and correct: `object_lift_hold` and `object_hard_lift` gated on
+`frame >= 65`, an absolute constant. That is the same defect this project criticised in Omnigrasp's
+fixed `grasp_start_frame`, with a different number. cf is at frame 47 on the median clip and as early
+as 22, so on at least half the set those two terms -- 4.0 of the weight, second only to
+`multi_tip_surface` -- paid nothing between the moment the hand closed and frame 65.
+
+`start_frame` now accepts a negative value meaning "this clip's own contact frame": -1 is exactly cf,
+-N is cf + (N-1). Four terms were on 65 and all four are object-phase terms, so all four moved:
+
+| term | weight in the new set | effect of the change |
+|---|---|---|
+| `object_lift_hold` | 2.0 | real: opens at cf instead of 65 |
+| `object_hard_lift` | 2.0 | real: opens at cf instead of 65 |
+| `object_trajectory_tracking` | 0.0 (replaced by `staged_object_tracking`) | consistency only |
+| `object_omnigrasp_grab` | 0.0 | consistency only |
+
+The gate is compared CLIP-LOCALLY. `_tracking_frame` is a global row under MIX, so `frame >= 65` was
+already true for every clip after the first on its very first step -- the constant was not only
+wrong, it was not even being applied to most clips.
+
+## The 0.10 / 0.30 / 0.50 s question
+
+Also raised in review: `object_lift_hold` targets 0.10 s, `object_hard_lift` 0.30 s, and the
+`lift_success` metric 0.50 s. That reads like three misaligned thresholds. It is not, and the
+distinction matters for how the reward is expected to behave.
+
+These terms are **dense**: the RewardManager calls them every step and the value is paid every step.
+
+```python
+value = height_weight  * height_score * contact_gate
+      + hard_lift_weight * strict_lift
+      + duration_weight  * duration_score
+      + force_weight   * force_close * height_score
+```
+
+`duration` is an accumulator that grows by `step_dt` while the strict lift holds and is **reset to
+zero the moment it breaks**. `duration_score = clamp(duration / 0.30, 0, 1)` therefore describes a
+RAMP, not a threshold: it reaches 1.0 after 0.30 s and stays there, being paid again on every
+subsequent step for as long as the object is held.
+
+So holding longer is strictly better -- total return grows with hold time -- and letting go is
+strictly worse, because the ramp restarts. "Grab for 0.3 s, collect, release" is not a winning
+strategy under this reward. The three numbers are ramp lengths for different components, and 0.50 s
+is a metric threshold rather than a reward at all.
+
+What the lift terms do NOT reward is the object *following its trajectory* while carried. That is
+`staged_object_tracking`'s job (2.0, contact-gated, active after cf), which is why replacing
+`object_trajectory_tracking` rather than dropping it matters.
