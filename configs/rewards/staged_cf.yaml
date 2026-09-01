@@ -1,56 +1,71 @@
-# Staged reward weights, to be applied through the env.yaml override chain.
+# Reward weights for the cf-staged set. Pass with --reward-cfg; it replaces the checkpoint's
+# params/env.yaml as the weight source.
 #
-# HOW THESE TAKE EFFECT
-#   tools/run/train_newton.py:107
-#     apply_reward_weights(cfg, reward_weights_from_env_yaml(<ckpt>/params/env.yaml))
-#   The task default in env_cfgs.py is overwritten by this file. Registering a term in env_cfgs.py
-#   is NOT enough -- a term absent from here trains at whatever the base cfg says, and terms the
-#   base cfg does not define will raise.
+# FORMAT IS LOAD-BEARING. reward_cfg_from_checkpoint.py parses this textually, not with a yaml
+# loader (env.yaml carries Python objects that do not resolve outside a built env). It matches
+# exactly two lines:
+#     ^  <name>:$        two spaces, name, nothing after the colon
+#     ^    weight: <f>   four spaces
+# The flow style `name: {weight: 1.0}` matches neither and the whole file reads as EMPTY, which
+# silently falls back to the task default where only `tracking` carries weight.
 #
-# BASELINE this replaces (identical across EAT1 / MIX / MIXSB / PARTS):
-#   multi_tip_surface 5.0, right_wrist_tracking 3.0, object_trajectory_tracking 2.0,
-#   object_lift_hold 2.0, object_hard_lift 2.0, tracking 1.0, contact_duration 1.0,
-#   stability 1.0, left_wrist_tracking 0.5, omnigrasp_style 0.5      (10 terms, sum 18.0)
-#
-# THIS SET: 10 terms, sum 18.5. The magnitude is deliberately close to the baseline so the PPO
-# value scale does not shift and a matched-iteration comparison stays honest.
-
+# Baseline this replaces (10 terms, sum 18.0):
+#   multi_tip_surface 5.0, right_wrist 3.0, object_trajectory_tracking 2.0, object_lift_hold 2.0,
+#   object_hard_lift 2.0, tracking 1.0, contact_duration 1.0, stability 1.0, left_wrist 0.5,
+#   omnigrasp_style 0.5
+# This set: 10 terms, sum 19.0. The +1.0 is staged_hand_pose, the only new signal.
 rewards:
-  # ---- REPLACED --------------------------------------------------------------------------------
-  # tracking (1.0) -> staged_lower_tracking. `tracking` is one Gaussian over the whole body; the
-  # upper half of it is exactly what should be released after cf, and it cannot be released
-  # separately. The lower body keeps the always-on term: GMR's feet carry the highest IK weights and
-  # the upper body needs something to stand on once it is free.
-  tracking: {weight: 0.0}
-  staged_lower_tracking: {weight: 1.0}
 
-  # right_wrist_tracking (3.0) + left_wrist_tracking (0.5) -> staged_upper_tracking (3.5).
-  # Same job, whole upper chain instead of two wrist points, and released after cf where the arm is
-  # a means rather than data. post_weight is 0.15 in env_cfgs.py, not 0 -- see the doc.
-  right_wrist_tracking: {weight: 0.0}
-  left_wrist_tracking: {weight: 0.0}
-  staged_upper_tracking: {weight: 3.5}
+  # ---- REPLACED ------------------------------------------------------------------------------
+  # tracking (1.0) -> staged_lower_tracking. `tracking` is one Gaussian over the whole body; its
+  # upper half is exactly what should be released after cf and cannot be released separately.
+  tracking:
+    weight: 0.0
+  staged_lower_tracking:
+    weight: 1.0
 
-  # object_trajectory_tracking (2.0) -> staged_object_tracking. Same quantity, plus two gates:
-  # active only after cf, and paid only when a fingertip is actually within 6 cm of the object.
-  object_trajectory_tracking: {weight: 0.0}
-  staged_object_tracking: {weight: 2.0}
+  # right_wrist (3.0) + left_wrist (0.5) -> staged_upper_tracking (3.5). Same job, whole upper
+  # chain instead of two wrist points, released after cf. post_weight is 0.15 in env_cfgs.py, not
+  # 0: the action space is a joint residual on a frozen tracker, so nothing structural stops the
+  # arm from windmilling once the term is gone.
+  right_wrist_tracking:
+    weight: 0.0
+  left_wrist_tracking:
+    weight: 0.0
+  staged_upper_tracking:
+    weight: 3.5
 
-  # ---- NEW -------------------------------------------------------------------------------------
-  # Nothing in the baseline reads the finger joints. This is the only place the cf grasp solve is
-  # spent. See the doc for why joint space and not fingertip positions.
-  staged_hand_pose: {weight: 1.0}
+  # object_trajectory_tracking (2.0) -> staged_object_tracking. Same quantity plus two gates:
+  # active only after this clip's own cf, and paid only when a fingertip is within 6 cm.
+  object_trajectory_tracking:
+    weight: 0.0
+  staged_object_tracking:
+    weight: 2.0
 
-  # ---- UNCHANGED -------------------------------------------------------------------------------
-  multi_tip_surface: {weight: 5.0}      # see the doc: replacing this is a DOWNGRADE, not a swap
-  object_lift_hold: {weight: 2.0}
-  object_hard_lift: {weight: 2.0}
-  contact_duration: {weight: 1.0}
-  stability: {weight: 1.0}
-  omnigrasp_style: {weight: 0.5}
+  # ---- NEW -----------------------------------------------------------------------------------
+  # Nothing in the baseline reads the 20 finger joints. This is the only place the cf grasp solve
+  # is spent. Joint space, not fingertip positions: no forward kinematics in the reward loop, and
+  # fingertip targets would reintroduce the 1.24x Wuji hand-length difference that step 5 absorbs.
+  staged_hand_pose:
+    weight: 1.0
 
-  # Registered but left at zero: staged_tip_object. It is a plain Gaussian on tip-to-object-CENTRE
-  # with a near-mask, and multi_tip_surface already does that job against the SURFACE with contact,
-  # force, grasp and drift gating. Kept in the tree because the close_hand_flag mask in it is worth
-  # folding into multi_tip_surface later; not worth losing five weighted sub-terms today.
-  staged_tip_object: {weight: 0.0}
+  # ---- UNCHANGED -----------------------------------------------------------------------------
+  # Replacing multi_tip_surface with staged_tip_object is a DOWNGRADE: it carries contact, grasp,
+  # force, drift and top-k sub-terms against the object SURFACE, where staged_tip_object is a
+  # plain Gaussian to the object CENTRE. Its close_hand_flag mask is worth folding in later.
+  multi_tip_surface:
+    weight: 5.0
+  object_lift_hold:
+    weight: 2.0
+  object_hard_lift:
+    weight: 2.0
+  contact_duration:
+    weight: 1.0
+  stability:
+    weight: 1.0
+  omnigrasp_style:
+    weight: 0.5
+
+  # Registered, deliberately unweighted.
+  staged_tip_object:
+    weight: 0.0

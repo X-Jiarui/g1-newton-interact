@@ -54,6 +54,9 @@ ap.add_argument("--xml", default=os.path.join(os.path.dirname(os.path.dirname(os
 ap.add_argument("--agent-cfg-from", default=os.path.expanduser(
   "~/sweep_ckpts_r2/OF_00_apple_eat_1_SPHERE/model_7310.pt"),
   help="checkpoint whose params/agent.yaml supplies the agent config (tracker, residual gains)")
+ap.add_argument("--reward-cfg", default=None,
+  help="yaml whose `rewards:` block supplies the reward weights, instead of the "
+       "checkpoint's params/env.yaml. Same block format: two spaces name, four spaces weight")
 ap.add_argument("--resume", default=None, help="checkpoint to warm-start from")
 ap.add_argument("--run-name", default="NEWTON_NATIVE")
 ap.add_argument("--log-root", default=os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "logs/rsl_rl"))
@@ -102,9 +105,20 @@ _apply_cfg_mapping(agent_cfg, _yaml.unsafe_load(p.open()))
 # The agent config is not the whole story: the checkpoint's env.yaml carries the reward weights it
 # trained with, and load_env_cfg returns the task default where only `tracking` has weight. Training
 # against the default is training with no grasping reward at all.
-_env_yaml = Path(A.agent_cfg_from).parent / "params" / "env.yaml"
+_env_yaml = (Path(A.reward_cfg) if A.reward_cfg
+             else Path(A.agent_cfg_from).parent / "params" / "env.yaml")
+if A.reward_cfg and not _env_yaml.exists():
+  raise SystemExit(f"--reward-cfg {_env_yaml} does not exist")
 if _env_yaml.exists():
-  apply_reward_weights(cfg, reward_weights_from_env_yaml(_env_yaml))
+  _w = reward_weights_from_env_yaml(_env_yaml)
+  # A yaml that parses to nothing is the failure this guard exists for: the flow style
+  # `name: {weight: 1.0}` matches neither regex, so the file reads as empty and training
+  # silently falls back to the task default where only `tracking` carries weight.
+  if not _w:
+    raise SystemExit(f"[reward-cfg] {_env_yaml} parsed to zero reward terms. The block "
+                     f"format is `  <name>:` then `    weight: <float>` on the next line.")
+  print(f"[reward-cfg] source: {_env_yaml}")
+  apply_reward_weights(cfg, _w)
 else:
   print(f"[reward-cfg] WARNING: no env.yaml beside the checkpoint; training with the task default, "
         f"where only one reward term carries weight")
