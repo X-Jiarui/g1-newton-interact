@@ -90,9 +90,14 @@ def _mocap_slot(name: str) -> int:
     n = (mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_BODY, b) or "").replace("/", "_")
     if n.endswith(want) or want.endswith(n):
       hits.append(int(m.body_mocapid[b]))
-  if len(hits) != 1:
+  if len(hits) > 1:
     raise SystemExit(f"mocap body {name!r} matched {len(hits)} bodies in the render model; "
-                     "the trace and the model disagree about the scene")
+                     "refusing to guess -- picking one is how the table ended up under the robot")
+  if not hits:
+    # Newton's scene carries mocap bodies the render scene does not (the terrain plane). Leaving
+    # such a body unposed is fine; inventing a slot for it is not. The table must still match, and
+    # it does -- it is the only recorded mocap body the render model actually has.
+    return -1
   return hits[0]
 
 def frames(qpos, mocap):
@@ -112,6 +117,8 @@ def frames(qpos, mocap):
       else:
         for src, name in enumerate(mnames):
           dst = _mocap_slot(name)
+          if dst < 0:
+            continue
           d.mocap_pos[dst] = mpos[i][src]
           d.mocap_quat[dst] = mquat[i][src]
     d.qvel[:] = 0

@@ -96,8 +96,13 @@ def mocap_slot(model, name: str) -> int:
         n = (mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY, b) or "").replace("/", "_")
         if n.endswith(want) or want.endswith(n):
             hits.append(int(model.body_mocapid[b]))
-    if len(hits) != 1:
-        raise SystemExit(f"mocap body {name!r} matched {len(hits)} bodies; trace and model disagree")
+    if len(hits) > 1:
+        raise SystemExit(f"mocap body {name!r} matched {len(hits)} bodies; refusing to guess -- "
+                         "picking one is how the table ended up under the robot")
+    if not hits:
+        # Newton's scene carries mocap bodies the render scene does not (the terrain plane). Leaving
+        # such a body unposed is fine; inventing a slot for it is not.
+        return -1
     return hits[0]
 
 
@@ -117,6 +122,14 @@ def load(name: str):
     mquat = z["mocap_quat"] if "mocap_quat" in z else None
     mnames = [str(x) for x in z["mocap_names"]] if "mocap_names" in z else None
     slots = [mocap_slot(model, n) for n in mnames] if mnames else None
+    if slots is not None:
+        missing = [n for n, d in zip(mnames, slots) if d < 0]
+        if missing:
+            print(f"[gallery] {name}: mocap bodies absent from the render scene, left unposed: "
+                  f"{missing}", flush=True)
+        if not any(d >= 0 for d in slots):
+            raise SystemExit(f"{name}: no recorded mocap body maps into the render scene; the "
+                             "table would be drawn at the origin")
 
     geoms = []
     for g in range(model.ngeom):
@@ -135,6 +148,8 @@ def load(name: str):
         if mpos is not None and model.nmocap:
             if slots is not None:
                 for src, dst in enumerate(slots):
+                    if dst < 0:
+                        continue
                     data.mocap_pos[dst] = mpos[i][src]
                     data.mocap_quat[dst] = mquat[i][src]
             else:

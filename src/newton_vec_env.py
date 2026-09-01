@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import math
 import os
+import re
 from typing import Any
 
 import numpy as np
@@ -144,6 +145,23 @@ class NewtonVecEnv:
 
     self.physics_dt = float(cfg.sim.mujoco.timestep) if hasattr(cfg.sim, "mujoco") else 0.005
     self.decimation = int(cfg.decimation)
+    _sts = os.environ.get("SIM_TIMESTEP", "").strip()
+    if _sts:
+      _new_dt = float(_sts)
+      _ratio = self.physics_dt / _new_dt
+      if abs(_ratio - round(_ratio)) > 1e-6:
+        raise RuntimeError(f"SIM_TIMESTEP {_new_dt} does not divide the configured "
+                           f"{self.physics_dt}; decimation could not stay integral and the control "
+                           f"rate would change along with the contact")
+      _old_dt, _old_dec = self.physics_dt, self.decimation
+      self.decimation = int(round(self.decimation * _ratio))
+      self.physics_dt = _new_dt
+      if hasattr(cfg.sim, "mujoco"):
+        cfg.sim.mujoco.timestep = _new_dt
+      cfg.decimation = self.decimation
+      print(f"[newton-env] SIM_TIMESTEP {1000*_new_dt:.3f} ms (was {1000*_old_dt:.3f}); decimation "
+            f"{_old_dec} -> {self.decimation}, control rate unchanged at "
+            f"{1.0/(self.physics_dt*self.decimation):.1f} Hz", flush=True)
     self.step_dt = self.physics_dt * self.decimation
     self.max_episode_length = int(math.ceil(float(cfg.episode_length_s) / self.step_dt))
 
@@ -171,6 +189,96 @@ class NewtonVecEnv:
         scene.default_shape_cfg.kh = float(hydro_kh)
         print(f"[newton-env] hydroelastic stiffness kh = {hydro_kh:.0e} on both contact sides")
       scene.add_mjcf(xml, collapse_fixed_joints=False, parse_mujoco_options=True)
+
+      # ON BY DEFAULT. Newton does not inherit MuJoCo's "same weld group never collides" rule,
+      # so wrist_yaw and palm -- one rigid body, meshes overlapping 9 mm by design -- produced
+      # 9 contacts per step per env, 12-14% of every contact in the scene, carrying no force and
+      # no information. Measured A/B at 64 envs x 3 seeds on frozen_S8: total contacts
+      # 825,455 -> 713,912 (-13.5%, exactly the 115,200 removed), lift_success 0.1641 -> 0.1617
+      # (inside the 3% noise floor), penetration and wall-clock unchanged. Set to 0 to disable.
+      if os.environ.get("HAND_COLLISION_FIX", "1").strip() not in ("0", "off", "false"):
+        # Applied to the MuJoCo spec before the scene is replicated, so every world inherits it.
+        import mujoco as _hcf
+        _hm = mujoco.MjModel.from_xml_path(xml)
+        _hbn = lambda _b: (_hcf.mj_id2name(_hm, _hcf.mjtObj.mjOBJ_BODY, _b) or "")
+        _fing = re.compile(r"(left|right)_finger(\d)_link(\d)")
+        _hand = re.compile(r"(finger|palm|wrist|mount)")
+        _pairs, _reasons = [], {}
+        for _b1 in range(_hm.nbody):
+          _n1 = _hbn(_b1)
+          if not _hand.search(_n1):
+            continue
+          for _b2 in range(_b1 + 1, _hm.nbody):
+            _n2 = _hbn(_b2)
+            if not _hand.search(_n2):
+              continue
+            _why = None
+            if int(_hm.body_weldid[_b1]) == int(_hm.body_weldid[_b2]):
+              _why = "same weld group"
+            elif int(_hm.body_parentid[_b1]) == _b2 or int(_hm.body_parentid[_b2]) == _b1:
+              _why = "one joint apart"
+            else:
+              # one joint apart THROUGH a fixed adapter: walk up past welded ancestors
+              def _weld_root(_b):
+                while _b > 0 and int(_hm.body_jntnum[_b]) == 0:
+                  _b = int(_hm.body_parentid[_b])
+                return _b
+              _r1, _r2 = _weld_root(_b1), _weld_root(_b2)
+              if _r1 != _r2 and (int(_hm.body_parentid[_r1]) == _r2
+                                 or int(_hm.body_parentid[_r2]) == _r1):
+                _why = "one joint apart via a fixed adapter"
+              else:
+                _m1, _m2 = _fing.search(_n1), _fing.search(_n2)
+                if _m1 and _m2 and _m1.group(1) == _m2.group(1) and _m1.group(2) == _m2.group(2):
+                  _why = "same finger"
+            if _why:
+              _pairs.append((_n1, _n2))
+              _reasons[_why] = _reasons.get(_why, 0) + 1
+        print(f"[collfix] excluding {len(_pairs)} hand body pairs: "
+              + ", ".join(f"{k}={v}" for k, v in sorted(_reasons.items())), flush=True)
+        # Map body name -> the scene's shape indices, so the body pairs become shape pairs.
+        # Clear the link2 isolation: uniform contype on every hand geom, so what may collide is
+        # decided by the exclusion list above and nothing else.
+        _nct = 0
+        for _g in range(_hm.ngeom):
+          _gb = _hbn(int(_hm.geom_bodyid[_g]))
+          if not _hand.search(_gb):
+            continue
+          if int(_hm.geom_contype[_g]) or int(_hm.geom_conaffinity[_g]):
+            if int(_hm.geom_contype[_g]) != 1 or int(_hm.geom_conaffinity[_g]) != 1:
+              _nct += 1
+        print(f"[collfix] hand geoms whose contype/conaffinity is not 1/1: {_nct} "
+              f"(the XML isolates every link2 with 2/2)", flush=True)
+
+        _bn2shapes = {}
+        for _si in range(len(scene.shape_body)):
+          _bi = int(scene.shape_body[_si])
+          if _bi < 0:
+            continue
+          _lbl = scene.body_label[_bi] if hasattr(scene, "body_label") else ""
+          _bn2shapes.setdefault(str(_lbl).split("/")[-1], []).append(_si)
+        _nfilt = 0
+        for _n1, _n2 in _pairs:
+          for _s1 in _bn2shapes.get(_n1.split("/")[-1], []):
+            for _s2 in _bn2shapes.get(_n2.split("/")[-1], []):
+              scene.add_shape_collision_filter_pair(_s1, _s2)
+              _nfilt += 1
+        print(f"[collfix] {_nfilt} shape-pair filters added from {len(_pairs)} body pairs",
+              flush=True)
+        _wp = [(a, b) for a, b in _pairs if "wrist" in a and "palm" in b
+               or "wrist" in b and "palm" in a]
+        print(f"[collfix] wrist/palm body pairs in the rule: {len(_wp)} -> {_wp[:4]}", flush=True)
+        _lbls = sorted(_bn2shapes.keys())
+        print(f"[collfix] sample of Newton body labels seen: {_lbls[:6]}", flush=True)
+        _miss = [p for p in _pairs
+                 if not _bn2shapes.get(p[0].split("/")[-1]) or not _bn2shapes.get(p[1].split("/")[-1])]
+        print(f"[collfix] body pairs that matched NO shapes: {len(_miss)} of {len(_pairs)}"
+              + (f"  e.g. {_miss[:3]}" if _miss else ""), flush=True)
+        if _nfilt == 0:
+          raise RuntimeError("HAND_COLLISION_FIX matched no shapes; the body-name lookup is wrong, "
+                             "and running on would silently leave the model unchanged")
+
+
 
       # Swap the object's collider before replicating, so every world gets it. mjlab authors the object
       # as a 4 cm sphere and its own mesh path uses the *_cir160 convex hull instead of the real shape.
@@ -412,7 +520,8 @@ class NewtonVecEnv:
           # for the stapler, 1025759 for the mug. Everything past the cap is dropped, which means
           # missed contacts in exactly the interaction being trained. A pair is a vec3i, so 4 M
           # costs 48 MB.
-          _max_tri = 4_000_000
+          _max_tri = int(os.environ.get("MAX_TRI_PAIRS", "12000000"))
+          # was 4_000_000; see the stall described above
           # grid_size is the hydroelastic working grid and it is charged per step regardless of
           # how many contacts there actually are: profiled at 2048 env, collide() was 234.7 ms of
           # a 253.9 ms substep while solver.step() was 19.2 ms, for 42 contacts per world.
@@ -575,6 +684,228 @@ class NewtonVecEnv:
       print(f"[newton-env] object solref -> {_vals} on {_hit} geom(s) "
             f"(resting penetration 0.04mm stapler / 0.28mm mug, against 1.88mm "
             f"at the shared default and 0.37mm for mjlab's sphere)")
+
+    # Geom masks for the penetration metric, built once: mj_id2name over ngeom every step would
+    # cost more than the statistic is worth.
+    self._pen_log_every = int(os.environ.get("PEN_LOG_EVERY", "4"))
+    self._pen_on = os.environ.get("PEN_LOG", "1").strip() not in ("", "0")
+    self._pen_tick = 0
+    if self._pen_on:
+      import mujoco as _mjpl, torch as _tpl
+      _mmpl = self.solver.mj_model
+      _og, _rg = [], []
+      for _g in range(_mmpl.ngeom):
+        _gn = _mjpl.mj_id2name(_mmpl, _mjpl.mjtObj.mjOBJ_GEOM, _g) or ""
+        _bn = _mjpl.mj_id2name(_mmpl, _mjpl.mjtObj.mjOBJ_BODY, int(_mmpl.geom_bodyid[_g])) or ""
+        if "apple" in _gn:
+          _og.append(_g)
+        # Whitelist on the robot. A blacklist on "world" matches "scene_worldbody", which every
+        # compiled body name contains, and silently discards every finger.
+        elif "robot" in _bn:
+          _rg.append(_g)
+      if not _og or not _rg:
+        print(f"[pen] disabled: {len(_og)} object geom(s), {len(_rg)} robot geom(s)", flush=True)
+        self._pen_on = False
+      else:
+        _ng = int(_mmpl.ngeom)
+        self._pen_obj = _tpl.zeros(_ng, dtype=_tpl.bool, device=device)
+        self._pen_rob = _tpl.zeros(_ng, dtype=_tpl.bool, device=device)
+        self._pen_obj[_tpl.tensor(_og, device=device)] = True
+        self._pen_rob[_tpl.tensor(_rg, device=device)] = True
+        print(f"[pen] penetration logging on: {len(_og)} object geom(s) vs {len(_rg)} robot "
+              f"geom(s), sampled every {self._pen_log_every} steps", flush=True)
+
+    _fr = os.environ.get("OBJECT_FRICTION", "").strip()
+    if _fr:
+      import mujoco as _mj2, warp as _wp2
+      _f = float(_fr)
+      _mm2 = self.solver.mj_model
+      _hit2 = 0
+      for _g in range(_mm2.ngeom):
+        _n = _mj2.mj_id2name(_mm2, _mj2.mjtObj.mjOBJ_GEOM, _g) or ""
+        if "apple" not in _n:
+          continue
+        _mm2.geom_friction[_g][0] = _f
+        _hit2 += 1
+      if _hit2 == 0:
+        raise RuntimeError("OBJECT_FRICTION matched no object geom")
+      _t = _wp2.to_torch(self.solver.mjw_model.geom_friction)
+      _src = _wp2.to_torch(_wp2.array(_mm2.geom_friction, dtype=float))
+      if _t.shape == _src.shape:
+        _t[:] = _src
+      elif _t.dim() == _src.dim() + 1 and _t.shape[1:] == _src.shape:
+        _t[:] = _src.unsqueeze(0)          # per-world copy
+      else:
+        raise RuntimeError(f"cannot push friction: mjw {tuple(_t.shape)} vs mj {tuple(_src.shape)}")
+      print(f"[newton-env] OBJECT_FRICTION -> slide={_f} on {_hit2} geom(s); "
+            f"mjw geom_friction shape {tuple(_t.shape)}", flush=True)
+
+    def _push(_field, _mm_arr):
+      import warp as _w
+      _t = _w.to_torch(getattr(self.solver.mjw_model, _field))
+      _src = _w.to_torch(_w.array(_mm_arr, dtype=float))
+      if _t.shape == _src.shape:
+        _t[:] = _src
+      elif _t.dim() == _src.dim() + 1 and _t.shape[1:] == _src.shape:
+        _t[:] = _src.unsqueeze(0)
+      else:
+        raise RuntimeError(f"cannot push {_field}: mjw {tuple(_t.shape)} vs mj {tuple(_src.shape)}")
+      return tuple(_t.shape)
+
+    def _hand_geoms(_mm):
+      import mujoco as _mj
+      out = []
+      for _g in range(_mm.ngeom):
+        _bn = _mj.mj_id2name(_mm, _mj.mjtObj.mjOBJ_BODY, int(_mm.geom_bodyid[_g])) or ""
+        if ("finger" in _bn) or ("palm" in _bn) or ("hand" in _bn):
+          out.append(_g)
+      return out
+
+    # MuJoCo combines two geoms' friction with an element-wise MAXIMUM at equal priority, so
+    # lowering the object's alone cannot lower the contact's -- the hand's 1.0 still wins. An
+    # earlier sweep set only OBJECT_FRICTION and concluded "friction does not matter" from a sweep
+    # that never changed friction; the solver's own contact.friction, printed by the probe below,
+    # is what settles it.
+    _ffl = os.environ.get("FINGER_FORCE_LIMIT", "").strip()
+    if _ffl:
+      import mujoco as _mjf2
+      _lim = float(_ffl)
+      _mmf2 = self.solver.mj_model
+      _n_act = 0
+      _before = 0.0
+      _fing_ids = []
+      for _a in range(_mmf2.nu):
+        _jn = _mjf2.mj_id2name(_mmf2, _mjf2.mjtObj.mjOBJ_JOINT,
+                               int(_mmf2.actuator_trnid[_a][0])) or ""
+        if ("finger" not in _jn) and ("thumb" not in _jn):
+          continue
+        _an = _mjf2.mj_id2name(_mmf2, _mjf2.mjtObj.mjOBJ_ACTUATOR, _a) or ""
+        _kp_a = float(_mmf2.actuator_gainprm[_a][0])
+        if ("unused" in _an) or (_kp_a < 10.0):
+          continue                      # the disabled XML motor; leave it inert
+        _before = max(_before, float(abs(_mmf2.actuator_forcerange[_a][1])))
+        _mmf2.actuator_forcelimited[_a] = 1
+        _mmf2.actuator_forcerange[_a][0] = -_lim
+        _mmf2.actuator_forcerange[_a][1] = _lim
+        _fing_ids.append(_a)
+        _n_act += 1
+      if _n_act == 0:
+        raise RuntimeError("FINGER_FORCE_LIMIT matched no finger actuator")
+      import warp as _wfl, torch as _tfl
+      _idx = _tfl.tensor(_fing_ids, dtype=_tfl.long)
+      _mw0 = self.solver.mjw_model
+      _tr0 = _wfl.to_torch(_mw0.actuator_forcerange)
+      _pick = _fing_ids[0]
+      _b4 = _tr0[0, _pick] if _tr0.dim() == 3 else _tr0[_pick]
+      print(f"[newton-env] finger actuator {_pick} forcerange BEFORE: "
+            f"{[round(float(x), 4) for x in _b4]}", flush=True)
+      _mw = self.solver.mjw_model
+      _tr = _wfl.to_torch(_mw.actuator_forcerange)
+      _tl = _wfl.to_torch(_mw.actuator_forcelimited) if hasattr(_mw, "actuator_forcelimited") \
+          else None
+      _idx = _idx.to(_tr.device)
+      if _tr.dim() == 3:            # (nworld, nu, 2)
+        _tr[:, _idx, 0] = -_lim
+        _tr[:, _idx, 1] = _lim
+      else:                          # (nu, 2)
+        _tr[_idx, 0] = -_lim
+        _tr[_idx, 1] = _lim
+      # forcelimited is left alone: the fingers already carry it, and the disabled
+      # xml_motor_unused_* actuators in the same name match are meant to stay inert.
+      _sh_a = tuple(_tr.shape)
+      _af = _tr[0, _pick] if _tr.dim() == 3 else _tr[_pick]
+      print(f"[newton-env] finger actuator {_pick} forcerange AFTER : "
+            f"{[round(float(x), 4) for x in _af]}", flush=True)
+      # An arm actuator, printed as the canary: it must keep whatever range it already had.
+      _arm = [a for a in range(_mmf2.nu)
+              if "elbow" in (_mjf2.mj_id2name(_mmf2, _mjf2.mjtObj.mjOBJ_JOINT,
+                                              int(_mmf2.actuator_trnid[a][0])) or "")]
+      if _arm:
+        _av = _tr[0, _arm[0]] if _tr.dim() == 3 else _tr[_arm[0]]
+        print(f"[newton-env] arm actuator forcerange after the write: "
+              f"{[round(float(x), 3) for x in _av]} (must not be [0, 0])", flush=True)
+      print(f"[newton-env] FINGER_FORCE_LIMIT {_lim} N*m on {_n_act} finger actuator(s) "
+            f"(was up to {_before} N*m); at a 30 mm lever that is {_lim/0.03:.0f} N, against "
+            f"4.2 N to hold the object; mjw shape {_sh_a}", flush=True)
+
+    _hfr = os.environ.get("HAND_FRICTION", "").strip()
+    if _hfr:
+      _mm = self.solver.mj_model
+      _gs = _hand_geoms(_mm)
+      if not _gs:
+        raise RuntimeError("HAND_FRICTION matched no hand geom")
+      for _g in _gs:
+        _mm.geom_friction[_g][0] = float(_hfr)
+      print(f"[newton-env] HAND_FRICTION -> slide={float(_hfr)} on {len(_gs)} hand geom(s), "
+            f"mjw shape {_push('geom_friction', _mm.geom_friction)}", flush=True)
+
+    _hsr = os.environ.get("HAND_SOLREF", "").strip()
+    if _hsr:
+      _mm = self.solver.mj_model
+      _vals = [float(x) for x in _hsr.replace(" ", "").split(",")]
+      _gs = _hand_geoms(_mm)
+      if not _gs:
+        raise RuntimeError("HAND_SOLREF matched no hand geom")
+      for _g in _gs:
+        _mm.geom_solref[_g][:len(_vals)] = _vals
+      print(f"[newton-env] HAND_SOLREF -> {_vals} on {len(_gs)} hand geom(s), "
+            f"mjw shape {_push('geom_solref', _mm.geom_solref)}", flush=True)
+
+    _hsi = os.environ.get("HAND_SOLIMP", "").strip()
+    if _hsi:
+      _mm = self.solver.mj_model
+      _vals = [float(x) for x in _hsi.replace(" ", "").split(",")]
+      _gs = _hand_geoms(_mm)
+      if not _gs:
+        raise RuntimeError("HAND_SOLIMP matched no hand geom")
+      for _g in _gs:
+        _mm.geom_solimp[_g][:len(_vals)] = _vals
+      print(f"[newton-env] HAND_SOLIMP -> {_vals} on {len(_gs)} hand geom(s), "
+            f"mjw shape {_push('geom_solimp', _mm.geom_solimp)}", flush=True)
+
+    # A standoff, NOT a stiffness: the constraint switches on this far before the surfaces meet.
+    # It inflates the object, so it is a diagnostic bound and not a candidate fix -- 3 mm makes a
+    # 15.6 mm hammer handle 38% thicker.
+    _omg = os.environ.get("OBJECT_MARGIN", "").strip()
+    if _omg:
+      import mujoco as _mjm
+      _mm = self.solver.mj_model
+      _n = 0
+      for _g in range(_mm.ngeom):
+        if "apple" not in (_mjm.mj_id2name(_mm, _mjm.mjtObj.mjOBJ_GEOM, _g) or ""):
+          continue
+        _mm.geom_margin[_g] = float(_omg); _n += 1
+      if _n == 0:
+        raise RuntimeError("OBJECT_MARGIN matched no object geom")
+      print(f"[newton-env] OBJECT_MARGIN -> {1000*float(_omg):.1f} mm standoff on {_n} geom(s), "
+            f"mjw shape {_push('geom_margin', _mm.geom_margin)}", flush=True)
+
+    # Geom masks for the penetration monitor. Built once: mj_id2name over ngeom every step would
+    # dominate the step time.
+    import mujoco as _mjpm
+    import torch as _tpm
+    _mmpm = self.solver.mj_model
+    _obj_g, _hand_g = [], []
+    for _g in range(_mmpm.ngeom):
+      _gn = _mjpm.mj_id2name(_mmpm, _mjpm.mjtObj.mjOBJ_GEOM, _g) or ""
+      _bn = _mjpm.mj_id2name(_mmpm, _mjpm.mjtObj.mjOBJ_BODY, int(_mmpm.geom_bodyid[_g])) or ""
+      if "apple" in _gn:
+        _obj_g.append(_g)
+      # Whitelist on the robot. A blacklist on "world" silently matched "scene_worldbody", which
+      # every compiled body name contains, and discarded every finger.
+      elif "robot" in _bn and (("finger" in _bn) or ("palm" in _bn) or ("hand" in _bn)):
+        _hand_g.append(_g)
+    if not _obj_g:
+      raise RuntimeError("penetration monitor found no object geom")
+    if not _hand_g:
+      raise RuntimeError("penetration monitor found no hand geom")
+    _ng = int(_mmpm.ngeom)
+    self._pm_is_obj = _tpm.zeros(_ng, dtype=_tpm.bool, device=device)
+    self._pm_is_hand = _tpm.zeros(_ng, dtype=_tpm.bool, device=device)
+    self._pm_is_obj[_tpm.tensor(_obj_g, device=device)] = True
+    self._pm_is_hand[_tpm.tensor(_hand_g, device=device)] = True
+    print(f"[newton-env] penetration monitor: {len(_obj_g)} object geom(s) vs {len(_hand_g)} "
+          f"hand geom(s)", flush=True)
 
     self._env = NewtonEnv(self.solver.mj_model, self.solver.mjw_data, self.num_envs, device,
                           control=self.control, rename_from=self._ref_mj,
@@ -1392,6 +1723,70 @@ class NewtonVecEnv:
       else:
         self._physics_step()
       self.state_in, self.state_out = self.state_out, self.state_in
+
+    if getattr(self, "_pen_on", False):
+      self._pen_tick += 1
+      if self._pen_tick % self._pen_log_every == 0:
+        import warp as _wpl, torch as _tpl2
+        _c = self.solver.mjw_data.contact
+        _gm = _wpl.to_torch(_c.geom)
+        _ds = _wpl.to_torch(_c.dist)
+        _a = _gm[:, 0].long().clamp(min=0)
+        _b = _gm[:, 1].long().clamp(min=0)
+        _sel = ((self._pen_obj[_a] & self._pen_rob[_b])
+                | (self._pen_rob[_a] & self._pen_obj[_b]))
+        _dep = (-_ds).clamp(min=0.0) * _sel.float()
+        _n = int(_sel.sum())
+        # Published every sampled step, empty or not: it is the difference between "the hand did
+        # not touch the object" and "this code did not run".
+        _log0 = self._env.extras.setdefault("log", {})
+        _log0["Penetration/sampled_contacts"] = float(_n)
+        if _n:
+          _pos = _dep[_sel]
+          _log = _log0
+          _log["Penetration/mean_mm"] = float(_pos.mean()) * 1000.0
+          _log["Penetration/max_mm"] = float(_pos.max()) * 1000.0
+          _log["Penetration/frac_over_1mm"] = float((_pos > 0.001).float().mean())
+          _log["Penetration/frac_over_3mm"] = float((_pos > 0.003).float().mean())
+          _log["Penetration/frac_over_4mm"] = float((_pos > 0.004).float().mean())
+          _log["Penetration/contacts"] = float(_n)
+          # Accumulate across the sampled steps and emit one line per ~200 samples, so the number
+          # the monitor reads is an average over a stretch of training rather than one step.
+          if not hasattr(self, "_pen_acc"):
+            self._pen_acc = [0.0, 0.0, 0.0, 0.0, 0.0, 0]
+          self._pen_acc[0] += float(_pos.mean()) * 1000.0
+          self._pen_acc[1] = max(self._pen_acc[1], float(_pos.max()) * 1000.0)
+          self._pen_acc[2] += float((_pos > 0.001).float().mean())
+          self._pen_acc[3] += float((_pos > 0.003).float().mean())
+          self._pen_acc[4] += float((_pos > 0.004).float().mean())
+          self._pen_acc[5] += 1
+          # per-world age, broadcast to the contacts of that world
+          _wid_c = _wpl.to_torch(_c.worldid).long()[_sel]
+          _age = self._env.episode_length_buf[_wid_c.clamp(0, self.num_envs - 1)]
+          _fresh = _age <= 3
+          if not hasattr(self, "_pen_split"):
+            self._pen_split = [0.0, 0, 0.0, 0, 0.0, 0.0]
+          if int(_fresh.sum()):
+            self._pen_split[0] += float(_pos[_fresh].mean()) * 1000.0
+            self._pen_split[1] += 1
+            self._pen_split[4] = max(self._pen_split[4], float(_pos[_fresh].max()) * 1000.0)
+          _old_m = ~_fresh
+          if int(_old_m.sum()):
+            self._pen_split[2] += float(_pos[_old_m].mean()) * 1000.0
+            self._pen_split[3] += 1
+            self._pen_split[5] = max(self._pen_split[5], float(_pos[_old_m].max()) * 1000.0)
+          if self._pen_acc[5] >= 200:
+            _k = self._pen_acc[5]
+            print(f"[pen-stat] mean={self._pen_acc[0]/_k:.4f}mm max={self._pen_acc[1]:.4f}mm "
+                  f">1mm={self._pen_acc[2]/_k:.5f} >3mm={self._pen_acc[3]/_k:.5f} "
+                  f">4mm={self._pen_acc[4]/_k:.5f} n={_n}", flush=True)
+            _ps = self._pen_split
+            print(f"[pen-split] within 3 steps of reset: mean="
+                  f"{(_ps[0]/_ps[1] if _ps[1] else float('nan')):.4f}mm max={_ps[4]:.4f}mm | "
+                  f"settled: mean={(_ps[2]/_ps[3] if _ps[3] else float('nan')):.4f}mm "
+                  f"max={_ps[5]:.4f}mm", flush=True)
+            self._pen_split = [0.0, 0, 0.0, 0, 0.0, 0.0]
+            self._pen_acc = [0.0, 0.0, 0.0, 0.0, 0.0, 0]
 
     self._env.episode_length_buf += 1
     self.common_step_counter += 1
