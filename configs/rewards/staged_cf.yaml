@@ -1,0 +1,43 @@
+# Rewards staged on the dataset's own contact frame (cf).
+#
+# The task default carries ONE weighted term -- `tracking`, weight 1.0, a single Gaussian on the
+# reference-link distance for the whole body. That term cannot express what the reference now knows,
+# because the reference is accurate in two different senses in two different places:
+#
+#   before cf   the retarget has been re-solved. The fingertips land on the points the human touched
+#               (taken from the SMPL-X mesh, median 1.6 cm residual), the palm is oriented like the
+#               human's (12.3 deg against 41.9 for raw GMR), and the hand closes over the 30 frames
+#               before cf. The arm and hand configuration is real data here.
+#
+#   after cf    the task is where the OBJECT goes. The arm configuration is a means. The grasp is
+#               solved at ONE frame and carried by a constant joint offset, so tracking the arm here
+#               fights the object reward wherever the carry is imperfect -- which is everywhere.
+#
+# Hence: track the upper body, the hand shape and the fingertips before cf; drop them to a small
+# weight after; let the object trajectory carry the second half; track the lower body throughout.
+#
+# `post_weight` is small rather than zero anywhere it appears. Omnigrasp drops its body term to
+# exactly zero because its action space is a pretrained motion latent that cannot produce a
+# non-human pose. Ours is joint residuals on a frozen tracker, so nothing structurally stops the arm
+# windmilling once the term is released. Sweep these up from zero, not down to it.
+
+rewards:
+  # the single term this replaces
+  tracking:
+    weight: 0.0
+
+  # --- throughout -----------------------------------------------------------------------------
+  staged_lower_tracking:
+    weight: 1.0        # GMR's most reliable output; the upper body needs something to stand on
+
+  # --- before cf: the grasp the retarget solves for -------------------------------------------
+  staged_upper_tracking:
+    weight: 1.0
+  staged_hand_pose:
+    weight: 1.0        # the 20 finger joints -- this is where the cf solve is actually spent
+  staged_tip_object:
+    weight: 0.5        # fingertips toward the object, masked to the tips the reference brings near
+
+  # --- after cf: the object is the task -------------------------------------------------------
+  staged_object_tracking:
+    weight: 1.5        # gated on real fingertip contact, so standing next to the object pays nothing
