@@ -30,11 +30,11 @@ rewards:
   staged_upper_tracking:
     weight: 0.0
 
-  # Dropped to 0.5: the 20 finger joints. Kept non-zero only so the grasp shape the retarget solves
-  # for is not completely absent from the reward; tip positions constrain it indirectly but not
-  # equivalently. This is the term to set to 0 next if the approach still looks over-specified.
+  # Dropped: the 20 finger joints. It paid 0.7-2.4% at weight 1.0, and the fingertip target at cf
+  # constrains the hand shape in the space the task is actually about. The cost is explicit: the
+  # joint vector the retarget solves for is now absent from the reward entirely.
   staged_hand_pose:
-    weight: 0.5
+    weight: 0.0
 
   # Unchanged: something has to stand up once the upper body is unconstrained.
   staged_lower_tracking:
