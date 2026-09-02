@@ -1,0 +1,92 @@
+# R15 weight set. Derived from the R14 payout audit, not from a checkpoint's env.yaml.
+#
+# Measured on R14 (Episode_Reward share, stapler / binoculars):
+#   multi_tip_surface   57.1% / 56.1%   <- one term paid over half of everything, while lift stayed 0
+#   object_lift_hold    16.3% / 22.4%   <- paid via near_std shaping, i.e. a second proximity term
+#   contact_duration     6.6% /  7.1%
+#   staged_upper_track   6.5% /  2.5%   <- weight 3.5, the second highest, for the worst return
+#   omnigrasp_style      4.6% /  3.4%   <- body pose + pregrasp, both duplicated elsewhere
+#   staged_object_track  3.7% /  5.3%   <- the ONLY post-cf objective, and nearly the smallest payer
+#   staged_lower_track   2.9% /  2.5%
+#   staged_hand_pose     2.4% /  0.7%   <- weight 1.0 for the 20 finger joints
+#   object_hard_lift     0.1% /  0.0%   <- weight 2.0 paying nothing
+#   stability           -0.0% / -0.0%   <- never triggers
+#
+# FORMAT IS LOAD-BEARING. reward_cfg_from_checkpoint.py parses this textually:
+#     ^  <name>:$        two spaces, name, nothing after the colon
+#     ^    weight: <f>   four spaces
+# The flow style `name: {weight: 1.0}` matches neither and the file reads as EMPTY.
+rewards:
+
+  # ---- APPROACH PHASE: one target instead of three ---------------------------------------------
+  # Everything before cf exists to put the hand where the grasp happens. staged_tip_cf says exactly
+  # that -- fingertips to the reference's fingertip positions AT cf, masked to the tips the
+  # reference actually brings to the object -- and nothing else states it.
+  staged_tip_cf:
+    weight: 5.0
+
+  # Dropped: the upper-body chain. Weight 3.5 returned 2.5-6.5%, the worst ratio in the set, and a
+  # fingertip target at cf already determines where the arm has to be.
+  staged_upper_tracking:
+    weight: 0.0
+
+  # Dropped to 0.5: the 20 finger joints. Kept non-zero only so the grasp shape the retarget solves
+  # for is not completely absent from the reward; tip positions constrain it indirectly but not
+  # equivalently. This is the term to set to 0 next if the approach still looks over-specified.
+  staged_hand_pose:
+    weight: 0.5
+
+  # Unchanged: something has to stand up once the upper body is unconstrained.
+  staged_lower_tracking:
+    weight: 1.0
+
+  # ---- CARRY PHASE -----------------------------------------------------------------------------
+  # Raised 2.0 -> 4.0. After cf the task IS the object trajectory, yet this was paying 3.7-5.3%
+  # while multi_tip_surface paid ~57% at full weight for staying in contact. That imbalance is the
+  # measured shape of "lifts it, then drifts off trajectory and drops it".
+  staged_object_tracking:
+    weight: 4.0
+
+  # multi_tip_surface, phase-masked to cf-onward. Same function, all six sub-terms intact; it now
+  # pays for HOLDING rather than for approaching, which is the job it was written for.
+  staged_multi_tip_surface:
+    weight: 5.0
+  multi_tip_surface:
+    weight: 0.0
+
+  # The one strict lift signal (3 cm, >=2 tips, held 0.30 s). It paid 0.0-0.1% in R14, so it costs
+  # nothing to keep and it is the actual target rather than a shaping term.
+  object_hard_lift:
+    weight: 2.0
+
+  # Dropped: it paid 16-22% through its near_std proximity shaping while lift was flat zero, which
+  # makes it a low-grade copy of multi_tip_surface wearing the name of a lift reward.
+  object_lift_hold:
+    weight: 0.0
+
+  # Unchanged: the only term rewarding sustained contact rather than proximity, so the only thing
+  # standing between the policy and a tap-and-release.
+  contact_duration:
+    weight: 1.0
+
+  # ---- KEPT AS INSURANCE -----------------------------------------------------------------------
+  # Penalty-only (torso below 0.55 m, action jerk, object speed). It measured -0.0%: it never fires.
+  # Free to keep, but do not count its 1.0 toward the budget.
+  stability:
+    weight: 1.0
+
+  # ---- DROPPED ---------------------------------------------------------------------------------
+  # Body pose duplicates lower/upper tracking; pregrasp duplicates the tip terms. Ported wholesale
+  # from Omnigrasp, never needed here.
+  omnigrasp_style:
+    weight: 0.0
+  tracking:
+    weight: 0.0
+  right_wrist_tracking:
+    weight: 0.0
+  left_wrist_tracking:
+    weight: 0.0
+  object_trajectory_tracking:
+    weight: 0.0
+  staged_tip_object:
+    weight: 0.0
