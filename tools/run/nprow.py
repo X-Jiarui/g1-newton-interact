@@ -56,15 +56,15 @@ KEYS = [("rew", r"Mean reward:\s*([-\d.]+)"),
         ("p4mm", r"Penetration/frac_over_4mm:\s*([\d.]+)"),
         ("psamp", r"Penetration/sampled_contacts:\s*([\d.]+)")]
 
-for path in sorted(glob.glob(sys.argv[1])):
-    name = os.path.basename(path)[:-4]
+def parse(path):
+    """Everything this reporter knows about one run, from the tail of its log."""
     try:
         with open(path, "rb") as f:
             f.seek(0, 2)
             f.seek(max(0, f.tell() - 400_000))
             tail = f.read().decode("utf-8", "ignore")
     except OSError:
-        continue
+        return None
     it = re.findall(r"Learning iteration\s+(\d+)/(\d+)", tail)
     try:
         with open(path, "rb") as f:
@@ -78,13 +78,29 @@ for path in sorted(glob.glob(sys.argv[1])):
         m = re.findall(pat, tail)
         vals[k] = m[-1] if m else "-"
     cur, tot = (it[-1] if it else ("?", "?"))
-    alive = "" if os.path.getmtime(path) > time.time() - 900 else "  DEAD?"
-    print(f"{name:<22s} {dtxt:>6s} it {cur:>5s}/{tot:<5s} rew {vals['rew']:>9s} "
+    return dtxt, cur, tot, vals
+
+
+def row(path, name=None, alive=None):
+    """One formatted line. `alive` overrides the mtime heuristic when the caller knows better."""
+    got = parse(path)
+    if got is None:
+        return f"{(name or os.path.basename(path)[:-4]):<22s}  (unreadable: {path})"
+    dtxt, cur, tot, vals = got
+    name = name if name is not None else os.path.basename(path)[:-4]
+    if alive is None:
+        alive = "" if os.path.getmtime(path) > time.time() - 900 else "  DEAD?"
+    return (f"{name:<22s} {dtxt:>6s} it {cur:>5s}/{tot:<5s} rew {vals['rew']:>9s} "
           f"contact {vals['contact']:>7s} lift {vals['lift']:>7s} liftA {vals['liftA']:>7s} "
           f"seq {vals['seq']:>6s} frame {vals['frame']:>7s} h2o {vals['h2o']:>6s} "
           f"u005 {vals['u005']:>6s} phys {vals['phys']:>6s} cfmiss {vals['cfmiss']:>7s} "
           f"tipcfD {vals['tipcfD']:>6s} arrF {vals['arrF']:>6s} arrN {vals['arrN']:>6s} "
           f"cf {vals['cf']:>5s} tipcfR {vals['tipcfR']:>7s} "
           f"ep_len {vals['ep_len']:>7s} objfar {vals['objfar']:>7s} "
-          f"nonfin {vals['nonfin']:>6s} | pen {vals['pen']:>6s}mm max {vals['penmax']:>7s} "
-          f">3mm {vals['p3mm']:>6s} >4mm {vals['p4mm']:>6s} n {vals['psamp']:>8s}{alive}")
+            f"nonfin {vals['nonfin']:>6s} | pen {vals['pen']:>6s}mm max {vals['penmax']:>7s} "
+            f">3mm {vals['p3mm']:>6s} >4mm {vals['p4mm']:>6s} n {vals['psamp']:>8s}{alive}")
+
+
+if __name__ == "__main__":
+    for _p in sorted(glob.glob(sys.argv[1])):
+        print(row(_p))
