@@ -38,9 +38,6 @@ say "2/5 venv at $VENV (python $PY)"
 [ -x "$VENV/bin/python" ] || uv venv --python "$PY" "$VENV"
 
 say "3/5 pinned deps"
-# pyglet backs Newton's headless ViewerGL, so record_runs.sh needs it; without it every
-# recording on a box dies at import with ModuleNotFoundError and training is unaffected, which
-# makes it easy to miss until you go looking for videos.
 # These versions are what every number in docs/RECIPE.md was measured on. newton and mujoco_warp
 # in particular are not interchangeable across minor versions -- the contact pipeline changes.
 VIRTUAL_ENV="$VENV" uv pip install \
@@ -51,7 +48,6 @@ VIRTUAL_ENV="$VENV" uv pip install \
   "mujoco-warp==3.11.0" \
   "rsl-rl-lib==5.2.0" \
   "trimesh==4.8.3" "viser==1.0.27" "numpy==2.3.4" "scipy==1.16.2" \
-  "pyglet==2.1.16" \
   "tensorboard" "pyyaml" "tqdm"
 
 say "4/5 mjlab source from $FROM"
