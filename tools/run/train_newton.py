@@ -76,6 +76,9 @@ ap.add_argument("--xml", default=os.path.join(os.path.dirname(os.path.dirname(os
 ap.add_argument("--agent-cfg-from", default=os.path.expanduser(
   "~/sweep_ckpts_r2/OF_00_apple_eat_1_SPHERE/model_7310.pt"),
   help="checkpoint whose params/agent.yaml supplies the agent config (tracker, residual gains)")
+ap.add_argument("--reward-cfg", default=None,
+  help="yaml whose `rewards:` block supplies the reward weights, instead of the "
+       "checkpoint's params/env.yaml. Same block format: two spaces name, four spaces weight")
 ap.add_argument("--resume", default=None, help="checkpoint to warm-start from")
 ap.add_argument("--rollout-free-run", action="store_true",
                 help="record the policy without early termination: clears the termination terms and "
@@ -140,13 +143,6 @@ if A.reference_pkls:
   # Several mjlab code paths still read the singular variable; point it at the first clip so they
   # resolve to a real file rather than whatever was left in the environment.
   os.environ["APPLE_EAT_PKL"] = MIX_PKLS[0]
-  # This port groups environments by object and replicates each group, so an environment carries
-  # exactly one object -- its own. Declare that layout so the scene config authors ONE object
-  # entity and one sensor set instead of one per clip; mjlab's default fan-out assumes every
-  # environment holds every object and parks the unused ones, which this scene has no room for.
-  # Only scene authoring changes: mix_clip_count() still reports the real clip count, so the clip
-  # map, the per-clip gates and the terminations are untouched.
-  os.environ["APPLE_OBJECT_PER_WORLD"] = "1"
   print(f"[train] MIX: {len(MIX_PKLS)} clips " +
         ", ".join(f"{os.path.basename(p)}->{os.path.basename(t)}"
                   for p, t in zip(MIX_PKLS, MIX_STLS)))
@@ -182,9 +178,20 @@ _apply_cfg_mapping(agent_cfg, _yaml.unsafe_load(p.open()))
 # The agent config is not the whole story: the checkpoint's env.yaml carries the reward weights it
 # trained with, and load_env_cfg returns the task default where only `tracking` has weight. Training
 # against the default is training with no grasping reward at all.
-_env_yaml = Path(A.agent_cfg_from).parent / "params" / "env.yaml"
+_env_yaml = (Path(A.reward_cfg) if A.reward_cfg
+             else Path(A.agent_cfg_from).parent / "params" / "env.yaml")
+if A.reward_cfg and not _env_yaml.exists():
+  raise SystemExit(f"--reward-cfg {_env_yaml} does not exist")
 if _env_yaml.exists():
-  apply_reward_weights(cfg, reward_weights_from_env_yaml(_env_yaml))
+  _w = reward_weights_from_env_yaml(_env_yaml)
+  # A yaml that parses to nothing is the failure this guard exists for: the flow style
+  # `name: {weight: 1.0}` matches neither regex, so the file reads as empty and training
+  # silently falls back to the task default where only `tracking` carries weight.
+  if not _w:
+    raise SystemExit(f"[reward-cfg] {_env_yaml} parsed to zero reward terms. The block "
+                     f"format is `  <name>:` then `    weight: <float>` on the next line.")
+  print(f"[reward-cfg] source: {_env_yaml}")
+  apply_reward_weights(cfg, _w)
 else:
   print(f"[reward-cfg] WARNING: no env.yaml beside the checkpoint; training with the task default, "
         f"where only one reward term carries weight")
