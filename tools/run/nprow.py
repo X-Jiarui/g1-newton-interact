@@ -27,6 +27,14 @@ The progress columns replace ep_len/objfar, both of which stopped meaning what t
           below cf is early, at cf means nobody arrived. This is the only "on time" number; the
           reward itself states only WHERE the hand must be, never WHEN.
   cf      Metric/cf_frame -- the clip's contact frame, so arrN has something to be read against.
+  dcf     Metric/staged_tip_cf_dist_at_cf, METRES -- the masked fingertip distance sampled ONCE,
+          at the first step an episode reaches its own contact frame. Unlike tipcfD it carries no
+          floor from the reference's own motion, so it is what the approach should be judged on.
+  atcf    Metric/staged_tip_cf_at_cf_frac -- fraction of envs that reached cf and so contribute
+          to dcf. A small dcf over 5 % of envs is a different claim from the same over 90 %.
+  wfar    Episode_Termination/wrist_target_far -- envs per step killed for the wrist being over
+          0.20 m from its per-frame reference. Compare against num_envs / ep_len, the total
+          resets per step.
 """
 import re, sys, os, glob, time
 
@@ -43,6 +51,9 @@ KEYS = [("rew", r"Mean reward:\s*([-\d.]+)"),
         ("cfmiss", r"Episode_Termination/tip_cf_miss:\s*([\d.]+)"),
         ("tipcfR", r"Episode_Reward/staged_tip_cf:\s*([\d.]+)"),
         ("tipcfD", r"Metric/staged_tip_cf_dist:\s*([\d.]+)"),
+        ("dcf", r"Metric/staged_tip_cf_dist_at_cf:\s*([\d.]+)"),
+        ("atcf", r"Metric/staged_tip_cf_at_cf_frac:\s*([\d.]+)"),
+        ("wfar", r"Episode_Termination/wrist_target_far:\s*([\d.]+)"),
         ("arrF", r"Metric/staged_tip_cf_arrive_frac:\s*([\d.]+)"),
         ("arrN", r"Metric/staged_tip_cf_arrive_frame:\s*([\d.]+)"),
         ("cf", r"Metric/cf_frame:\s*([\d.]+)"),
@@ -94,9 +105,10 @@ def row(path, name=None, alive=None):
           f"contact {vals['contact']:>7s} lift {vals['lift']:>7s} liftA {vals['liftA']:>7s} "
           f"seq {vals['seq']:>6s} frame {vals['frame']:>7s} h2o {vals['h2o']:>6s} "
           f"u005 {vals['u005']:>6s} phys {vals['phys']:>6s} cfmiss {vals['cfmiss']:>7s} "
-          f"tipcfD {vals['tipcfD']:>6s} arrF {vals['arrF']:>6s} arrN {vals['arrN']:>6s} "
+          f"tipcfD {vals['tipcfD']:>6s} dcf {vals['dcf']:>6s} atcf {vals['atcf']:>6s} "
+          f"arrF {vals['arrF']:>6s} arrN {vals['arrN']:>6s} "
           f"cf {vals['cf']:>5s} tipcfR {vals['tipcfR']:>7s} "
-          f"ep_len {vals['ep_len']:>7s} objfar {vals['objfar']:>7s} "
+          f"ep_len {vals['ep_len']:>7s} objfar {vals['objfar']:>7s} wfar {vals['wfar']:>6s} "
             f"nonfin {vals['nonfin']:>6s} | pen {vals['pen']:>6s}mm max {vals['penmax']:>7s} "
             f">3mm {vals['p3mm']:>6s} >4mm {vals['p4mm']:>6s} n {vals['psamp']:>8s}{alive}")
 
