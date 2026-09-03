@@ -327,10 +327,13 @@ def staged_tip_cf_reward(
     prev = getattr(env, "_tipcf_prev_d", None)
     if not isinstance(prev, torch.Tensor) or prev.shape != d.shape or prev.device != d.device:
         prev = d.detach().clone()
-    # Reset the baseline on the CLIP-LOCAL frame. Omnigrasp resets on `frame <= 0`, which under a
-    # concatenated mix is never true for clip 1 and up -- those clips then score progress against a
-    # stale value from the previous episode.
-    fresh = apple_mdp.local_tracking_frame(env, n) <= 0
+    # Reset on the EPISODE, not on the frame. `frame <= 0` is what Omnigrasp uses and it is wrong
+    # here twice over: under a concatenated mix it is never true for clip 1 and up, and even with
+    # that fixed by going clip-local, this task starts every episode at a RANDOM reference frame
+    # drawn uniformly from 0-50, so frame 0 comes up on roughly one reset in fifty. The other
+    # forty-nine carried state across the episode boundary. `episode_length_buf` counts steps since
+    # this env's own reset and is exactly zero on the first one, so it says what was meant.
+    fresh = env.episode_length_buf <= 1
     prev = torch.where(fresh, d.detach(), prev)
     cap = max(float(progress_cap), 1e-9)
     prog = ((prev - d).clamp(min=0.0, max=cap) / cap)
@@ -367,9 +370,16 @@ def staged_tip_cf_reward(
     # means.
     #
     # Read the two keys together. `_arrive_frac` is the fraction of env-steps spent in the arrived
-    # state and is unambiguous. `_arrive_frame` charges envs that have not arrived yet with their
-    # own cf, so early in a rollout it reads close to cf and falls as envs arrive; it is a mean
-    # over live envs like every other Metric here, not a terminal value.
+    # state -- WITHIN an episode, which is what the `fresh` reset above is load-bearing for: while
+    # the latch survived episode boundaries this number climbed monotonically toward 1 and read as
+    # "the hand is there almost always" when the truth was "almost every env has arrived at least
+    # once at some point". `_arrive_frame` charges envs that have not arrived yet with their own
+    # cf, so early in a rollout it reads close to cf and falls as envs arrive; it is a mean over
+    # live envs like every other Metric here, not a terminal value.
+    #
+    # That charging makes `_arrive_frame` a CONSERVATIVE lateness test: envs that never arrive drag
+    # it toward cf and can never push it past, so a value above cf can only come from real
+    # arrivals that happened after cf.
     f_now = apple_mdp.local_tracking_frame(env, n)
     f_now = f_now.round().long() if f_now.dtype.is_floating_point else f_now.long()
     arrived = getattr(env, "_tipcf_arrive_f", None)
