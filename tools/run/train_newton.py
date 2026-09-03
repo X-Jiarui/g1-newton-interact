@@ -479,6 +479,35 @@ if A.rollout_steps:
   # Calibration, not decoration: a rollout that merely *looks* wrong is an opinion, but a rollout
   # whose contact/lift/stand disagree with the run's own training row is a measurement. Without
   # this the first eval harness shipped a scene the policy never saw and nobody could tell.
+  # --- grasp force probe -----------------------------------------------------------------------
+  # GRASP_FORCE_PROBE=<csv> logs, per control step, what is actually holding the object up.
+  # Calibrated, not guessed: while the object still rests on the table the vertical constraint
+  # force must equal its own weight. Anything that does not reproduce that is not the contact
+  # force -- see the four ways this was read wrong before (efc_address is pyramid edges, not xyz;
+  # efc.force is per world; body names are full paths; blacklists match everything).
+  _gfp = os.environ.get("GRASP_FORCE_PROBE", "").strip()
+  _gf = None
+  if _gfp:
+    import warp as _wp, numpy as _gnp, mujoco as _gmj
+    _gm = env.solver.mj_model
+    _gobj_b = next(i for i in range(_gm.nbody)
+                   if "apple" in (_gmj.mj_id2name(_gm, _gmj.mjtObj.mjOBJ_BODY, i) or "")
+                   and "robot" not in (_gmj.mj_id2name(_gm, _gmj.mjtObj.mjOBJ_BODY, i) or ""))
+    _gdof = int(_gm.body_dofadr[_gobj_b])
+    _gmass = float(_gm.body_mass[_gobj_b])
+    _gw = _gmass * 9.81
+    # Whitelist on "robot": a blacklist on "world" matches every compiled body name, which is how
+    # an earlier probe silently sampled nothing at all.
+    _grobot_g = _gnp.array([bool("robot" in (_gmj.mj_id2name(_gm, _gmj.mjtObj.mjOBJ_BODY,
+                                                            int(_gm.geom_bodyid[g])) or ""))
+                            for g in range(_gm.ngeom)])
+    _gobj_g = _gnp.array([int(_gm.geom_bodyid[g]) == _gobj_b for g in range(_gm.ngeom)])
+    _gf = open(_gpath := _gfp, "w")
+    _gf.write("step,obj_z,Fz_constraint,weight,n_hand_contacts,hand_Fn_sum,min_dist_mm,done0,objfar,frame,cf,tipcf_d\n")
+    _gref_n = int(__import__("mjlab.tasks.residual_interact.mdp", fromlist=["x"])._ref(env.device)["n_frames"])
+    print(f"[gfp] object body {_gobj_b} mass {_gmass:.4f} kg weight {_gw:.3f} N -> {_gpath}",
+          flush=True)
+
   _acc, _nacc, _dones = {}, 0, 0
   for _k in range(int(A.rollout_steps)):
     with _rt.inference_mode():
@@ -497,6 +526,52 @@ if A.rollout_steps:
       except (TypeError, ValueError):
         continue
     _nacc += 1
+    if _gf is not None:
+      _gd = env.solver.mjw_data
+      _gq = _wp.to_torch(_gd.qfrc_constraint)[0].detach().cpu().numpy()
+      _gFz = float(_gq[_gdof + 2])
+      _gz = float(_wp.to_torch(_gd.xpos)[0, _gobj_b, 2].item())
+      _gc = _gd.contact
+      _gg = _wp.to_torch(_gc.geom).detach().cpu().numpy()
+      _gwid = _wp.to_torch(_gc.worldid).detach().cpu().numpy()
+      _gadr = _wp.to_torch(_gc.efc_address).detach().cpu().numpy()
+      _gdist = _wp.to_torch(_gc.dist).detach().cpu().numpy()
+      _gef = _wp.to_torch(_gd.efc.force).detach().cpu().numpy()
+      _gn, _gsum, _gmind = 0, 0.0, 1e9
+      for _ci in range(_gg.shape[0]):
+        if int(_gwid[_ci]) != 0:
+          continue
+        _ga, _gb2 = int(_gg[_ci, 0]), int(_gg[_ci, 1])
+        if _ga < 0 or _gb2 < 0:
+          continue
+        _hand = (_grobot_g[_ga] and _gobj_g[_gb2]) or (_grobot_g[_gb2] and _gobj_g[_ga])
+        if not _hand:
+          continue
+        _gn += 1
+        _gmind = min(_gmind, float(_gdist[_ci]))
+        # The normal force is the SUM over the friction-cone pyramid edges, not any one column.
+        for _e in range(_gadr.shape[1]):
+          _ai = int(_gadr[_ci, _e])
+          if _ai >= 0:
+            _gsum += float(_gef[0, _ai])
+      # A z that jumps back to the spawn height is a RESET, not a drop. Without the done flag the
+      # two are indistinguishable in this file, and reading one as the other inverts the diagnosis.
+      _gdone = int(bool(_tm[0].item()) or bool(_to[0].item()))
+      _gof = float((env.extras.get("log") or {}).get("Episode_Termination/og_object_far", float("nan")))
+      # Is the hand AT the reference grasp pose by the time the clip says contact happens? Same
+      # function the approach reward and the cf-miss termination use, so the number is the one the
+      # training actually saw -- not a second definition of "arrived".
+      from mjlab.tasks.residual_interact import staged_mdp as _gsm
+      from mjlab.tasks.apple_eat import mdp as _gam
+      _gnf = max(int(_gref_n), 1)
+      _gfr = float(_gam.local_tracking_frame(env, _gnf)[0].item())
+      _gcf = float(_gsm.cf_local(env)[0].item())
+      _gtd = float(_gsm._tip_cf_distance(env, near_threshold=0.10)[0][0].item())
+      _gf.write(f"{_k},{_gz:.5f},{_gFz:.4f},{_gw:.4f},{_gn},{_gsum:.4f},"
+                f"{(_gmind * 1000.0 if _gmind < 1e8 else float('nan')):.4f},{_gdone},{_gof:.4f},"
+                f"{_gfr:.2f},{_gcf:.1f},{_gtd:.5f}\n")
+      if _k % 20 == 0:
+        _gf.flush()
     if _k % 100 == 0:
       print(f"[rollout] step {_k}", flush=True)
   print(f"[rollout] metrics over {_nacc} steps, {_dones} episode ends:", flush=True)
@@ -504,6 +579,9 @@ if A.rollout_steps:
     if any(_t in _kk for _t in ("physical_contact", "lift_success", "stable_not_fallen",
                                 "sequence_success", "Termination", "ep_len", "object_mpjpe")):
       print(f"[rollout]   {_kk} = {_acc[_kk] / max(_nacc, 1):.4f}", flush=True)
+  if _gf is not None:
+    _gf.close()
+    print(f"[gfp] wrote {_gpath}", flush=True)
   print("[rollout] done")
   raise SystemExit(0)
 
