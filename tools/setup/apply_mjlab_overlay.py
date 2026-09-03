@@ -27,6 +27,7 @@ import sys
 from pathlib import Path
 
 FILES = [
+    ("residual_interact", "mdp.py"),
     ("residual_interact", "staged_mdp.py"),
     ("residual_interact", "env_cfgs.py"),
     ("residual_interact", "rl.py"),
