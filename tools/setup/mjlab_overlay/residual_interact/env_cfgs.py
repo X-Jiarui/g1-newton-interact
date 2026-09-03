@@ -1217,11 +1217,28 @@ def residual_interact_env_cfg(
       func=staged_mdp.staged_tip_cf_reward,
       weight=0.0,
       params={
-        # 0.20, not the 0.06 this started at. The hand begins 0.52 m from the target: at std 0.06
-        # the reward there is 6e-13, so a weight-5.0 term carried no gradient at all until the
-        # policy had already solved the approach by other means. 0.20 pays 0.08 at 0.52 m, 0.76 at
-        # 0.15 m and 0.99 on arrival -- monotone over the whole approach, which is the point.
-        "distance_std": 0.20,
+        # 0.50, raised from 0.20, and 0.20 was itself raised from 0.06 because at that width the
+        # reward 0.52 m out was 6e-13 and a weight-5.0 term carried no gradient until the approach
+        # was already solved by other means.
+        #
+        # 0.20 was still too narrow for what the approach actually is. Measured on the reference:
+        # the object does NOT move before cf (0.0000-0.018 m) and neither does the table -- the
+        # ROBOT walks 0.15 to 0.60 m to reach it. That whole walk happens beyond the 0.20 m switch,
+        # so it was paid by the progress term alone, which is a pure derivative: standing still at
+        # 1.2 m and standing still at 0.25 m both earn zero. There was no potential pulling the
+        # robot across the distance it has to cover. Measured consequence: 81 % of airplane's
+        # env-steps sat in that far field at 0.66 reward per step against 2.1-4.4 in the near
+        # field, closing at 0.2 m/s when the clip needs 0.43 m/s.
+        #
+        # At 0.50 the level term has real slope over the whole walk -- 0.028 at 1.2 m, 0.139 at
+        # 0.8, 0.243 at 0.6, 0.363 at 0.4, 0.462 at the switch -- while the endgame is untouched
+        # (0.622 at 5 cm against 0.609 before, 0.973 at 1 cm against 0.972). The seam stays
+        # continuous because the far field is scaled by level(switch), which moves with it.
+        #
+        # The cost, stated: hovering is worth more than it was. Standing at 0.6 m now pays ~1.1
+        # per step where it paid 0. It is still strictly less than closing in, so the gradient
+        # points the right way -- unlike before the seam fix, when closing was a 3.3x pay cut.
+        "distance_std": 0.50,
         "near_threshold": 0.10,
         "pre_weight": 1.0,
         "post_weight": 0.0,

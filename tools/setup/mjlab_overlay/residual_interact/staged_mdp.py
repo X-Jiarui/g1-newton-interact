@@ -268,7 +268,7 @@ def _ref_tip_pos_at(env, row: torch.Tensor) -> torch.Tensor:
 
 def staged_tip_cf_reward(
     env,
-    distance_std: float = 0.20,
+    distance_std: float = 0.50,
     near_std: float = 0.03,
     switch: float = 0.20,
     progress_cap: float = 0.01,
