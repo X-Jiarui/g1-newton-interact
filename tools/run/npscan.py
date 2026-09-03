@@ -14,9 +14,14 @@ being written recently but has no live process behind it any more. That is a run
 a monitor keyed on directories reports it as a healthy row until the numbers go stale enough to
 notice.
 
+The dead-log window is deliberately short. A long one reports every run that was stopped on
+purpose today, which buries the live rows in exactly the report meant to show them; 30 minutes
+answers "did something fall over just now" and nothing else.
+
 Usage:
-    python npscan.py                      # live runs, plus recently-dead ones it can find
-    python npscan.py /workspace/logs_*    # also sweep these dirs for orphaned logs
+    python npscan.py                          # live runs only
+    python npscan.py /workspace/logs_*        # also flag logs orphaned in the last 30 min
+    DEAD_WINDOW_MIN=180 python npscan.py ...  # widen that window
 """
 
 import os
@@ -72,6 +77,7 @@ def main():
             print(f"{name:<22s}  (running as pid {pid}, but its stdout is not a readable file: {log!r})")
 
     # Anything written recently with nothing behind it is a run that stopped.
+    window = float(os.environ.get("DEAD_WINDOW_MIN", "30")) * 60.0
     dirs = sys.argv[1:]
     if dirs:
         dead = []
@@ -84,13 +90,15 @@ def main():
                     age = time.time() - p.stat().st_mtime
                 except OSError:
                     continue
-                if age < 6 * 3600:          # touched in the last six hours, so recently relevant
+                if age < window:
                     dead.append((age, p))
         if dead:
-            print(f"\nlogs written in the last 6 h with NO live process ({len(dead)}):")
+            print(f"\nDIED? logs written in the last {window/60:.0f} min with no live process "
+                  f"({len(dead)}):")
             for age, p in sorted(dead):
-                print(f"  {p}   last write {age/60:.0f} min ago")
-                print("  " + nprow.row(str(p), alive="  DEAD"))
+                got = nprow.parse(str(p))
+                it = f"it {got[1]}/{got[2]}" if got else "unreadable"
+                print(f"  {p.name:<32s} {it:<16s} last write {age/60:.0f} min ago")
 
 
 if __name__ == "__main__":
