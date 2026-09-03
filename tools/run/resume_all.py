@@ -112,11 +112,18 @@ def relaunch(path):
     runs = json.loads(pathlib.Path(path).read_text())
     for r in runs:
         argv = list(r["argv"])
-        if "--resume" in argv:
-            print(f"  {r['name']}: already has --resume; left as recorded")
-        elif r.get("resume"):
-            argv += ["--resume", r["resume"]]
+        # REPLACE any --resume already in argv, never skip it. After the first restart the
+        # recorded argv carries that restart's checkpoint, so skipping pins every later restart to
+        # the same old weights: the run silently rewinds by however much it has trained since.
+        # Measured the one time this fired: eight runs each lost ten iterations.
+        if r.get("resume"):
+            try:
+                i = argv.index("--resume")
+                argv[i + 1] = r["resume"]
+            except (ValueError, IndexError):
+                argv += ["--resume", r["resume"]]
         else:
+            argv = [a for a in argv]
             print(f"  {r['name']}: no checkpoint, restarting from scratch")
         log = open(r["log"], "ab")          # append: keep the pre-restart history in one file
         p = subprocess.Popen(argv, cwd=r["cwd"], env=r["env"], stdout=log,
