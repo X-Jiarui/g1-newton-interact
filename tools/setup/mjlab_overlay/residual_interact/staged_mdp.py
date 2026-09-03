@@ -409,6 +409,31 @@ def staged_tip_cf_reward(
     mdp._safe_log(env, f"Metric/{log_prefix}_arrive_frame",
                   torch.where(arrived >= 0, arrived, cf.to(arrived.dtype)))
 
+    # DISTANCE AT cf -- the number the approach should actually be judged on.
+    #
+    # `_dist` is a per-step mean against a STATIC target, the cf pose, so it inherits a floor set
+    # by the reference's own motion: early in an episode the hand is legitimately far because the
+    # approach has not happened yet. Measured on the reference alone, a PERFECT tracker scores
+    # 0.19 to 0.75 depending on the clip, and reading `_dist` as error made one clip look 0.79 m
+    # off when its true tracking error was 2.4 cm.
+    #
+    # This samples d once, at the first step the episode reaches its own contact frame, and
+    # averages over the envs that got there. Envs that never reach cf contribute NOTHING rather
+    # than being charged a default -- unlike `_arrive_frame`, where charging cf is what makes the
+    # lateness test conservative. Read it with `_at_cf_frac`: a small distance over 5 % of envs is
+    # not the same claim as the same distance over 90 %.
+    d_at = getattr(env, "_tipcf_d_at_cf", None)
+    if not isinstance(d_at, torch.Tensor) or d_at.shape != d.shape or d_at.device != d.device:
+        d_at = torch.full_like(d, -1.0)
+    d_at = torch.where(fresh, torch.full_like(d_at, -1.0), d_at)
+    reached = (f_now >= cf) & (cf >= 0) & (d_at < 0)
+    d_at = torch.where(reached, d.detach(), d_at)
+    env._tipcf_d_at_cf = d_at.detach().clone()
+    have = d_at >= 0
+    mean_at_cf = (d_at * have).sum() / have.sum().clamp_min(1)
+    mdp._safe_log(env, f"Metric/{log_prefix}_dist_at_cf", mean_at_cf.reshape(1).expand_as(d))
+    mdp._safe_log(env, f"Metric/{log_prefix}_at_cf_frac", have.float())
+
     mdp._safe_log(env, f"Metric/{log_prefix}_far_frac", far.float())
     mdp._safe_log(env, f"Metric/{log_prefix}_progress", prog)
     mdp._safe_log(env, f"Metric/{log_prefix}_rot", rot_r)

@@ -159,6 +159,8 @@ _COMPACT_WANDB_EP_EXTRA_KEYS = frozenset(
     "Metric/tip_cf_miss_dist",
     # Arrival time, the "on time" half of the approach question.
     "Metric/staged_tip_cf_arrive_frac",
+    "Metric/staged_tip_cf_dist_at_cf",
+    "Metric/staged_tip_cf_at_cf_frac",
     "Metric/staged_tip_cf_arrive_frame",
     "Metric/staged_tip_cf_dist",
     "Metric/staged_tip_cf_far_frac",

@@ -1982,7 +1982,14 @@ def residual_interact_env_cfg(
       func=mdp.wrist_target_far_termination,
       # window=0 keeps the instantaneous check; >0 accepts the wrist being within
       # threshold of its reference at any frame in +-window, like the object term.
-      params={"active_after_steps": 100, "threshold": 0.20, "window": 0},
+      # 56 = the 36 startup control steps the reference is held for, plus 20 frames of grace
+      # once it starts moving. `active_after_steps` is on the CONTROL-STEP clock, and start_frame
+      # cancels out of it, so this is a fixed amount of elapsed reference motion for every env --
+      # but it is NOT a fixed phase relative to cf, because RSI draws start_frame from 0-50. At
+      # the old 100 the check opened 31 frames BEFORE cf for an env that started at frame 0 and
+      # 19 frames AFTER cf for one that started at 50, and with ep_len at 104-150 it had almost
+      # no episode left to fire in: 4.3 terminations per step against og_object_far's 14.9.
+      params={"active_after_steps": 56, "threshold": 0.20, "window": 0},
     ),
     # DISABLED (warmup beyond any reachable episode length), like fell_over_early and
     # object_leash above.
