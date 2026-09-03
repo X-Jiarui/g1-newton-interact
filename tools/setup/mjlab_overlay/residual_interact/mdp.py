@@ -627,7 +627,23 @@ def wrist_target_far_termination(
   active_after_steps: int = 100,
   threshold: float = 0.20,
   window: int = 0,
+  pre_cf_only: bool = True,
 ) -> torch.Tensor:
+  """Kill an episode whose wrist has fallen more than `threshold` from its per-frame reference.
+
+  Restricted to the APPROACH by default. Before cf the whole task is getting the hand to the
+  grasp, and a wrist that has lost its reference by 20 cm is not going to arrive; after cf the
+  task is the OBJECT, and the wrist is expected to leave the reference trajectory in whatever way
+  keeps the object held. Killing on wrist error there would punish a carry that is succeeding on
+  the only terms that matter.
+
+  Two clocks meet in this gate and both are needed. `active_after_steps` is on the CONTROL-STEP
+  clock and counts the 36 startup steps the reference is held for, so it expresses "how much
+  reference motion has elapsed" -- start_frame cancels out of it. The cf test is on the
+  REFERENCE-FRAME clock. `active_after_steps` alone cannot express a phase relative to cf,
+  because RSI draws start_frame uniformly from 0-50: at the old default of 100 this opened 31
+  frames BEFORE cf for an env starting at frame 0 and 19 frames AFTER cf for one starting at 50.
+  """
   if int(window) > 0:
     ref = _ref(env.device)
     n = int(ref["n_frames"])
@@ -646,6 +662,11 @@ def wrist_target_far_termination(
     )
   dist = torch.maximum(left, right)
   active = env.episode_length_buf >= int(active_after_steps)
+  if bool(pre_cf_only):
+    # Imported here, not at module scope: staged_mdp imports this module.
+    from mjlab.tasks.residual_interact import staged_mdp as _smdp
+
+    active = active & _smdp.before_cf(env)
   value = (dist > float(threshold)) & active
   active_f = active.float()
   threshold_f = torch.full_like(dist, float(threshold))

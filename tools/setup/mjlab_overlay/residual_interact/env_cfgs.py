@@ -1989,7 +1989,12 @@ def residual_interact_env_cfg(
       # the old 100 the check opened 31 frames BEFORE cf for an env that started at frame 0 and
       # 19 frames AFTER cf for one that started at 50, and with ep_len at 104-150 it had almost
       # no episode left to fire in: 4.3 terminations per step against og_object_far's 14.9.
-      params={"active_after_steps": 56, "threshold": 0.20, "window": 0},
+      # pre_cf_only: the approach is the only phase this check belongs to. After cf the task
+      # is the object, and the wrist is expected to leave the reference trajectory in
+      # whatever way keeps it held; killing on wrist error there punishes a carry that is
+      # succeeding on the only terms that matter.
+      params={"active_after_steps": 56, "threshold": 0.20, "window": 0,
+              "pre_cf_only": True},
     ),
     # DISABLED (warmup beyond any reachable episode length), like fell_over_early and
     # object_leash above.
