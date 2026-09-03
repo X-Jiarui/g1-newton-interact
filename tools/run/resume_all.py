@@ -109,10 +109,32 @@ def capture(path):
     return 0
 
 
-def relaunch(path):
+def relaunch(path, renames=(), log_dir=None):
+    """Restart each captured run with --resume pointing at its latest checkpoint.
+
+    `renames` maps run-name prefixes, which is how a from-scratch round is abandoned in favour of
+    the trained lineage it replaced: the checkpoint is re-resolved AFTER renaming, so the run
+    comes back on the weights belonging to the name it is being restored to, not on whatever the
+    abandoned round happened to write.
+    """
     runs = json.loads(pathlib.Path(path).read_text())
+    if log_dir:
+        pathlib.Path(log_dir).mkdir(parents=True, exist_ok=True)
     for r in runs:
         argv = list(r["argv"])
+        name = r["name"] or ""
+        for old_p, new_p in renames:
+            if name.startswith(old_p):
+                name = new_p + name[len(old_p):]
+        if name != r["name"]:
+            for i, a in enumerate(argv):
+                if a == "--run-name" and i + 1 < len(argv):
+                    argv[i + 1] = name
+            ck, it = latest_ckpt(r["cwd"], name)
+            r["resume"], r["resume_iter"] = ck, it
+            r["log"] = (str(pathlib.Path(log_dir) / f"{name}.log") if log_dir
+                        else str(pathlib.Path(r["log"]).with_name(f"{name}.log")))
+            r["name"] = name
         # REPLACE any --resume already in argv, never skip it. After the first restart the
         # recorded argv carries that restart's checkpoint, so skipping pins every later restart to
         # the same old weights: the run silently rewinds by however much it has trained since.
@@ -176,8 +198,6 @@ if __name__ == "__main__":
     mode, spec, rest = sys.argv[1], sys.argv[2], sys.argv[3:]
     if mode == "capture":
         raise SystemExit(capture(spec))
-    if mode == "relaunch":
-        raise SystemExit(relaunch(spec))
     ren, ldir = [], None
     i = 0
     while i < len(rest):
@@ -188,4 +208,6 @@ if __name__ == "__main__":
             ldir = rest[i + 1]; i += 2
         else:
             raise SystemExit(f"unknown argument {rest[i]!r}")
+    if mode == "relaunch":
+        raise SystemExit(relaunch(spec, ren, ldir))
     raise SystemExit(fresh(spec, ren, ldir))
