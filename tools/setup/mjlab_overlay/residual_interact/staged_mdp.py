@@ -22,6 +22,7 @@ output (feet carry the highest IK weights) and the upper body needs a stable bas
 
 from __future__ import annotations
 
+import math
 import os
 
 import torch
@@ -339,8 +340,23 @@ def staged_tip_cf_reward(
     prog = ((prev - d).clamp(min=0.0, max=cap) / cap)
     env._tipcf_prev_d = d.detach().clone()
 
-    far = d > float(switch)
-    pos_r = torch.where(far, prog, level)
+    # JOIN THE TWO REGIMES AT THE SWITCH. Both terms used to run on [0, 1] independently, and that
+    # made closing in a PAY CUT. Measured on the live weights: a hand cruising inward at 1 cm per
+    # control step -- 0.5 m/s at 50 Hz, easy -- earns the full 1.000 in the far field, while the
+    # instant it crosses 20 cm the level term pays 0.303. Even glued to 1 cm from the target it
+    # only reaches 0.972, still under a steady far-field cruise. The optimal policy under that
+    # shaping is to hover outside 20 cm and keep inching, forever, which is exactly what
+    # R24_S4_AIRPLANE_FLY_1 learned: the largest staged_tip_cf payout of any clip (23.5, 85 % of
+    # its total reward) while sitting 0.79 m away with contact identically 0.0000.
+    #
+    # Scaling the far-field progress by the level AT the switch makes the two meet: the far field
+    # now tops out at exactly what the near field pays on entry, so crossing is worth zero and
+    # everything inside is worth strictly more. Closing can never lose money again.
+    sw = float(switch)
+    level_at_switch = (0.5 * math.exp(-0.5 * (sw / max(float(distance_std), 1e-6)) ** 2)
+                       + 0.5 * math.exp(-0.5 * (sw / max(float(near_std), 1e-6)) ** 2))
+    far = d > sw
+    pos_r = torch.where(far, prog * level_at_switch, level)
 
     # ORIENTATION. The reference carries no wrist quaternion -- the tip cache is forward kinematics
     # of dof_pos, positions only -- so the hand frame is taken from the tips themselves: the normal
