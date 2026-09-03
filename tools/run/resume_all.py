@@ -10,6 +10,7 @@ Two phases, because the overlay has to be installed while nothing is running:
 
     capture <spec.json>     record every live run, then kill it
     relaunch <spec.json>    start each one again with --resume <its latest checkpoint>
+    fresh <spec.json> ...   start each one again from iteration 0, --resume stripped
 
 argv is replayed as a list, never through a shell: one of the arguments is a JSON object with
 spaces in it and any quoting round-trip would corrupt it.
@@ -134,8 +135,57 @@ def relaunch(path):
     return 0
 
 
+def fresh(path, renames, log_dir):
+    """Relaunch from iteration 0, keeping every other option the run was started with.
+
+    Renaming is not cosmetic. Restarting a run from scratch under its own name writes model_0.pt
+    upward into the directory that already holds its trained checkpoints, overwriting the low
+    numbers while the high ones survive -- one directory, two lineages, and no way to tell them
+    apart later. A new round prefix keeps the old weights intact and the new run honest.
+    """
+    runs = json.loads(pathlib.Path(path).read_text())
+    if log_dir:
+        pathlib.Path(log_dir).mkdir(parents=True, exist_ok=True)
+    for r in runs:
+        argv = list(r["argv"])
+        while "--resume" in argv:
+            i = argv.index("--resume")
+            del argv[i:i + 2]
+        name = r["name"] or ""
+        for old, new in renames:
+            if name.startswith(old):
+                name = new + name[len(old):]
+        for i, a in enumerate(argv):
+            if a == "--run-name" and i + 1 < len(argv):
+                argv[i + 1] = name
+        log = (str(pathlib.Path(log_dir) / f"{name}.log") if log_dir
+               else str(pathlib.Path(r["log"]).with_name(f"{name}.log")))
+        fh = open(log, "wb")            # a fresh run gets a fresh log; nothing to preserve
+        p = subprocess.Popen(argv, cwd=r["cwd"], env=r["env"], stdout=fh,
+                             stderr=subprocess.STDOUT, start_new_session=True)
+        gpu = r["env"].get("CUDA_VISIBLE_DEVICES", "?")
+        print(f"  GPU{gpu}  {r['name']} -> {name:<28s} pid {p.pid}  FROM SCRATCH  {log}")
+    print(f"relaunched {len(runs)} run(s) from iteration 0")
+    return 0
+
+
 if __name__ == "__main__":
-    if len(sys.argv) != 3 or sys.argv[1] not in ("capture", "relaunch"):
+    if len(sys.argv) < 3 or sys.argv[1] not in ("capture", "relaunch", "fresh"):
         print(__doc__)
         raise SystemExit(2)
-    raise SystemExit(capture(sys.argv[2]) if sys.argv[1] == "capture" else relaunch(sys.argv[2]))
+    mode, spec, rest = sys.argv[1], sys.argv[2], sys.argv[3:]
+    if mode == "capture":
+        raise SystemExit(capture(spec))
+    if mode == "relaunch":
+        raise SystemExit(relaunch(spec))
+    ren, ldir = [], None
+    i = 0
+    while i < len(rest):
+        if rest[i] == "--map":
+            old, new = rest[i + 1].split("=", 1)
+            ren.append((old, new)); i += 2
+        elif rest[i] == "--log-dir":
+            ldir = rest[i + 1]; i += 2
+        else:
+            raise SystemExit(f"unknown argument {rest[i]!r}")
+    raise SystemExit(fresh(spec, ren, ldir))
