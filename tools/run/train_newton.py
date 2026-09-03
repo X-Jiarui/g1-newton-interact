@@ -140,6 +140,13 @@ if A.reference_pkls:
   # Several mjlab code paths still read the singular variable; point it at the first clip so they
   # resolve to a real file rather than whatever was left in the environment.
   os.environ["APPLE_EAT_PKL"] = MIX_PKLS[0]
+  # This port groups environments by object and replicates each group, so an environment carries
+  # exactly one object -- its own. Declare that layout so the scene config authors ONE object
+  # entity and one sensor set instead of one per clip; mjlab's default fan-out assumes every
+  # environment holds every object and parks the unused ones, which this scene has no room for.
+  # Only scene authoring changes: mix_clip_count() still reports the real clip count, so the clip
+  # map, the per-clip gates and the terminations are untouched.
+  os.environ["APPLE_OBJECT_PER_WORLD"] = "1"
   print(f"[train] MIX: {len(MIX_PKLS)} clips " +
         ", ".join(f"{os.path.basename(p)}->{os.path.basename(t)}"
                   for p, t in zip(MIX_PKLS, MIX_STLS)))

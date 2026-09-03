@@ -335,6 +335,12 @@ class NewtonVecEnv:
     self._grad_stage = np.zeros(self.n_clips, dtype=np.int64)   # 0 none, 1 contact, 2 lift
     self._grad_windows = 0
     self._pmcp_success = np.zeros(self.n_clips, dtype=np.float64)
+    # Omnigrasp's auto-PMCP signal: a CUMULATIVE count of how often each clip has failed, not the
+    # current failure level. `motion_lib_base.update_soft_sampling_weight` does
+    # `termination_history[failed] += 1` then `prob = history / history.sum()`, and that one line is
+    # why "everything fails" needs no special case: on the first update every clip has count 1, so
+    # the split is exactly uniform, and it sharpens by itself only once some clips stop failing.
+    self._pmcp_hist = np.zeros(self.n_clips, dtype=np.float64)
     self._pmcp_seen = False
     self.nmodel = world.finalize()
 
@@ -927,6 +933,42 @@ class NewtonVecEnv:
       counts[clips] += extra
     return counts
 
+  def hist_counts(self, hist, quota: int = 1) -> "np.ndarray":
+    """Env counts proportional to each clip's CUMULATIVE failure count, inside its object block.
+
+    This is Omnigrasp's soft auto-PMCP weighting (`prob = termination_history / sum`) rather than
+    our softmax over the current failure level: linear in the counts, no temperature. The counts
+    carry history, so a clip that was hard for a long time keeps a larger share for a while after
+    it starts succeeding, and a clip that never fails fades out on its own.
+
+    The one thing kept from our rule and NOT from theirs is the floor. Their `prob = count/sum`
+    sends a clip that has never failed to probability zero, i.e. it is never trained again; that is
+    a real forgetting risk rather than a deliberate choice. `quota` keeps every clip producing
+    gradient. Set MIX_PMCP_QUOTA=1 to get as close to their behaviour as the block layout allows.
+    """
+    import numpy as _np
+
+    hist = _np.asarray(hist, dtype=_np.float64).reshape(self.n_clips)
+    counts = _np.zeros(self.n_clips, dtype=_np.int64)
+    for oi, clips in self.object_clips.items():
+      total = int(self.object_env_count[oi])
+      if quota * len(clips) > total:
+        raise ValueError(f"quota {quota} x {len(clips)} clips exceeds object {oi}'s {total} envs")
+      counts[clips] = quota
+      spare = total - quota * len(clips)
+      if spare <= 0:
+        continue
+      h = hist[clips]
+      w = h / h.sum() if h.sum() > 0 else _np.ones(len(clips)) / len(clips)
+      extra = _np.floor(w * spare).astype(_np.int64)
+      rem = spare - int(extra.sum())
+      if rem > 0:
+        frac = w * spare - _np.floor(w * spare)
+        for idx in _np.argsort(-frac)[:rem]:
+          extra[idx] += 1
+      counts[clips] += extra
+    return counts
+
   def graduation_counts(self) -> "np.ndarray":
     """Per-clip env counts from the graduation rule, inside each object block.
 
@@ -1025,6 +1067,32 @@ class NewtonVecEnv:
             f"contact={[round(float(x),4) for x in self._grad_contact]} "
             f"lift={[round(float(x),4) for x in self._grad_lift]} "
             f"envs {before} -> {counts.tolist()}{tail}", flush=True)
+      return
+
+    if os.environ.get("MIX_PMCP_RULE", "graduation") == "histogram":
+      if self.common_step_counter % self.pmcp_every != 0:
+        return
+      log = self.extras.get("log") or {}
+      vals = [log.get(f"{self.pmcp_metric}/clip{c}") for c in range(self.n_clips)]
+      if any(v is None for v in vals):
+        # Never reallocate on a partial read: a missing clip would look like a perfect one.
+        return
+      succ = np.asarray([float(v) for v in vals], dtype=np.float64).clip(0.0, 1.0)
+      self._pmcp_hist += 1.0 - succ
+      quota = self.pmcp_quota if self.pmcp_quota > 0 else max(1, int(self.num_envs // self.n_clips // 4))
+      counts = self.hist_counts(self._pmcp_hist, quota=quota)
+      before = self.clip_env_count.tolist()
+      moved = not np.array_equal(counts, self.clip_env_count)
+      if moved:
+        self.set_clip_counts(counts)
+      # Printed on EVERY fire, including the fires that move nothing. Returning silently when the
+      # counts happen to match is indistinguishable from the rule never running at all, and that
+      # ambiguity is what makes a scheduling bug invisible.
+      print(f"[pmcp-hist] step {self.common_step_counter}  succ="
+            f"{[round(float(x), 4) for x in succ]}  hist="
+            f"{[round(float(x), 2) for x in self._pmcp_hist]}  "
+            f"envs {before} -> {counts.tolist()}"
+            f"{'' if moved else '  (no change)'}", flush=True)
       return
 
     forced = os.environ.get("MIX_PMCP_FORCE", "").strip()
