@@ -22,6 +22,8 @@ ap.add_argument("--with-ckpt0", action="store_true",
                      "STARTED from, i.e. the before picture")
 ap.add_argument("--runs", default="", help="regex; only runs whose name matches are recorded")
 ap.add_argument("--steps", type=int, default=0, help="0 = derive the length from the clip")
+ap.add_argument("--manifest-only", action="store_true",
+                help="do not record; just rebuild manifest.json from the traces already on disk")
 A = ap.parse_args()
 
 os.makedirs(A.out, exist_ok=True)
@@ -112,7 +114,7 @@ def jobs_for(run: dict) -> list[dict]:
     return out
 
 
-def record(j: dict) -> dict:
+def record(j: dict) -> None:
     name = os.path.basename(j["npz"])[:-4]
     if os.path.exists(j["npz"]):
         print(f"[trace] have {name}", flush=True)
@@ -145,7 +147,9 @@ def record(j: dict) -> dict:
             print(f"[trace] FAILED {name}", flush=True)
             print(subprocess.run(["tail", "-6", j["log"]], capture_output=True,
                                  text=True).stdout, flush=True)
-            return {}
+
+
+def record_entry(j: dict) -> dict:
     # The rollout's own contact/lift is what makes the picture evidence instead of an opinion.
     nums = ""
     try:
@@ -170,11 +174,23 @@ for r in runs:
     print(f"        {r['name']}: {len(r['pkls'])} clip(s), iters {r['iters'][0]}..{r['iters'][-1]}",
           flush=True)
 
-entries: list[dict] = []
-with cf.ThreadPoolExecutor(max_workers=A.jobs) as ex:
-    for e in ex.map(record, jobs):
-        if e:
-            entries.append(e)
-            # Written after every trace, so the gallery can be started before the sweep finishes.
-            json.dump(sorted(entries, key=lambda x: x["name"]), open(MANIFEST, "w"), indent=1)
-print(f"[trace] manifest -> {MANIFEST} ({len(entries)} entries)", flush=True)
+def write_manifest() -> int:
+    """Rebuild the manifest from the traces ON DISK, never from what this process recorded.
+
+    Two recorders were once started on the same box; each kept its own list and each overwrote
+    the file, so the gallery showed a fraction of the traces that existed. Scanning the directory
+    makes the manifest a function of the box's state instead of one process's history.
+    """
+    have = [record_entry(j) for j in jobs if os.path.exists(j["npz"])]
+    have = [e for e in have if e]
+    json.dump(sorted(have, key=lambda x: x["name"]), open(MANIFEST, "w"), indent=1)
+    return len(have)
+
+
+if not A.manifest_only:
+    with cf.ThreadPoolExecutor(max_workers=A.jobs) as ex:
+        for _ in ex.map(record, jobs):
+            # Rewritten after every trace, so the gallery can start before the sweep finishes.
+            write_manifest()
+n = write_manifest()
+print(f"[trace] manifest -> {MANIFEST} ({n} entries)", flush=True)

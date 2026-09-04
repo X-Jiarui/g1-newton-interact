@@ -335,6 +335,46 @@ contact engine.
 
 ---
 
+## 3.5 Grasp retargeting: fixing the hand at the contact frame
+
+GMR gives a good body and a bad hand: at GRAB's own contact frame the retargeted fingertips are a
+median **9.1 cm** from the object points the human touched with them, and the palm is **41.9 deg**
+off the human's orientation. [`docs/07-grasp-retarget.md`](docs/07-grasp-retarget.md) re-solves the
+arm and the operating hand there, against targets read out of GRAB.
+
+**Adopted route: mesh fingertips + a palm-orientation objective.**
+
+| | orient | shape | residual | penetration | 4+ finger contact |
+|---|---|---|---|---|---|
+| GMR, no IK | 41.9 deg | 16.8 deg | — | 0.86 cm | 58.6 % |
+| joint + 2 cm, rotation 0.3 | 12.8 deg | 12.8 deg | 1.49 cm | 0.40 cm | 59.1 % |
+| **mesh tip + rotation 0.3** | **12.3 deg** | **12.4 deg** | **1.60 cm** | **0.55 cm** | **71.7 %** |
+
+198 s1 clips, 198/198 solved, no arm joint left within 2 % of a limit.
+
+```bash
+X=$GMR_ROOT/assets/g1_wuji/g1_mocap_29dof_with_wuji_hands.xml
+
+python tools/retarget/shrink_object_radius.py --dataset-root $SRC --out-root $WORK/shifted \
+  --robot-xml $X --mode adaptive --grab-dir $GRAB_DIR --margin 0.03
+
+python tools/retarget/extract_grasp_targets.py --grab-dir $GRAB_DIR \
+  --smplx-dir $GMR_ROOT/assets/body_models --dataset-root $WORK/shifted \
+  --out $WORK/targets.npz --back 0
+
+python tools/retarget/solve_arm_ik.py --dataset-root $WORK/shifted --grab-dir $GRAB_DIR \
+  --robot-xml $X --targets mesh --grasp-npz $WORK/targets.npz --free-fingers \
+  --rot-weight 0.3 --out-root $WORK/solved --summary $WORK/solved.csv
+```
+
+Swap `--targets mesh` for `--targets human --tip-extend 0.020` to run the joint-based route, which
+the mesh route replaced. Every parameter, sweep and rejected alternative is recorded in
+[`configs/retarget/grasp_ik.yaml`](configs/retarget/grasp_ik.yaml) — including a global object scale,
+a larger reach margin and three other target definitions, all measured and all worse.
+
+The IK has **no collision term**, so fingers still pass through the object at a median 0.55 cm, and
+only the contact frame is solved. See the doc for what that leaves open.
+
 ## 4. Objects: SDF pipeline and gallery
 
 ### 4.1 Build and validate a collider for every object
@@ -492,5 +532,9 @@ Each cost real time here. [docs/03-defects.md](docs/03-defects.md) and
 | `tools/run/record_runs.sh` | one video per run, Newton's renderer, no early termination |
 | `tools/pipeline/policy_gallery.py` | viser dropdown over recorded traces, for comparing checkpoints |
 | `tools/pipeline/rank_sequences_by_travel.py` | clip ranking by object travel |
+| `tools/retarget/shrink_object_radius.py` | pulls each object radially toward the pelvis until the arm can reach it |
+| `tools/retarget/extract_grasp_targets.py` | the human's fingertips at the contact frame, in the object's frame |
+| `tools/retarget/solve_arm_ik.py` | re-solves the arm and hand at the contact frame with Newton's IK |
+| `configs/retarget/grasp_ik.yaml` | every retargeting parameter, its sweep, and what was rejected |
 | `tools/setup/patch_mjlab.py` | ships the env->clip map fix into the unversioned mjlab checkout |
-| `docs/` | goal, parity, baseline, defects, architecture, reproduction, native migration |
+| `docs/` | goal, parity, baseline, defects, architecture, reproduction, native migration, grasp retargeting |
