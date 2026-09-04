@@ -57,6 +57,9 @@ KEYS = [("rew", r"Mean reward:\s*([-\d.]+)"),
         # Fraction of environments whose table has been dropped; 0.00 when the run does not ask
         # for removal, so the column is safe to read on every run.
         ("tblrm", r"Metric/table_removed:\s*([\d.-]+)"),
+        # The R31 approach term logs its own distance; dcf comes from staged_tip_cf, which a
+        # run on the R31 weight set does not evaluate at all, so that column reads "-" there.
+        ("hcf", r"Metric/staged_hand_cf_dist:\s*([\d.-]+)"),
         ("arrF", r"Metric/staged_tip_cf_arrive_frac:\s*([\d.]+)"),
         ("arrN", r"Metric/staged_tip_cf_arrive_frame:\s*([\d.]+)"),
         ("cf", r"Metric/cf_frame:\s*([\d.]+)"),
@@ -112,7 +115,7 @@ def row(path, name=None, alive=None):
           f"arrF {vals['arrF']:>6s} arrN {vals['arrN']:>6s} "
           f"cf {vals['cf']:>5s} tipcfR {vals['tipcfR']:>7s} "
           f"ep_len {vals['ep_len']:>7s} objfar {vals['objfar']:>7s} wfar {vals['wfar']:>6s} "
-          f"tblrm {vals['tblrm']:>6s} "
+          f"tblrm {vals['tblrm']:>6s} hcf {vals['hcf']:>6s} "
             f"nonfin {vals['nonfin']:>6s} | pen {vals['pen']:>6s}mm max {vals['penmax']:>7s} "
             f">3mm {vals['p3mm']:>6s} >4mm {vals['p4mm']:>6s} n {vals['psamp']:>8s}{alive}")
 
