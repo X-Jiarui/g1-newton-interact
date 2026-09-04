@@ -1228,6 +1228,9 @@ def residual_interact_env_cfg(
         "close_distance": 0.20,
         "progress_cap": 0.10,
         "near_threshold": 0.20,
+        # 0.0 = faithful. >0 mixes a narrow Gaussian of that width into the position half, which is
+        # what fixed the flat endgame on the tip term (0.03 there).
+        "endgame_std": 0.0,
         "pre_weight": 1.0,
         "post_weight": 0.0,
         "log_prefix": "staged_hand_cf",

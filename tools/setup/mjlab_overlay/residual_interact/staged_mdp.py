@@ -570,6 +570,7 @@ def staged_hand_cf_reward(
     close_distance: float = 0.20,
     progress_cap: float = 0.10,
     near_threshold: float = 0.20,
+    endgame_std: float = 0.0,
     pre_weight: float = 1.0,
     post_weight: float = 0.0,
     log_prefix: str = "staged_hand_cf",
@@ -595,11 +596,18 @@ def staged_hand_cf_reward(
     points are reachable with quite different finger curls, so the hand SHAPE is unconstrained.
     This is the one part of Omnigrasp's pregrasp shaping we did not have.
 
-    Known seam, inherited from the original: just outside `close_distance` the progress term pays
-    up to 0.1, just inside it `exp(-100 * 0.04)` pays 0.018. Crossing inward is a small pay cut
-    until the hand keeps closing. Ours had exactly this failure once before, at a much larger
-    ratio, and it made the policy hover; if the approach stalls at ~20 cm, this is the first
-    place to look.
+    NO SEAM at `close_distance`, and the reason is one easily-missed line: their position error is
+    `(diff**2).mean(dim=-1)`, a mean over the three XYZ components, i.e. |d|^2/3 -- an implicit
+    k_pos/3. At d = 0.20 m that pays exp(-100*0.04/3) = 0.264 against a far-field ceiling of 0.100
+    (each body's `clamp(prev-curr, 0, 0.1)`, averaged), so crossing inward is a 2.4x RAISE.
+    Computing it as exp(-100*|d|^2) instead gives 0.018 and invents a pay cut that is not there.
+
+    The real risk is the ENDGAME, not the seam. exp(-100 |d|^2/3) pays 0.920 at 5 cm and 0.987 at
+    2 cm, so closing the last three centimetres buys 6.7 %. That is the shape already measured
+    stalling this task once: at std 0.20 the old tip term paid 0.959 at 5.8 cm and the hand hovered.
+    `endgame_std > 0` mixes in a narrow Gaussian at that width, half and half -- the fix that worked
+    there; 0.0 keeps the port faithful. Watch `Metric/staged_hand_cf_dist`: if it settles at
+    3-6 cm and stops, turn this on.
     """
     ref = mdp._ref(env.device)
     n = max(int(ref["n_frames"]), 1)
@@ -630,6 +638,13 @@ def staged_hand_cf_reward(
     sq = ((tgt_pos - live_pos) ** 2).mean(dim=-1)              # matches their (diff**2).mean(-1)
     pos_err = (sq * close).sum(dim=-1) / n_used
     r_pos = torch.exp(-float(k_pos) * pos_err)
+    if float(endgame_std) > 0.0:
+        # Same half-and-half mix that fixed the flat endgame on the tip term. Range stays [0, 1],
+        # so the weight and every other term's share are unchanged.
+        tight = torch.exp(
+            -0.5 * (((d * close).sum(dim=-1) / n_used) / float(endgame_std)).pow(2)
+        )
+        r_pos = 0.5 * r_pos + 0.5 * tight
 
     ang = _quat_rel_angle(tgt_quat, live_quat)                 # [E, B]
     rot_err = ((ang ** 2) * close).sum(dim=-1) / n_used
