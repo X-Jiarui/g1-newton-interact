@@ -409,9 +409,47 @@ def _reference_frame_tensor(env, ref: dict, frame: int | torch.Tensor) -> torch.
 
 def _reference_object_pose_w(env, ref: dict, frame: int | torch.Tensor) -> torch.Tensor:
   frame_t = _reference_frame_tensor(env, ref, frame)
-  pos = ref["obj_pos"][frame_t] + env.scene.env_origins
+  pos = ref["obj_pos"][frame_t]
   quat = ref["obj_quat"][frame_t]
-  return torch.cat([pos, quat], dim=-1)
+  pos, quat = _still_until_cf(env, ref, frame_t, pos, quat)
+  return torch.cat([pos + env.scene.env_origins, quat], dim=-1)
+
+
+def _still_until_cf(env, ref: dict, frame_t, pos, quat):
+  """Hold the object's reference where it rests until this env reaches its own contact frame.
+
+  Omnigrasp's object target does not move until the table is removed --
+  `TrajGenerator3D(..., starting_still_dt=self.table_remove_frame * self.dt)` -- so the window in
+  which "the reference lifted the object and the policy did not" simply does not exist there. Ours
+  does: measured on R28, the reference starts lifting 20-40 frames BEFORE cf, the real object stays
+  on the table, and `object_reference_window` then ends 70-100% of all episodes before the grasp is
+  even due. This closes that window.
+
+  After cf the reference is REBASED, `ref'(f) = ref(0) + (ref(f) - ref(cf))`, so the carry starts
+  from where the object actually is instead of jumping to wherever the human had already lifted it.
+  Rebasing is what makes the seam continuous; freezing alone would put a several-centimetre step at
+  cf and trip `og_object_far` on the spot.
+
+  Off unless OBJ_REF_STILL_UNTIL_CF is set.
+  """
+  if os.environ.get("OBJ_REF_STILL_UNTIL_CF", "").strip() not in ("1", "on", "true"):
+    return pos, quat
+  from mjlab.tasks.residual_interact import staged_mdp as _smdp
+
+  n = max(int(ref["n_frames"]), 1)
+  lo, hi = apple_mdp._clip_bounds(env, n)
+  cf_l = _smdp.cf_local(env)
+  known = cf_l >= 0
+  cf_row = torch.minimum(lo + cf_l.clamp_min(0), hi)
+  rest_pos = ref["obj_pos"][lo]
+  rest_quat = ref["obj_quat"][lo]
+  cf_pos = ref["obj_pos"][cf_row]
+  before = known & (frame_t < cf_row)
+  after = known & ~before
+  pos = torch.where(before.unsqueeze(-1), rest_pos, pos)
+  pos = torch.where(after.unsqueeze(-1), rest_pos + (pos - cf_pos), pos)
+  quat = torch.where(before.unsqueeze(-1), rest_quat, quat)
+  return pos, quat
 
 
 def _reference_object_pos_w(env, ref: dict, frame: int | torch.Tensor) -> torch.Tensor:
@@ -490,6 +528,16 @@ def reset_to_residual_interact_curriculum(
     + 1
   )
   clip_len_e = clip_len[env_ids]
+
+  # RSI_ANCHOR_CF=1 moves the start distribution to Omnigrasp's: it samples uniformly over the
+  # motion and then clamps to `contact_time - 0.5 s` (humanoid_omnigrasp.py:515), which for a GRAB
+  # clip whose contact is 1.4-2.1 s into a 7-24 s recording collapses 85-95% of environments onto
+  # that one instant. The grasp is then the only thing left to learn; the walk up to the table is
+  # not in the training distribution at all. Ours starts 22-92 frames out and mostly dies on the way.
+  if os.environ.get("RSI_ANCHOR_CF", "").strip() in ("1", "on", "true"):
+    contact_frame_anchor = "clip_contact"
+    contact_offset_start = int(os.environ.get("RSI_CF_OFFSET_START", "-20"))
+    contact_offset_end = int(os.environ.get("RSI_CF_OFFSET_END", "-10"))
 
   frame = torch.zeros(env_ids.numel(), dtype=torch.long, device=env.device)
   draw = torch.rand(env_ids.numel(), device=env.device)
@@ -573,6 +621,13 @@ def object_reference_window_termination(
   policy that grasps slightly early or late is not punished, while one that leaves
   the apple on the table is.
   """
+  # OBJ_REF_WINDOW_ENABLE=0 turns this off without touching the termination list, so the run stays
+  # index-comparable with one that keeps it. Measured on R28: at 0.05 m this term takes 70-100% of
+  # all resets, against 0.1-13% for og_object_far at Omnigrasp's own 0.12 m, and it fires BEFORE the
+  # grasp is due because the reference lifts the object first.
+  if os.environ.get("OBJ_REF_WINDOW_ENABLE", "1").strip() in ("0", "off", "false"):
+    return torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+
   ref = _ref(env.device)
   n = int(ref["n_frames"])
   obj: Entity = object_pool.active(env)
