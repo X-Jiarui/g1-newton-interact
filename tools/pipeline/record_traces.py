@@ -149,25 +149,26 @@ def record(j: dict) -> None:
                                  text=True).stdout, flush=True)
 
 
-def record_entry(j: dict) -> dict:
+def entry_for(run: str, clip: str, it: int, npz: str, xml: str, stl: str, log: str) -> dict:
     # The rollout's own contact/lift is what makes the picture evidence instead of an opinion.
     nums = ""
     try:
-        txt = open(j["log"], errors="replace").read()
+        txt = open(log, errors="replace").read()
         for key in ("Stage/physical_contact", "PhaseA/lift_success"):
             m = re.findall(rf"{re.escape(key)}\D*([0-9.]+)", txt)
             if m:
                 nums += f"  {key.split('/')[-1]}={m[-1]}"
     except OSError:
         pass
-    return {"name": f"{j['clip']}  it{j['it']}  [{j['run']}]",
-            "npz": j["npz"], "xml": j["xml"], "stl": j["stl"],
-            "info": f"{j['run']}  iter {j['it']}  clip {j['clip']}{nums}"}
+    return {"name": f"{clip}  it{it}  [{run}]",
+            "npz": npz, "xml": xml, "stl": stl,
+            "info": f"{run}  iter {it}  clip {clip}{nums}"}
 
 
 runs = discover()
 if not runs:
     raise SystemExit("no live train_newton.py runs matched")
+by_run = {r["name"]: r for r in runs}
 jobs = [j for r in runs for j in jobs_for(r)]
 print(f"[trace] {len(runs)} run(s) -> {len(jobs)} trace(s) into {A.out}", flush=True)
 for r in runs:
@@ -175,16 +176,33 @@ for r in runs:
           flush=True)
 
 def write_manifest() -> int:
-    """Rebuild the manifest from the traces ON DISK, never from what this process recorded.
+    """Rebuild the manifest from the traces ON DISK, never from a derived job list.
 
-    Two recorders were once started on the same box; each kept its own list and each overwrote
-    the file, so the gallery showed a fraction of the traces that existed. Scanning the directory
-    makes the manifest a function of the box's state instead of one process's history.
+    Two things broke the naive version. Two recorders were once started on the same box and each
+    overwrote the file with its own history. And the "latest checkpoint" moves while training runs,
+    so a job list rebuilt an hour later names npz files that were never written. Globbing the
+    directory and parsing the names back makes the manifest a function of what actually exists.
     """
-    have = [record_entry(j) for j in jobs if os.path.exists(j["npz"])]
-    have = [e for e in have if e]
-    json.dump(sorted(have, key=lambda x: x["name"]), open(MANIFEST, "w"), indent=1)
-    return len(have)
+    entries = []
+    for npz in sorted(glob.glob(os.path.join(A.out, "*.npz"))):
+        stem = os.path.basename(npz)[:-4]
+        try:
+            run, clip, ittag = stem.rsplit("__", 2)
+            it = int(ittag[2:])
+        except ValueError:
+            continue
+        r = by_run.get(run)
+        if r is None:
+            continue
+        stl = ""
+        for pkl, cand in zip(r["pkls"], r["stls"]):
+            if os.path.splitext(os.path.basename(pkl))[0] == clip:
+                stl = cand
+                break
+        entries.append(entry_for(run, clip, it, npz, r["xml"], stl,
+                                 os.path.join(A.out, stem + ".log")))
+    json.dump(sorted(entries, key=lambda x: x["name"]), open(MANIFEST, "w"), indent=1)
+    return len(entries)
 
 
 if not A.manifest_only:
