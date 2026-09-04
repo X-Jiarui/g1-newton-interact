@@ -903,6 +903,48 @@ def _initial_cuboid_scene_poses(
   )
 
 
+# Omnigrasp removes the table at the reference contact time -- `humanoid_omnigrasp.py:762`,
+# `self._table_states[env_ids, 2] = 100`, with the removal frame set per environment from that
+# clip's own contact time. Off unless TABLE_REMOVE_AFTER_CF is set, so nothing changes for a run
+# that does not ask for it.
+_TABLE_REMOVE_AFTER_CF = os.environ.get("TABLE_REMOVE_AFTER_CF", "").strip()
+_TABLE_REMOVE_DROP = float(os.environ.get("TABLE_REMOVE_DROP", "0.30") or 0.30)
+
+
+def _table_removed_mask(env) -> torch.Tensor | None:
+  """Which environments have passed their own contact frame by TABLE_REMOVE_AFTER_CF frames."""
+  if not _TABLE_REMOVE_AFTER_CF:
+    return None
+  # Imported here, not at module scope: staged_mdp imports residual_interact.mdp, which imports
+  # this module.
+  from mjlab.tasks.residual_interact import staged_mdp as _smdp
+
+  return _smdp.after_cf(env, int(_TABLE_REMOVE_AFTER_CF))
+
+
+def _drop_table_after_cf(env, table_pose: torch.Tensor) -> torch.Tensor:
+  """Sink the table once the grasp should exist, so an unheld object falls instead of resting.
+
+  This does NOT hand the policy a lift. The object is a full rigid body under gravity either way;
+  what goes away is the support a not-quite-grasp could lean on, which is also what turns "failed
+  to grasp" from an unlabelled non-event into an immediate `og_object_far` termination.
+
+  Down by a fixed amount rather than Omnigrasp's +100 m: `table_top` feeds an observation channel
+  (`_object_table_obs`), and a 100 m reading is a number no normaliser has ever seen.
+  """
+  gone = _table_removed_mask(env)
+  if gone is None:
+    return table_pose
+  # Visible in the training row: a removal that never fires and one that fires at reset look the
+  # same in every other metric.
+  from mjlab.tasks.residual_interact import mdp as _rmdp
+
+  _rmdp._safe_log(env, "Metric/table_removed", gone.float())
+  table_pose = table_pose.clone()
+  table_pose[:, 2] = table_pose[:, 2] - gone.to(table_pose.dtype) * abs(_TABLE_REMOVE_DROP)
+  return table_pose
+
+
 def _write_table_pose(table: Entity, table_pose: torch.Tensor, env_ids=None) -> None:
   if table.is_mocap:
     table.write_mocap_pose_to_sim(table_pose, env_ids=env_ids)
@@ -1478,6 +1520,7 @@ class Sonic53Action(ActionTerm):
       _, table_pose = _cuboid_scene_poses_at_frame(
         ref, self._env.scene.env_origins, table_frame
       )
+      table_pose = _drop_table_after_cf(self._env, table_pose)
       _write_table_pose(table, table_pose)
     self._apply_reference_object_tracking(ref)
     self._entity.set_joint_position_target(target, joint_ids=self._target_ids)
