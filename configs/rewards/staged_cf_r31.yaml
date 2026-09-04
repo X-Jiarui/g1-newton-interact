@@ -1,0 +1,110 @@
+# R31 = R24 with the approach term swapped for the faithful Omnigrasp pregrasp port.
+# Only staged_tip_cf -> staged_hand_cf changes; every other weight is byte-identical to R24.
+#
+# Original R24 header follows.
+# R24 weight set -- the approach-phase rewrite, trained from scratch on every box.
+#
+# The change this round is `staged_tip_cf`, not the weights. Its old form was a single Gaussian at
+# std 0.20, which was measured to pay 0.959 at 5.8 cm and 0.9988 at 1 cm: closing the last five
+# centimetres bought 4%, so the policy hovered and the hand never arrived. It is now two scales
+# (wide 0.20 carries the approach, narrow 0.03 puts the gradient in the endgame), plus Omnigrasp's
+# progress term beyond 0.20 m which cannot saturate at any distance, plus a low-weight orientation
+# proxy. Same weight, different function.
+#
+# Trained from scratch rather than resumed: every checkpoint on disk was optimised against the
+# saturated form, and warm-starting into a differently-shaped reward measures neither.
+#
+# Also new, and paying nothing: `Metric/staged_tip_cf_arrive_frac` / `_arrive_frame`. The reward
+# says WHERE the hand must be and nothing about WHEN -- its target is the static cf pose, so a
+# given distance pays the same at frame 10 and frame 60. Before adding any deadline term we need
+# to see the arrival distribution, and it was not observable.
+#
+# FORMAT IS LOAD-BEARING. reward_cfg_from_checkpoint.py parses this textually:
+#     ^  <name>:$        two spaces, name, nothing after the colon
+#     ^    weight: <f>   four spaces
+# The flow style `name: {weight: 1.0}` matches neither and the file reads as EMPTY.
+rewards:
+
+  # ---- APPROACH PHASE: one target instead of three ---------------------------------------------
+  # Everything before cf exists to put the hand where the grasp happens. staged_tip_cf says exactly
+  # that -- fingertips to the reference's fingertip positions AT cf, masked to the tips the
+  # reference actually brings to the object -- and nothing else states it.
+  staged_tip_cf:
+    weight: 0.0
+
+  # Omnigrasp's pregrasp term, whole: 16 hand bodies a side (palm + finger link2/3/4), position and
+  # orientation, against their pose at cf, with the far field replaced by its progress term.
+  # It REPLACES staged_tip_cf at the same weight -- same job, same output range [0,1], so the total
+  # reward scale and every other term's share are unchanged and the two rounds stay comparable.
+  staged_hand_cf:
+    weight: 5.0
+
+  # Dropped: the upper-body chain. Weight 3.5 returned 2.5-6.5%, the worst ratio in the set, and a
+  # fingertip target at cf already determines where the arm has to be.
+  staged_upper_tracking:
+    weight: 0.0
+
+  # Dropped: the 20 finger joints. It paid 0.7-2.4% at weight 1.0, and the fingertip target at cf
+  # constrains the hand shape in the space the task is actually about. The cost is explicit: the
+  # joint vector the retarget solves for is now absent from the reward entirely.
+  staged_hand_pose:
+    weight: 0.0
+
+  # Unchanged: something has to stand up once the upper body is unconstrained.
+  staged_lower_tracking:
+    weight: 2.0
+
+  # ---- CARRY PHASE -----------------------------------------------------------------------------
+  # Raised 2.0 -> 4.0. After cf the task IS the object trajectory, yet this was paying 3.7-5.3%
+  # while multi_tip_surface paid ~57% at full weight for staying in contact. That imbalance is the
+  # measured shape of "lifts it, then drifts off trajectory and drops it".
+  staged_object_tracking:
+    weight: 4.0
+
+  # multi_tip_surface, phase-masked to cf-onward. Same function, all six sub-terms intact; it now
+  # pays for HOLDING rather than for approaching, which is the job it was written for.
+  staged_multi_tip_surface:
+    weight: 5.0
+  multi_tip_surface:
+    weight: 0.0
+
+  # The one strict lift signal (3 cm, >=2 tips, held 0.30 s). It paid 0.0-0.1% in R14, so it costs
+  # nothing to keep and it is the actual target rather than a shaping term.
+  object_hard_lift:
+    weight: 20.0
+
+  # Dropped: it paid 16-22% through its near_std proximity shaping while lift was flat zero, which
+  # makes it a low-grade copy of multi_tip_surface wearing the name of a lift reward.
+  object_lift_hold:
+    weight: 0.0
+
+  # Unchanged: the only term rewarding sustained contact rather than proximity, so the only thing
+  # standing between the policy and a tap-and-release.
+  contact_duration:
+    weight: 0.0
+  # Same term, carry phase only. Before cf it paid for touching the object at all,
+  # which competed with the one thing the approach phase has to be about.
+  staged_contact_duration:
+    weight: 1.0
+
+  # ---- KEPT AS INSURANCE -----------------------------------------------------------------------
+  # Penalty-only (torso below 0.55 m, action jerk, object speed). It measured -0.0%: it never fires.
+  # Free to keep, but do not count its 1.0 toward the budget.
+  stability:
+    weight: 1.0
+
+  # ---- DROPPED ---------------------------------------------------------------------------------
+  # Body pose duplicates lower/upper tracking; pregrasp duplicates the tip terms. Ported wholesale
+  # from Omnigrasp, never needed here.
+  omnigrasp_style:
+    weight: 0.0
+  tracking:
+    weight: 0.0
+  right_wrist_tracking:
+    weight: 0.0
+  left_wrist_tracking:
+    weight: 0.0
+  object_trajectory_tracking:
+    weight: 0.0
+  staged_tip_object:
+    weight: 0.0

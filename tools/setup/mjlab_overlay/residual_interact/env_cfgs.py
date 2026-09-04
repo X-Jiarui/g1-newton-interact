@@ -1213,6 +1213,26 @@ def residual_interact_env_cfg(
       },
     ),
     # --- R15: one approach target, and multi_tip_surface confined to the carry phase ---------
+    # Omnigrasp's pregrasp term ported whole: the 16 hand bodies a side, position AND orientation,
+    # against their pose at cf. Weight 0.0 here; a reward yaml turns it on INSTEAD of staged_tip_cf,
+    # which does the same job with five points and no orientation -- running both would pay the
+    # approach twice and change the total reward scale.
+    "staged_hand_cf": RewardTermCfg(
+      func=staged_mdp.staged_hand_cf_reward,
+      weight=0.0,
+      params={
+        "k_pos": 100.0,
+        "k_rot": 10.0,
+        "w_pos": 0.9,
+        "w_rot": 0.1,
+        "close_distance": 0.20,
+        "progress_cap": 0.10,
+        "near_threshold": 0.20,
+        "pre_weight": 1.0,
+        "post_weight": 0.0,
+        "log_prefix": "staged_hand_cf",
+      },
+    ),
     "staged_tip_cf": RewardTermCfg(
       func=staged_mdp.staged_tip_cf_reward,
       weight=0.0,

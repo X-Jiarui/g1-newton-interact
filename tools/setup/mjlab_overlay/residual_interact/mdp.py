@@ -281,6 +281,20 @@ _TIP_BODY_NAMES_WUJI = (
   "right_finger5_tip",
 )
 
+# Omnigrasp's pregrasp reward supervises `hand_bodies`: per hand the wrist plus THREE joints of
+# every finger (`R_Index1/2/3` ...), 16 bodies a side. The Wuji hand maps onto that one for one:
+# the palm link stands in for the wrist, and `link2/3/4` are the three moving joints -- `link1` has
+# zero travel (measured, see the finger-IK notes) and `_tip` is a geomless derived frame, so
+# neither carries information the other links do not.
+_HAND_BODY_NAMES_WUJI = tuple(
+  f"{side}_{part}"
+  for side in ("left", "right")
+  for part in ("palm_link", *(f"finger{i}_link{j}" for i in range(1, 6) for j in (2, 3, 4)))
+)
+# The xhand set was never enumerated; fall back to its fingertips so a run with that hand keeps
+# working rather than raising on a name the model does not have.
+_HAND_BODY_NAMES_XHAND = None
+
 _TIP_BODY_NAMES = (
   _TIP_BODY_NAMES_XHAND if _HAND_KIND == "xhand" else _TIP_BODY_NAMES_WUJI
 )
@@ -1176,6 +1190,20 @@ def _tip_body_ids(env) -> torch.Tensor:
   )
 
 
+def _hand_body_names() -> tuple[str, ...]:
+  names = _HAND_BODY_NAMES_XHAND if _HAND_KIND == "xhand" else _HAND_BODY_NAMES_WUJI
+  return names or _TIP_BODY_NAMES
+
+
+def _hand_body_ids(env) -> torch.Tensor:
+  robot: Entity = env.scene["robot"]
+  return _cached_ids(
+    env,
+    "_residual_hand_body_ids",
+    lambda: robot.find_bodies(_hand_body_names(), preserve_order=True)[0],
+  )
+
+
 def _tip_distances(env) -> torch.Tensor:
   robot: Entity = env.scene["robot"]
   obj: Entity = object_pool.active(env)
@@ -1523,7 +1551,8 @@ def _reference_body_xyz_cache(device: str) -> tuple[torch.Tensor, tuple[str, ...
   root_pos = ref["root_pos"].detach().cpu().numpy()
   root_rot = ref["root_rot"].detach().cpu().numpy()
   q = ref["dof_pos"].detach().cpu().numpy()
-  out = []
+  out: list = []
+  out_q: list = []
   # the arrays span every clip when APPLE_EAT_PKL_MIX is used; n_frames is per clip
   for frame in range(int(q.shape[0])):
     data.qpos[:] = model.qpos0
@@ -1540,27 +1569,43 @@ def _reference_body_xyz_cache(device: str) -> tuple[torch.Tensor, tuple[str, ...
 
 
 def _reference_tip_pos_cache(device: str) -> tuple[torch.Tensor, tuple[str, ...]]:
+  pos, _, names = _reference_body_pose_cache(device, _TIP_BODY_NAMES, "tip_body")
+  return pos, names
+
+
+def _reference_body_pose_cache(
+  device: str, names: tuple[str, ...], key: str
+) -> tuple[torch.Tensor, torch.Tensor, tuple[str, ...]]:
+  """Reference world POSE (position and orientation) of `names`, one entry per reference frame.
+
+  The forward kinematics were already being run over every frame here; only `data.xpos` was kept
+  and `data.xquat` -- the same call's other output -- was thrown away. Orientation costs nothing
+  extra to cache and is half of what a hand-shape target needs: a fingertip can sit in the right
+  place with the finger curled the wrong way.
+  """
   ref = _ref(device)
-  cached = ref.get("tip_body_pos")
-  cached_names = ref.get("tip_body_names")
+  cached = ref.get(f"{key}_pos")
+  cached_quat = ref.get(f"{key}_quat")
+  cached_names = ref.get(f"{key}_names")
   if (
     isinstance(cached, torch.Tensor)
+    and isinstance(cached_quat, torch.Tensor)
     and cached.device.type == torch.device(device).type
     and cached_names
   ):
-    return cached, tuple(cached_names)
+    return cached, cached_quat, tuple(cached_names)
 
   model = mujoco.MjModel.from_xml_path(str(_ROBOT_XML))
   data = mujoco.MjData(model)
   body_ids: list[int] = []
   kept_names: list[str] = []
-  for name in _TIP_BODY_NAMES:
+  for name in names:
     body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, name)
     if body_id >= 0:
       body_ids.append(int(body_id))
       kept_names.append(name)
   if not body_ids:
-    raise RuntimeError(f"No fingertip bodies found in {_ROBOT_XML}")
+    raise RuntimeError(f"None of {key} bodies found in {_ROBOT_XML}: {names}")
 
   free_joints = [
     idx for idx, typ in enumerate(model.jnt_type) if typ == mujoco.mjtJoint.mjJNT_FREE
@@ -1588,10 +1633,13 @@ def _reference_tip_pos_cache(device: str) -> tuple[torch.Tensor, tuple[str, ...]
       data.qpos[qadr] = value
     mujoco.mj_forward(model, data)
     out.append(data.xpos[body_ids].copy())
-  tip_pos = torch.from_numpy(np.stack(out).astype(np.float32)).to(device=device)
-  ref["tip_body_pos"] = tip_pos
-  ref["tip_body_names"] = tuple(kept_names)
-  return tip_pos, tuple(kept_names)
+    out_q.append(data.xquat[body_ids].copy())
+  pos = torch.from_numpy(np.stack(out).astype(np.float32)).to(device=device)
+  quat = torch.from_numpy(np.stack(out_q).astype(np.float32)).to(device=device)
+  ref[f"{key}_pos"] = pos
+  ref[f"{key}_quat"] = quat
+  ref[f"{key}_names"] = tuple(kept_names)
+  return pos, quat, tuple(kept_names)
 
 
 def _reference_release_frame(device: str, lift_threshold: float = 0.03) -> torch.Tensor:

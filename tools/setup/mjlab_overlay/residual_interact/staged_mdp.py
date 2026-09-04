@@ -550,3 +550,111 @@ def staged_contact_duration_reward(
     value = value * _phase_weight(env, pre_weight, post_weight)
     mdp._safe_log(env, f"ResidualReward/{log_prefix}", value)
     return value
+
+
+def _quat_rel_angle(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+    """Angle of the rotation taking `b` to `a`, both wxyz, shape [..., 4] -> [...]."""
+    aw, ax, ay, az = a.unbind(-1)
+    bw, bx, by, bz = b.unbind(-1)
+    # a * conj(b)
+    w = aw * bw + ax * bx + ay * by + az * bz
+    return 2.0 * torch.acos(w.abs().clamp(max=1.0))
+
+
+def staged_hand_cf_reward(
+    env,
+    k_pos: float = 100.0,
+    k_rot: float = 10.0,
+    w_pos: float = 0.9,
+    w_rot: float = 0.1,
+    close_distance: float = 0.20,
+    progress_cap: float = 0.10,
+    near_threshold: float = 0.20,
+    pre_weight: float = 1.0,
+    post_weight: float = 0.0,
+    log_prefix: str = "staged_hand_cf",
+) -> torch.Tensor:
+    """Omnigrasp's pregrasp term, ported whole: the WHOLE grasping hand to its pose at cf.
+
+    `compute_pregrasp_reward_time` does not score fingertip-to-object distance. It scores every
+    body in `hand_bodies` -- per hand the wrist plus three joints of each finger, 16 a side --
+    against that body's world POSE at the contact frame, position and orientation both:
+
+        close_hand_flag = ||ref_hand_pos - ref_obj_pos|| < close_distance
+        r_pos = exp(-k_pos * mean_selected ||ref - live||^2)          k_pos = 100
+        r_rot = exp(-k_rot * mean_selected angle^2)                   k_rot = 10
+        reward = 0.9 * r_pos + 0.1 * r_rot        (0.9/0.1 are hardcoded there, over the yaml)
+
+    and beyond `close_distance` both halves are REPLACED -- not summed -- by a progress term
+    `clamp(prev - curr, 0, 0.1)`, because exp(-100 d^2) is numerically flat anywhere far away.
+
+    Our Wuji hand maps one for one: `palm_link` for the wrist, `finger{1..5}_link{2,3,4}` for the
+    three finger joints (`link1` has zero travel, `_tip` is a geomless derived frame).
+
+    Why this and not `staged_tip_cf`: a fingertip target fixes five points, and the same five
+    points are reachable with quite different finger curls, so the hand SHAPE is unconstrained.
+    This is the one part of Omnigrasp's pregrasp shaping we did not have.
+
+    Known seam, inherited from the original: just outside `close_distance` the progress term pays
+    up to 0.1, just inside it `exp(-100 * 0.04)` pays 0.018. Crossing inward is a small pay cut
+    until the hand keeps closing. Ours had exactly this failure once before, at a much larger
+    ratio, and it made the policy hover; if the approach stalls at ~20 cm, this is the first
+    place to look.
+    """
+    ref = mdp._ref(env.device)
+    n = max(int(ref["n_frames"]), 1)
+    lo, hi = apple_mdp._clip_bounds(env, n)
+    cf = cf_local(env)
+    row = (lo + cf.clamp(min=0)).clamp(lo, hi)
+
+    ref_pos_all, ref_quat_all, _ = mdp._reference_body_pose_cache(
+        env.device, mdp._hand_body_names(), "hand_body"
+    )
+    tgt_pos = ref_pos_all.index_select(0, row)                 # [E, B, 3] hand bodies AT cf
+    tgt_quat = ref_quat_all.index_select(0, row)               # [E, B, 4]
+    obj_cf = mdp._reference_object_pos_w(env, ref, row)        # [E, 3]
+
+    # Omnigrasp's own hand selection: the bodies the REFERENCE brings near the object at contact.
+    # It picks the operating hand and drops the fingers that clip never used, with no side flag.
+    close = ((tgt_pos - obj_cf.unsqueeze(1)).norm(dim=-1) < float(near_threshold)) & (
+        cf >= 0
+    ).unsqueeze(1)
+    n_used = close.sum(dim=-1).clamp_min(1)
+
+    robot = env.scene["robot"]
+    ids = mdp._hand_body_ids(env)
+    live_pos = robot.data.body_link_pos_w[:, ids]
+    live_quat = robot.data.body_link_quat_w[:, ids]
+
+    d = (tgt_pos - live_pos).norm(dim=-1)                      # [E, B]
+    sq = ((tgt_pos - live_pos) ** 2).mean(dim=-1)              # matches their (diff**2).mean(-1)
+    pos_err = (sq * close).sum(dim=-1) / n_used
+    r_pos = torch.exp(-float(k_pos) * pos_err)
+
+    ang = _quat_rel_angle(tgt_quat, live_quat)                 # [E, B]
+    rot_err = ((ang ** 2) * close).sum(dim=-1) / n_used
+    r_rot = torch.exp(-float(k_rot) * rot_err)
+
+    # far field: replace both halves with "did the hand close any distance this step"
+    prev = getattr(env, "_handcf_prev_d", None)
+    if not isinstance(prev, torch.Tensor) or prev.shape != d.shape or prev.device != d.device:
+        prev = d.detach().clone()
+    fresh = env.episode_length_buf <= 1
+    prev = torch.where(fresh.unsqueeze(-1), d.detach(), prev)
+    cap = max(float(progress_cap), 1e-9)
+    prog = (((prev - d).clamp(min=0.0, max=cap) * close).sum(dim=-1)) / n_used
+    env._handcf_prev_d = d.detach().clone()
+
+    mean_d = (d * close).sum(dim=-1) / n_used
+    far = mean_d > float(close_distance)
+    r_pos = torch.where(far, prog, r_pos)
+    r_rot = torch.where(far, prog, r_rot)
+
+    value = float(w_pos) * r_pos + float(w_rot) * r_rot
+    value = torch.where(close.any(dim=-1), value, torch.zeros_like(value))
+
+    mdp._safe_log(env, f"Metric/{log_prefix}_dist", mean_d)
+    mdp._safe_log(env, f"Metric/{log_prefix}_rot", (ang * close).sum(dim=-1) / n_used)
+    mdp._safe_log(env, f"Metric/{log_prefix}_far_frac", far.float())
+    mdp._safe_log(env, f"Metric/{log_prefix}_used_bodies", n_used.float())
+    return _phase_weight(env, float(pre_weight), float(post_weight)) * value

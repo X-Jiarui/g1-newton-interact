@@ -167,6 +167,10 @@ _COMPACT_WANDB_EP_EXTRA_KEYS = frozenset(
     "Metric/staged_tip_cf_progress",
     "Metric/staged_tip_cf_rot",
     "Metric/staged_tip_cf_used_tips",
+    "Metric/staged_hand_cf_dist",
+    "Metric/staged_hand_cf_rot",
+    "Metric/staged_hand_cf_far_frac",
+    "Metric/staged_hand_cf_used_bodies",
     "Metric/cf_frame",
     # Fraction of environments whose table has been dropped out from under the object.
     "Metric/table_removed",
