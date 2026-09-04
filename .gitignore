@@ -5,3 +5,8 @@ assets/mjlab_scene/assets/
 MUJOCO_LOG.TXT
 *.mp4
 assets/newton_roundtrip.xml
+
+# Rescued checkpoints from rented boxes -- large binaries, never committed.
+ckpt_backup/
+traces/
+.venv-viser/
