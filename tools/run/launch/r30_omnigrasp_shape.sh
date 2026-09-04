@@ -32,8 +32,11 @@
 # CLIPS entries are `gpu:clip_stem:mesh_stem:tag`, whitespace separated:
 #   CLIPS="0:apple_lift:apple:R30_APPLE 1:camera_lift:camera:R30_CAMERA"
 #
-# Warm start, not from scratch: from iteration 0 wrist_target_far kills 60-100 % of episodes during
-# the approach (that was R27). The trained weights are the warmup.
+# From scratch is safe with this switch set, which was NOT true before it. R27 collapsed because
+# wrist_target_far killed 60-100 % of episodes during the approach; it activates at control step 56
+# and is pre_cf_only, and RSI_ANCHOR_CF puts cf at step ~51, so it can no longer fire -- R30 has
+# read wfar 0.0000 on every cycle, and two from-scratch cube runs reached contact 0.23 by iteration
+# 44 with no collapse. Leave RESUME_FROM unset for a clean round; set it to warm-start instead.
 set -u
 ROOT=${ROOT:?set ROOT to the repo path}
 DATA=${DATA:?set DATA to the step6 reference dir holding <clip_stem>.pkl}
@@ -69,7 +72,7 @@ for item in $CLIPS; do
     src="$RESUME_FROM/$(echo "$tag" | sed 's/^R[0-9]*_/R29_/')"
     it=$(ls "$src"/model_*.pt 2>/dev/null | sed 's/.*model_//;s/\.pt//' | sort -n | tail -1)
     [ -n "$it" ] && resume="--resume $src/model_$it.pt"
-    [ -z "$it" ] && echo "no checkpoint under $src -- $tag starts from scratch, expect the R27 collapse"
+    [ -z "$it" ] && echo "no checkpoint under $src -- $tag starts from scratch"
   fi
 
   CUDA_VISIBLE_DEVICES="$gpu" \
