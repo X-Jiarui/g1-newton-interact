@@ -1551,8 +1551,7 @@ def _reference_body_xyz_cache(device: str) -> tuple[torch.Tensor, tuple[str, ...
   root_pos = ref["root_pos"].detach().cpu().numpy()
   root_rot = ref["root_rot"].detach().cpu().numpy()
   q = ref["dof_pos"].detach().cpu().numpy()
-  out: list = []
-  out_q: list = []
+  out = []
   # the arrays span every clip when APPLE_EAT_PKL_MIX is used; n_frames is per clip
   for frame in range(int(q.shape[0])):
     data.qpos[:] = model.qpos0
@@ -1623,7 +1622,8 @@ def _reference_body_pose_cache(
   root_pos = ref["root_pos"].detach().cpu().numpy()
   root_rot = ref["root_rot"].detach().cpu().numpy()
   q = ref["dof_pos"].detach().cpu().numpy()
-  out = []
+  out: list = []
+  out_q: list = []
   # the arrays span every clip when APPLE_EAT_PKL_MIX is used; n_frames is per clip
   for frame in range(int(q.shape[0])):
     data.qpos[:] = model.qpos0
