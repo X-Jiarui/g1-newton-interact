@@ -472,7 +472,15 @@ if A.rollout_steps:
   _pol = _wrap_stats(TASK, runner, _pol)
   # Judge every checkpoint from the same place: the reference start. The RSI window would
   # otherwise drop each rollout at a random frame and the clips would not be comparable.
-  env._env._force_reference_start_frame = 0
+  #
+  # ROLLOUT_START_FRAME overrides that for the case where comparability is NOT the point: a policy
+  # trained with RSI_ANCHOR_CF never sees frames 0..cf-20, so a frame-0 rollout scores it out of its
+  # own distribution. Set "rsi" to let the trained window pick the start, or an integer to pin one.
+  _rsf = os.environ.get("ROLLOUT_START_FRAME", "").strip().lower()
+  if _rsf in ("rsi", "trained"):
+    print("[rollout] start frame left to the trained RSI window", flush=True)
+  else:
+    env._env._force_reference_start_frame = int(_rsf) if _rsf else 0
   env.reset()
   _obs = env.get_observations()
   print(f"[rollout] {A.rollout_steps} deterministic steps from reference frame 0")
