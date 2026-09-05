@@ -869,6 +869,27 @@ class NewtonVecEnv:
       print(f"[newton-env] HAND_SOLIMP -> {_vals} on {len(_gs)} hand geom(s), "
             f"mjw shape {_push('geom_solimp', _mm.geom_solimp)}", flush=True)
 
+    # Which side's contact parameters win. MuJoCo blends solref/solimp between two geoms only
+    # while their priorities are EQUAL; the higher-priority geom's values are used outright when
+    # they differ. That matters here because --object-solref already stiffens the object to 0.004
+    # (2*timestep, the stability floor) while the hand sits at MuJoCo's default 0.02: blended, the
+    # pair runs at 0.012, and penetration goes as timeconst^2, so the contact that actually holds
+    # the object is 9x softer than the one that was tuned.
+    _opr = os.environ.get("OBJECT_PRIORITY", "").strip()
+    if _opr:
+      import mujoco as _mjp
+      _mm = self.solver.mj_model
+      _n = 0
+      for _g in range(_mm.ngeom):
+        if "apple" not in (_mjp.mj_id2name(_mm, _mjp.mjtObj.mjOBJ_GEOM, _g) or ""):
+          continue
+        _mm.geom_priority[_g] = int(_opr); _n += 1
+      if _n == 0:
+        raise RuntimeError("OBJECT_PRIORITY matched no object geom")
+      print(f"[newton-env] OBJECT_PRIORITY -> {int(_opr)} on {_n} geom(s); its solref/solimp now "
+            f"win outright instead of being blended with the hand's, "
+            f"mjw shape {_push('geom_priority', _mm.geom_priority)}", flush=True)
+
     # A standoff, NOT a stiffness: the constraint switches on this far before the surfaces meet.
     # It inflates the object, so it is a diagnostic bound and not a candidate fix -- 3 mm makes a
     # 15.6 mm hammer handle 38% thicker.
