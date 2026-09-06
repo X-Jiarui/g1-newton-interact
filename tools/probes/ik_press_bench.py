@@ -435,14 +435,23 @@ class Rig:
             float(keep[int(np.argmin(d))]["solref"][0]))
 
   # ---------------------------------------------------------------- setup
-  def calibrate(self, settle=250, approach="envelop"):
-    """Two poses, both derived from the scene rather than guessed, both identical in every
-    condition: where the CLOSED fingertips converge (the press target), and the OPEN hand the press
-    starts from. The cube starts at the target with the hand open, so it is never initialised inside
-    the hand -- doing that ejected it at ~0.5 m/s and left every condition with zero contacts."""
+  def calibrate(self, settle=400, approach="envelop"):
+    """Two poses, both derived from the scene and identical in every condition.
+
+    Order matters. The OPEN pose is settled first and becomes the press start; the CLOSED pose is
+    then settled FROM that same state. Doing it the other way round measured the convergence point
+    from one arm pose and pressed from another: the arm sags under gravity between phases and the
+    two targets were 11 cm apart, so the cube was never where the fingers went.
+    """
     m = self.m
     hi = np.array([m.actuator_ctrlrange[a, 1] for a in self.finger_acts])
     lo = np.array([m.actuator_ctrlrange[a, 0] for a in self.finger_acts])
+
+    self.restore()
+    self.set_fingers(lo)
+    self.run(settle, 0, park_object=True)
+    self.open_cmd = self.target_from_qpos(extra=lo)[self.finger_acts]
+    self.snapshot()                       # the open, settled arm IS the press start
 
     self.restore()
     self.set_fingers(hi)
@@ -456,8 +465,7 @@ class Rig:
       self.target = xp[self.tip_bodies[1]].copy()
     elif approach == "knuckle":
       # A mid-phalanx: a long flat edge rather than a tip, and a different SDF neighbourhood.
-      kb = [b for b in range(self.m.nbody)
-            if "right_finger2_link3" in bname(self.m, b)]
+      kb = [b for b in range(self.m.nbody) if "right_finger2_link3" in bname(self.m, b)]
       self.target = xp[kb[0]].copy() if kb else xp[self.tip_bodies[1]].copy()
     else:
       raise SystemExit(f"unknown --approach {approach!r}")
@@ -466,12 +474,7 @@ class Rig:
     self.closed_cmd = self.target_from_qpos(extra=hi)[self.finger_acts]
 
     self.restore()
-    self.set_fingers(lo)
-    self.run(settle, 0, park_object=True)
-    self.open_cmd = self.target_from_qpos(extra=lo)[self.finger_acts]
     self.open_clear, _ = self.depth_into_cube_mm(self.target)
-    # The open hand IS the press start: snapshot it so every condition begins identically.
-    self.snapshot()
     return self.target, self.closed_spread, self.open_clear
 
   def gravcomp_object(self, on=True):
@@ -506,7 +509,7 @@ class Rig:
                      pin=(bool(A.pin_object) and not park))
     if park:
       d, who = self.depth_into_cube_mm(self.target)
-      return dict(commanded_mm=d, drift_mm=drift, deepest_geom=who)
+      return dict(commanded_mm=d, cmd_drift_mm=drift, deepest_geom=who)
     ov, n, f, tc = self.overlap_mm()
     geo, _ = self.depth_into_cube_mm(sq(self.d.geom_xpos)[self.obj_geoms[0]])
     moved = 1000.0 * float(np.linalg.norm(
