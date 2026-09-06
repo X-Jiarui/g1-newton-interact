@@ -687,6 +687,11 @@ if os.environ.get("CONTACT_CENSUS"):
       # Did anything actually integrate? Two settle designs in a row reported penetrations
       # identical to three decimals with the fingertip not moving a micron, which is the
       # signature of a settle that never ran -- not of a physical result.
+      _qv = _qvel_t[0].detach().cpu().numpy()
+      _od = int(_m.jnt_dofadr[_oj0])
+      print("[census]   object: mass %.4f kg  free dofs at %d  qvel after settle %s  neq %d" % (
+          float(_m.body_mass[_oid0]), _od, _cnp.round(_qv[_od:_od + 6], 5).tolist(), int(_m.neq)),
+          flush=True)
       _dq = (_qpos_t[0] - _q0).abs()
       _fq = _ct.tensor(_hand_q, device=_dq.device, dtype=_ct.long)
       _oa0 = int(_m.jnt_qposadr[_oj0])
