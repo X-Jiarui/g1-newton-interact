@@ -356,6 +356,43 @@ class Rig:
         best, bestg = k, g
     return 1000.0 * best, bestg
 
+  def dump_geometry(self):
+    """Where everything actually is. A press that reports no contact is either a physics result or
+    a placement bug, and only the numbers separate the two."""
+    m = self.m
+    xp = self.xpos().cpu().numpy()
+    while xp.ndim > 2:
+      xp = xp[0]
+    gx = wp.to_torch(self.d.geom_xpos).cpu().numpy()
+    while gx.ndim > 2:
+      gx = gx[0]
+    op = gx[self.obj_geoms[0]]
+    h = self._obj_mesh_extent()
+    print(f"\n  object geom at {np.round(op,4)} m, qpos says "
+          f"{np.round(self.qpos().cpu().numpy().reshape(-1)[self.obj_qadr:self.obj_qadr+3],4)}")
+    for b in self.tip_bodies:
+      d = xp[b] - op
+      surf = float(np.max(np.abs(d) - h))    # >0 outside the box, <0 inside it
+      print(f"    {bname(m,b)[-24:]:24s} at {np.round(xp[b],4)}  "
+            f"tip-to-surface {1000*surf:+8.2f} mm")
+    # Which shapes did Newton's narrow phase actually report on?
+    ct = self.env.contacts
+    if ct is not None:
+      n = int(wp.to_torch(ct.rigid_contact_count).cpu().numpy().reshape(-1)[0])
+      s0 = wp.to_torch(ct.rigid_contact_shape0).cpu().numpy()[:n]
+      s1 = wp.to_torch(ct.rigid_contact_shape1).cpu().numpy()[:n]
+      shapes = sorted(set(s0.tolist()) | set(s1.tolist()))
+      print(f"  Newton CollisionPipeline: {n} contacts over shapes {shapes[:24]}")
+      obj_shapes = [i for i in range(self.env.nmodel.shape_count)
+                    if "apple" in str(self.env.nmodel.shape_key[i])]
+      print(f"  object shape id(s) {obj_shapes} present in Newton contacts: "
+            f"{[i for i in obj_shapes if i in shapes]}")
+      pairs = getattr(self.env.collision_pipeline, "shape_pairs_filtered", None)
+      if pairs is not None:
+        P = wp.to_torch(pairs).cpu().numpy()
+        hit = [p.tolist() for p in P if p[0] in obj_shapes or p[1] in obj_shapes]
+        print(f"  broad-phase pair table: {len(P)} pairs, {len(hit)} involve the object")
+
   # ---- the command -------------------------------------------------------------------
   def snapshot(self):
     self._q0 = self.qpos().clone()
@@ -709,6 +746,7 @@ def main():
     g, gg = rig.geometric_overlap_mm()
     print(f"\n  geometric overlap (no physics at all): {g:.3f} mm"
           + (f" on {gname(rig.m, gg)[-40:]}" if gg is not None else ""))
+    rig.dump_geometry()
     return
 
   if A.mode == "pose":
