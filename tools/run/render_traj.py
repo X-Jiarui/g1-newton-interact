@@ -25,6 +25,15 @@ ap.add_argument("--width", type=int, default=640)
 ap.add_argument("--height", type=int, default=480)
 ap.add_argument("--fps", type=int, default=50)
 ap.add_argument("--stride", type=int, default=1)
+ap.add_argument("--cam-lookat", default=None,
+                help="x,y,z the camera points at. Default frames the whole humanoid, which tells "
+                     "the viewer nothing about a 2 mm overlap.")
+ap.add_argument("--cam-distance", type=float, default=None)
+ap.add_argument("--cam-azimuth", type=float, default=None)
+ap.add_argument("--cam-elevation", type=float, default=None)
+ap.add_argument("--cam-track", default=None,
+                help="body name to keep centred, e.g. 'apple' -- the camera follows it frame by "
+                     "frame, which is the only way a close shot stays on the contact")
 ap.add_argument("--object-mesh", default=None,
                 help="draw the object as this STL instead of the scene's placeholder sphere; the mesh is what the physics actually collided against")
 A = ap.parse_args()
@@ -67,6 +76,23 @@ cam.lookat[:] = [0.80, -0.10, 0.85]
 cam.distance = 1.9
 cam.elevation = -14.0
 cam.azimuth = 118.0
+if A.cam_lookat:
+  cam.lookat[:] = [float(x) for x in A.cam_lookat.split(",")]
+if A.cam_distance is not None:
+  cam.distance = A.cam_distance
+if A.cam_azimuth is not None:
+  cam.azimuth = A.cam_azimuth
+if A.cam_elevation is not None:
+  cam.elevation = A.cam_elevation
+
+_track = -1
+if A.cam_track:
+  _hits = [b for b in range(m.nbody)
+           if A.cam_track in (mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_BODY, b) or "")]
+  if not _hits:
+    raise SystemExit(f"--cam-track {A.cam_track!r} matched no body")
+  _track = _hits[0]
+  print(f"tracking body {mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_BODY, _track)}")
 
 def load(p):
   z = np.load(p, allow_pickle=True)
@@ -123,6 +149,8 @@ def frames(qpos, mocap):
           d.mocap_quat[dst] = mquat[i][src]
     d.qvel[:] = 0
     mujoco.mj_forward(m, d)
+    if _track >= 0:
+      cam.lookat[:] = d.xpos[_track]
     renderer.update_scene(d, camera=cam)
     out.append(renderer.render().copy())
   return out
