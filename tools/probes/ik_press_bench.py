@@ -690,7 +690,7 @@ class Rig:
     ov, n, f, tc = self.overlap_mm()
     moved = 1000.0 * float(np.linalg.norm(sq(self.qpos())[self.obj_qadr:self.obj_qadr + 3] - obj0))
     return dict(fall_v=v0, clear_dz_mm=1000*self._clear_dz, start_overlap_mm=gap0, worst_mm=worst, settled_mm=settled,
-                worst_contact_mm=wcon, ncon_max=nmax, ncon=n, force_N=f, vmax=vmax,
+                contact_frac=nsustain / max(steps, 1), worst_contact_mm=wcon, ncon_max=nmax, ncon=n, force_N=f, vmax=vmax,
                 object_moved_mm=moved, finite=bool(np.isfinite(sq(self.qpos())).all()))
 
 
