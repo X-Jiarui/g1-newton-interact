@@ -121,6 +121,12 @@ ap.add_argument("--depths", default="0.003,0.010,0.030",
                      "impossible on purpose; correct physics stops responding to commanding deeper.")
 ap.add_argument("--approach-s", type=float, default=1.0, help="seconds of straight-line travel")
 ap.add_argument("--hold-s", type=float, default=1.0, help="seconds held at the impossible target")
+ap.add_argument("--min-contact-steps", type=int, default=50,
+                help="a row that never made contact is INVALID, not a pass. Zero contacts scores a "
+                     "perfect penetration number, which is exactly what a rig that misses the "
+                     "target reports.")
+ap.add_argument("--min-contact-force", type=float, default=0.5,
+                help="newtons the contact must actually carry for the row to count")
 ap.add_argument("--noise-floor", type=float, default=0.10,
                 help="mm. Acceptance is max geometric overlap over the WHOLE trajectory, not the "
                      "settled value.")
@@ -248,6 +254,15 @@ class Rig:
     if not self.obj_geoms or not self.tip_geoms:
       raise RuntimeError("mjlab flattens BODY names into one path string; key on GEOM names")
     self.tip_bodies = sorted({int(m.geom_bodyid[g]) for g in self.tip_geoms})
+    # `"finger" in body_name` matches left_finger* as well, so hand_geoms spans BOTH hands. That is
+    # right for the training penetration metric and fatal for the press rig: the clearance and
+    # travel searches were being satisfied by the LEFT hand while the block sailed past the right
+    # one, which is how a row could report travel 95.5 mm, zero contacts and "WORST 0.000  PASS".
+    self.press_geoms = [g for g in self.hand_geoms
+                        if "right_finger" in bname(m, int(m.geom_bodyid[g]))
+                        or "right_palm" in bname(m, int(m.geom_bodyid[g]))]
+    if not self.press_geoms:
+      raise RuntimeError("no right-hand collider matched for the press rig")
 
     # Trap 7: mjlab's compiled actuators are unnamed. Identify them through the joint they drive.
     self.jnt_of_act = [int(m.actuator_trnid[a, 0]) for a in range(m.nu)]
@@ -299,7 +314,16 @@ class Rig:
       return 0.5 * (V.max(0) - V.min(0))
     return np.asarray(m.geom_size[g][:3])
 
-  def hull_verts(self):
+  def hull_verts(self, geoms=None):
+    if geoms is not None:
+      m, out = self.m, []
+      for g in geoms:
+        if int(m.geom_type[g]) != 7 or int(m.geom_dataid[g]) < 0:
+          continue
+        did = int(m.geom_dataid[g])
+        va, vn = int(m.mesh_vertadr[did]), int(m.mesh_vertnum[did])
+        out.append((g, m.mesh_vert[va:va + vn].reshape(-1, 3).astype(np.float64)))
+      return out
     if self._hv is None:
       m, out = self.m, []
       for g in self.hand_geoms:
@@ -311,11 +335,11 @@ class Rig:
       self._hv = out
     return self._hv
 
-  def hand_world_verts(self):
+  def hand_world_verts(self, geoms=None):
     gx, gm = sq(self.d.geom_xpos), sq(self.d.geom_xmat)
-    return {g: hv @ gm[g].reshape(3, 3).T + gx[g] for g, hv in self.hull_verts()}
+    return {g: hv @ gm[g].reshape(3, 3).T + gx[g] for g, hv in self.hull_verts(geoms)}
 
-  def depth_into_cube_mm(self, centre):
+  def depth_into_cube_mm(self, centre, geoms=None):
     """How far the hand's collider surface lies inside a cube at `centre`, with NO physics at all.
 
     The cube is axis-aligned (the bench sets its quaternion to identity) and convex, so testing a
@@ -324,7 +348,7 @@ class Rig:
     interpenetration it looks like.
     """
     best, who = 0.0, None
-    for g, P in self.hand_world_verts().items():
+    for g, P in self.hand_world_verts(geoms).items():
       d = self.h[None, :] - np.abs(P - np.asarray(centre)[None, :])
       k = float(d.min(axis=1).max()) if d.size else -1.0
       if k > best:
@@ -443,6 +467,10 @@ class Rig:
       # Computed geometrically, per frame, with no solver in it -- so the number burnt into the
       # video and the number in the table cannot drift apart.
       extra["overlap_mm"] = np.asarray(ser, dtype=np.float64)
+      for k, v in (("ncon", getattr(self, "_nseries", None)),
+                   ("contact_force_N", getattr(self, "_fseries", None))):
+        if v is not None and len(v) == len(ser):
+          extra[k] = np.asarray(v, dtype=np.float64)
     np.savez_compressed(path, qpos=np.stack(self._rec[0]),
                         mocap_pos=np.stack([a for a, _ in self._rec[1]]),
                         mocap_quat=np.stack([b for _, b in self._rec[1]]),
@@ -721,7 +749,7 @@ class Rig:
     p0 = xp[tip].copy()
     u = p0 - xp[palm]
     u = u / max(np.linalg.norm(u), 1e-9)
-    V = np.concatenate(list(self.hand_world_verts().values()), axis=0)
+    V = np.concatenate(list(self.hand_world_verts(self.press_geoms).values()), axis=0)
 
     def depth_at(c):
       dd = self.h[None, :] - np.abs(V - np.asarray(c)[None, :])
@@ -740,6 +768,12 @@ class Rig:
       raise RuntimeError(f"no travel reaches {1000*depth:.1f} mm of depth; best "
                          f"{1000*max(depth_at(centre0 - u * t) for t in grid):.2f} mm")
     self._centre0, self._axis, self._travel = centre0, u, float(travel[0])
+    # The plan must be able to touch. A path that misses the hand scores a perfect penetration
+    # number, which is how "travel 95.5 mm, ncon 0, WORST 0.000, PASS" happened.
+    peak = max(depth_at(centre0 - u * t) for t in grid if t <= self._travel)
+    if peak < depth * 0.9:
+      raise RuntimeError(f"planned path never reaches the hand (peak {1000*peak:.2f} mm); "
+                         f"this is a planning bug, not a result")
     return dict(start_clear_mm=-1000.0 * depth_at(centre0), travel_mm=1000.0 * self._travel,
                 commanded_mm=1000.0 * depth_at(centre0 - u * self._travel))
 
@@ -759,11 +793,12 @@ class Rig:
     self._cmd = self.target_from_qpos()
     n = int(approach_steps) + int(hold_steps)
     self.pin_object(at=self._centre0)
-    step0 = self.depth_into_cube_mm(self._centre0)[0]
+    step0 = self.depth_into_cube_mm(self._centre0, self.press_geoms)[0]
     if step0 > 0.0:
       raise RuntimeError(f"step 0 is {step0:.3f} mm INSIDE the block; a run that starts illegal "
                          f"cannot demonstrate a wall. Increase --standoff.")
     worst, series, forces = 0.0, [], []
+    nser, fser, contact_steps, fmax = [], [], 0, 0.0
     for i in range(n):
       frac = min(1.0, (i + 1) / max(int(approach_steps), 1))
       c = self._centre0 - self._axis * (frac * self._travel)
@@ -773,19 +808,26 @@ class Rig:
       self.cmd()[0, :] = torch.tensor(self._cmd, dtype=self.cmd().dtype, device=self.cmd().device)
       self.env._physics_step()
       self.env.state_in, self.env.state_out = self.env.state_out, self.env.state_in
-      d = self.depth_into_cube_mm(c)[0]
+      d = self.depth_into_cube_mm(c, self.press_geoms)[0]
       worst = max(worst, d)
       _ov, _n, f, _tc = self.overlap_mm()
-      forces.append(f if np.isfinite(f) else 0.0)
+      f = f if np.isfinite(f) else 0.0
+      forces.append(f)
+      if _n > 0:
+        contact_steps += 1
+        fmax = max(fmax, f)
       if self._rec is not None and i % max(1, self.env.decimation) == 0:
         self._rec[0].append(sq(self.qpos()).copy())
         self._rec[1].append((sq(self.d.mocap_pos).copy(), sq(self.d.mocap_quat).copy()))
         series.append(d)
+        nser.append(_n)
+        fser.append(f)
     ov, nc, f, tc = self.overlap_mm()
-    self._series = series
+    self._series, self._nseries, self._fseries = series, nser, fser
     return dict(start_mm=step0, worst_mm=worst,
-                settled_mm=self.depth_into_cube_mm(c)[0], contact_mm=ov, ncon=nc,
-                force_N=float(np.max(forces)), pair_timeconst=tc,
+                settled_mm=self.depth_into_cube_mm(c, self.press_geoms)[0], contact_mm=ov, ncon=nc,
+                contact_steps=contact_steps, contact_frac=contact_steps / max(n, 1),
+                force_N=float(np.max(forces)), contact_force_N=fmax, pair_timeconst=tc,
                 finite=bool(np.isfinite(sq(self.qpos())).all()))
 
 
@@ -1185,10 +1227,9 @@ def main():
     rig.run(sub, 0, park_object=True)
     rig.snapshot(freeze_hold=True)
     print(f"  arm settled under its own servo before the block is placed")
-    print(f"\n{'setting':16s}{'depth mm':>9s}{'standoff':>10s}{'start':>8s}"
-          f"{'commanded':>11s}{'WORST':>9s}{'settled':>9s}{'contact':>9s}{'ncon':>6s}"
-          f"{'maxFn':>10s}{'tau':>8s}{'pass':>6s}")
-    print("-" * 111)
+    print(f"\n{'setting':14s}{'depth':>7s}{'stand':>7s}{'start':>7s}{'cmd':>8s}"
+          f"{'WORST':>8s}{'settled':>9s}{'con-steps':>10s}{'Fmax':>10s}{'tau':>8s}{'verdict':>9s}")
+    print("-" * 108)
     rows = []
     for name in [x.strip() for x in A.settings.split(A.sep) if x.strip()]:
       reset_settings(rig)
@@ -1200,15 +1241,24 @@ def main():
               f"{info['start_clear_mm']:.1f} mm standoff", flush=True)
         rig.start_recording(bool(A.dump) and A.dump_of in f"{name}|{depth}")
         r = rig.run_approach(sub, hold)
-        ok = r["worst_mm"] <= A.noise_floor and r["finite"]
+        # Both halves. A run must start clear AND actually have pressed on something; only then
+        # does a small overlap mean the wall held.
+        touched = (r["contact_steps"] >= A.min_contact_steps
+                   and r["contact_force_N"] >= A.min_contact_force)
+        if not touched:
+          verdict = "INVALID"
+        elif r["worst_mm"] <= A.noise_floor and r["finite"]:
+          verdict = "PASS"
+        else:
+          verdict = "fail"
         rows.append(dict(setting=name, depth_mm=1000*depth,
                          standoff_mm=info["start_clear_mm"],
-                         commanded_mm=info["commanded_mm"], passes=ok, **r))
-        print(f"{name[:16]:16s}{1000*depth:9.1f}{info['start_clear_mm']:10.2f}"
-              f"{r['start_mm']:8.3f}{info['commanded_mm']:11.3f}{r['worst_mm']:9.3f}"
-              f"{r['settled_mm']:9.3f}{r['contact_mm']:9.3f}{r['ncon']:6d}"
-              f"{r['force_N']:10.2f}{r['pair_timeconst']:8.4f}"
-              f"{('YES' if ok else 'no'):>6s}", flush=True)
+                         commanded_mm=info["commanded_mm"], verdict=verdict, **r))
+        print(f"{name[:14]:14s}{1000*depth:7.1f}{info['start_clear_mm']:7.1f}"
+              f"{r['start_mm']:7.3f}{info['commanded_mm']:8.3f}{r['worst_mm']:8.3f}"
+              f"{r['settled_mm']:9.3f}{r['contact_steps']:10d}"
+              f"{r['contact_force_N']:10.2f}{r['pair_timeconst']:8.4f}"
+              f"{verdict:>9s}", flush=True)
         if rig._rec:
           print(f"  recorded {rig.write_recording(A.dump)} frames to {A.dump}", flush=True)
           rig.start_recording(False)
