@@ -772,6 +772,25 @@ class NewtonVecEnv:
     # earlier sweep set only OBJECT_FRICTION and concluded "friction does not matter" from a sweep
     # that never changed friction; the solver's own contact.friction, printed by the probe below,
     # is what settles it.
+    # APPLE_HAND_EFFORT edits the actuator cfg, and the cfg's value does NOT reach the compiled
+    # model -- the entity spec is cached, so the run prints its new limit and simulates the old
+    # one. That silence cost a whole A/B whose independent variable never moved. Fail loudly
+    # instead, and point at the knob that is actually enforced.
+    _ahe = os.environ.get("APPLE_HAND_EFFORT", "").strip()
+    if _ahe and not os.environ.get("FINGER_FORCE_LIMIT", "").strip():
+      import mujoco as _mjae
+      _mae = self.solver.mj_model
+      _got = {round(float(_mae.actuator_forcerange[_a][1]), 4) for _a in range(_mae.nu)
+              if "finger" in (_mjae.mj_id2name(_mae, _mjae.mjtObj.mjOBJ_JOINT,
+                                               int(_mae.actuator_trnid[_a][0])) or "")
+              and float(_mae.actuator_gainprm[_a][0]) >= 10.0}
+      if _got and abs(min(_got) - float(_ahe)) > 1e-6:
+        raise RuntimeError(
+          f"APPLE_HAND_EFFORT={_ahe} did not reach the compiled model (finger actuators hold "
+          f"{sorted(_got)} N*m). The entity spec is cached, so the cfg value is printed but never "
+          f"simulated. Use FINGER_FORCE_LIMIT={_ahe} instead, which writes mj_model and mjw_model "
+          f"directly.")
+
     _ffl = os.environ.get("FINGER_FORCE_LIMIT", "").strip()
     if _ffl:
       import mujoco as _mjf2
