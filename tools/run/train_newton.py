@@ -629,6 +629,19 @@ if os.environ.get("CONTACT_CENSUS"):
     import mujoco_warp as _mjw
     _mjw.kinematics(_m_w, _d)
     _mjw.collision(_m_w, _d)
+    # Detection is only half the question. A contact the narrow phase reports but the solver never
+    # turns into force explains a penetration that no stiffness setting can budge, so run the full
+    # pipeline as well and read what force each object contact actually carries.
+    _cf = {}
+    try:
+      _mjw.forward(_m_w, _d)
+      _ef = _cwp.to_torch(_d.efc.force).detach().cpu().numpy().reshape(-1)
+      _ea = _cwp.to_torch(_d.contact.efc_address).detach().cpu().numpy()
+      _cf = {"efc": (_ef, _ea)}
+    except Exception as _e:
+      print("[census] could not read constraint force: %r" % (_e,), flush=True)
+      print("[census]   d attrs: %s" % [_a for _a in dir(_d) if not _a.startswith("_")][:40],
+            flush=True)
 
     # Does the pose the collider sees match the pose that was written? mjlab's state lives in
     # Newton and mjw_data is a mirror it re-syncs, so a direct qpos write can be discarded before
@@ -712,6 +725,18 @@ if os.environ.get("CONTACT_CENSUS"):
     for _k, _v in sorted(_pairs.items(), key=lambda kv: kv[1][1]):
       print("         %-26s %3d contact(s)  deepest dist %8.3f mm" % (_k, _v[0], _v[1] * 1000.0),
             flush=True)
+    if _cf:
+      _ef, _ea = _cf["efc"]
+      print("         constraint force on each object contact:", flush=True)
+      for _i in _cnp.nonzero(_live)[0]:
+        _a, _b = int(_g[_i, 0]), int(_g[_i, 1])
+        if not (_isobj[_a] or _isobj[_b]):
+          continue
+        _adr = _ea[_i]
+        _adr = int(_adr.reshape(-1)[0]) if hasattr(_adr, "reshape") else int(_adr)
+        _fn = float(_ef[_adr]) if 0 <= _adr < len(_ef) else float("nan")
+        print("           %-30s dist %8.3f mm  efc_adr %6d  normal force %10.4f N" % (
+            _bname[_b] if _isobj[_a] else _bname[_a], _s[_i] * 1000.0, _adr, _fn), flush=True)
   raise SystemExit(0)
 
 if A.rollout_steps:
