@@ -633,27 +633,41 @@ if os.environ.get("CONTACT_CENSUS"):
     # changes the resting depth changed the physics, not the policy's behaviour.
     _settle = int(os.environ.get("CENSUS_SETTLE", "0"))
     if _settle:
+      # Identify actuators by the JOINT they drive. Matching on actuator names found nothing:
+      # mjlab's compiled model leaves them unnamed, so the filter silently swept zero of them and
+      # every effort level produced the same number.
+      def _jname(_a):
+        return (_cmj.mj_id2name(_m, _cmj.mjtObj.mjOBJ_JOINT, int(_m.actuator_trnid[_a, 0]))
+                or "").lower()
+      _hand_act = [_a for _a in range(_m.nu) if "finger" in _jname(_a)]
+      _hand_q = sorted({int(_m.jnt_qposadr[int(_m.actuator_trnid[_a, 0])]) for _a in _hand_act})
+      _free_q = _cnp.zeros(_m.nq, dtype=bool)
+      _free_q[_hand_q] = True
+      _oj0 = next(_j for _j in range(_m.njnt) if _m.jnt_type[_j] == _cmj.mjtJoint.mjJNT_FREE
+                  and "apple" in (_cmj.mj_id2name(_m, _cmj.mjtObj.mjOBJ_JOINT, _j) or ""))
+      _free_q[int(_m.jnt_qposadr[_oj0]):int(_m.jnt_qposadr[_oj0]) + 7] = True
+      _pin_q = _ct.tensor(_cnp.nonzero(~_free_q)[0], device=_qpos_t.device, dtype=_ct.long)
       _eff = os.environ.get("CENSUS_HAND_EFFORT", "").strip()
       if _eff:
         _fr = _cwp.to_torch(_m_w.actuator_forcerange)
-        _hand = [_a for _a in range(_m.nu)
-                 if "finger" in (_cmj.mj_id2name(_m, _cmj.mjtObj.mjOBJ_ACTUATOR, _a) or "")
-                 and "unused" not in (_cmj.mj_id2name(_m, _cmj.mjtObj.mjOBJ_ACTUATOR, _a) or "")]
-        _fr[..., _hand, 0] = -float(_eff)
-        _fr[..., _hand, 1] = float(_eff)
-        print(f"[census] hand effort_limit -> +-{float(_eff)} N*m on {len(_hand)} actuator(s)",
-              flush=True)
+        _fr[..., _hand_act, 0] = -float(_eff)
+        _fr[..., _hand_act, 1] = float(_eff)
+      print("[census] settle %d steps; %d hand actuator(s), %d hand qpos, effort %s N*m" % (
+          _settle, len(_hand_act), len(_hand_q), _eff or "unchanged"), flush=True)
       _ctrl_t = _cwp.to_torch(_d.ctrl)
       _adr = _cnp.array([int(_m.jnt_qposadr[int(_m.actuator_trnid[_a, 0])])
                          for _a in range(_m.nu)])
       _ctrl_t[0, :] = _ct.tensor(_qall[_f][_adr], dtype=_ctrl_t.dtype, device=_ctrl_t.device)
-      # Cancel the object's weight. At 0.36 kg gravity alone drops it 20 cm over this settle and
-      # the measurement becomes about falling, not about how far the finger presses in.
       _xf = _cwp.to_torch(_d.xfrc_applied)
       _oid0 = next(_i for _i in range(_m.nbody)
                    if "apple" in (_cmj.mj_id2name(_m, _cmj.mjtObj.mjOBJ_BODY, _i) or "")
                    and "robot" not in (_cmj.mj_id2name(_m, _cmj.mjtObj.mjOBJ_BODY, _i) or ""))
       for _k in range(_settle):
+        # Everything but the fingers and the object is held at the recorded pose. Letting the
+        # whole robot integrate freely for 0.6 s put it on the floor: 396 contacts, none of them
+        # on the object, which measures a fall rather than a grasp.
+        _qpos_t[0, _pin_q] = _frozen[_pin_q]
+        _qvel_t[0, :] = 0.0
         _xf[0, _oid0, 2] = float(_m.body_mass[_oid0]) * 9.81
         _mjw.step(_m_w, _d)
     else:
