@@ -70,6 +70,20 @@ m = _model_with_object_mesh(A.xml, A.object_mesh)
 d = mujoco.MjData(m)
 renderer = mujoco.Renderer(m, height=A.height, width=A.width)
 
+# Two defaults make a close-up render come back EMPTY, and both cost hours before being found.
+#
+#  * The near clipping plane is `stat.extent * map.znear`, and this scene's extent is 48 m (the
+#    floor), so the default 0.01 puts it **0.48 m in front of the camera**. Any camera closer than
+#    that to what it is looking at renders bare floor and nothing else.
+#  * The hand and the object live in geom groups the default MjvOption hides, so even a correctly
+#    aimed camera draws only the torso and legs.
+m.vis.map.znear = min(m.vis.map.znear, 0.0005)
+m.vis.map.zfar = max(m.vis.map.zfar, 20.0)
+vopt = mujoco.MjvOption()
+mujoco.mjv_defaultOption(vopt)
+for _g in range(len(vopt.geomgroup)):
+  vopt.geomgroup[_g] = 1
+
 cam = mujoco.MjvCamera()
 mujoco.mjv_defaultCamera(cam)
 cam.lookat[:] = [0.80, -0.10, 0.85]
