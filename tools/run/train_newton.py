@@ -511,11 +511,17 @@ if os.environ.get("PRESS_TEST"):
   _zero_act = _rt.zeros((env.num_envs, _nact), device="cuda:0")
 
   def _overlap_mm():
+    """Deepest hand-object overlap in mm, and how many such contacts exist.
+
+    Returned together on purpose: an overlap with zero contacts behind it is not a measurement,
+    and reading the two from separate expressions is how the first version reported 0 contacts
+    alongside non-zero overlaps.
+    """
     _c = _d.contact
     _g = _pwp.to_torch(_c.geom).detach().cpu().numpy()
     _w = _pwp.to_torch(_c.worldid).detach().cpu().numpy()
     _s = _pwp.to_torch(_c.dist).detach().cpu().numpy()
-    _best = 0.0
+    _best, _cnt = 0.0, 0
     for _i in range(_g.shape[0]):
       if int(_w[_i]) != 0:
         continue
@@ -524,7 +530,8 @@ if os.environ.get("PRESS_TEST"):
         continue
       if (_rob[_a] and _obg[_b]) or (_rob[_b] and _obg[_a]):
         _best = min(_best, float(_s[_i]))
-    return -_best * 1000.0
+        _cnt += 1
+    return -_best * 1000.0, _cnt
 
   print(f"[press] frame {_frame} of {len(_qall)}; forces {_forces} N; {_settle} settle steps each",
         flush=True)
@@ -557,9 +564,7 @@ if os.environ.get("PRESS_TEST"):
         # the floor rather than the grip.
         _xfrc[0, _objb, :3] = _ax * _F
         _xfrc[0, _objb, 2] += _objm * 9.81
-      _ov = _overlap_mm()
-      _nc = int(((_rob[_pwp.to_torch(_d.contact.geom).detach().cpu().numpy()[:, 0].clip(0)]
-                  & _obg[_pwp.to_torch(_d.contact.geom).detach().cpu().numpy()[:, 1].clip(0)])).sum())
+      _ov, _nc = _overlap_mm()
       print(f"[press] {_F:8.2f} N -> overlap {_ov:7.3f} mm  ({_nc} contacts)", flush=True)
       _fh.write(f"{_F},{_ov},{_nc}\n")
   print(f"[press] wrote {_out}", flush=True)
