@@ -119,7 +119,12 @@ def bname(m, b):
 
 def sq(a):
   """mjWarp lays model and data arrays out per world; at one world the leading axis is a singleton."""
-  v = wp.to_torch(a).cpu().numpy() if not isinstance(a, np.ndarray) else a
+  if isinstance(a, np.ndarray):
+    v = a
+  elif isinstance(a, torch.Tensor):
+    v = a.detach().cpu().numpy()
+  else:
+    v = wp.to_torch(a).detach().cpu().numpy()
   while v.ndim > 1 and v.shape[0] == 1:
     v = v[0]
   return v
