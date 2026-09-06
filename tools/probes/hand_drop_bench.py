@@ -50,6 +50,12 @@ ap.add_argument("--heights", default="0,0.002,0.01,0.05,0.2", help="metres above
 ap.add_argument("--dt", type=float, default=0.002)
 ap.add_argument("--steps", type=int, default=1500)
 ap.add_argument("--side", default="right")
+ap.add_argument("--parts", default="all", choices=("all", "palm"),
+                help="'all' freezes the whole hand in the trace pose -- but at frame 285 that pose "
+                     "is WRAPPED round the cube, and the finger cage is narrower than the 40 mm "
+                     "block, so some vertex is geometrically inside for ANY placement and no "
+                     "contact model could prevent it. 'palm' drops the palm collider alone, which "
+                     "presses a flat surface onto a face and is a valid wall test.")
 ap.add_argument("--margin", type=float, default=0.002,
                 help="metres of clear space between the hand and the object before the drop. The "
                      "hand must never START inside: a run that begins overlapped shows the solver "
@@ -90,7 +96,8 @@ def hand_parts(frame: int):
     mujoco.mj_forward(m, d)
     B, Gm = mujoco.mjtObj.mjOBJ_BODY, mujoco.mjtObj.mjOBJ_GEOM
 
-    want = (f"{A.side}_palm_link", f"{A.side}_finger")
+    want = ((f"{A.side}_palm_link",) if A.parts == "palm"
+            else (f"{A.side}_palm_link", f"{A.side}_finger"))
     ref = next(i for i in range(m.nbody)
                if (mujoco.mj_id2name(m, B, i) or "").endswith(f"{A.side}_palm_link"))
     R_ref = d.xmat[ref].reshape(3, 3)
