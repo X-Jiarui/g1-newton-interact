@@ -69,6 +69,12 @@ ap.add_argument("--object-offset", default="0,0,0",
 ap.add_argument("--out", default=None, help="write the table as csv here as well")
 A = ap.parse_args()
 
+# Read straight off R30_CUBE's own /proc/<pid>/environ, so the bench scene is the trained scene.
+# APPLE_HAND_KIND in particular is not optional: the default 'xhand' rejects this clip's 69 dof
+# columns outright, and a wrong hand kind would silently bench a different robot.
+os.environ.setdefault("APPLE_HAND_KIND", "wuji")
+os.environ.setdefault("APPLE_OBJECT_PER_WORLD", "1")
+os.environ.setdefault("APPLE_SCENE_Z_OFFSET", "-0.03")
 os.environ.setdefault("APPLE_EAT_PKL", A.reference_pkl)
 os.environ.setdefault("PEN_LOG", "0")
 sys.path.insert(0, os.path.join(ROOT, "src"))
