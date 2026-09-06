@@ -570,6 +570,78 @@ if os.environ.get("PRESS_TEST"):
   print(f"[press] wrote {_out}", flush=True)
   raise SystemExit(0)
 
+if os.environ.get("CONTACT_CENSUS"):
+  # Which of the two ways a 16 mm overlap can survive is actually happening?
+  #
+  #   (a) the contacts exist but are discarded because the world is over its nconmax budget, or
+  #   (b) the contacts are never generated at all, because a collider that lies wholly inside an
+  #       SDF has no surface for the narrow phase to find.
+  #
+  # These call for opposite fixes, and one census tells them apart. The whole recorded qpos is
+  # pinned -- robot AND object -- so the contacts reported belong to exactly the configuration
+  # tools/probes/overlap_geometry.py measured the geometry of, with nothing re-simulated.
+  import numpy as _cnp, torch as _ct, warp as _cwp, mujoco as _cmj
+  _m = env.solver.mj_model
+  _d = env.solver.mjw_data
+  _qall = _cnp.load(os.environ["CENSUS_QPOS"], allow_pickle=True)["qpos"]
+  _frames = [int(x) % len(_qall) for x in
+             os.environ.get("CENSUS_FRAMES", "200,285,300,350").split(",")]
+
+  _bname = [(_cmj.mj_id2name(_m, _cmj.mjtObj.mjOBJ_BODY, int(_m.geom_bodyid[g])) or "?")
+            .replace("robot/", "") for g in range(_m.ngeom)]
+  _isobj = [("apple" in _bname[g] and "robot" not in
+             (_cmj.mj_id2name(_m, _cmj.mjtObj.mjOBJ_BODY, int(_m.geom_bodyid[g])) or ""))
+            for g in range(_m.ngeom)]
+
+  _qpos_t = _cwp.to_torch(_d.qpos)
+  _qvel_t = _cwp.to_torch(_d.qvel)
+  _cg = _cwp.to_torch(_d.contact.geom)
+  _cw = _cwp.to_torch(_d.contact.worldid)
+  _cd = _cwp.to_torch(_d.contact.dist)
+  _cap = int(_cg.shape[0])
+  _nact = int(getattr(getattr(env, "_env", env).action_manager, "total_action_dim", 0)) or \
+      int(_cwp.to_torch(_d.ctrl).shape[-1])
+  _zero = _ct.zeros((env.num_envs, _nact), device="cuda:0")
+  _percap = _cap // max(1, env.num_envs)
+  print(f"[census] contact array capacity {_cap} across {env.num_envs} world(s) "
+        f"= {_percap}/world; num_envs={env.num_envs}", flush=True)
+
+  for _f in _frames:
+    _frozen = _ct.tensor(_qall[_f], dtype=_qpos_t.dtype, device=_qpos_t.device)
+    for _ in range(3):
+      _qpos_t[0, :] = _frozen
+      _qvel_t[0, :] = 0.0
+      with _ct.inference_mode():
+        env.step(_zero)
+    _qpos_t[0, :] = _frozen
+    _qvel_t[0, :] = 0.0
+
+    _g = _cg.detach().cpu().numpy()
+    _w = _cw.detach().cpu().numpy()
+    _s = _cd.detach().cpu().numpy()
+    _live = (_g[:, 0] >= 0) & (_g[:, 1] >= 0) & (_w == 0)
+    _tot = int(_live.sum())
+    _pairs = {}
+    for _i in _cnp.nonzero(_live)[0]:
+      _a, _b = int(_g[_i, 0]), int(_g[_i, 1])
+      if not (_isobj[_a] or _isobj[_b]):
+        continue
+      _hand = _bname[_b] if _isobj[_a] else _bname[_a]
+      _p = _pairs.setdefault(_hand, [0, 0.0])
+      _p[0] += 1
+      _p[1] = min(_p[1], float(_s[_i]))
+    _nobj = sum(v[0] for v in _pairs.values())
+    _flag = "  <-- AT CAPACITY" if _tot >= _percap else ""
+    print(f"\n[census] frame {_f}: {_tot} contact(s) in world 0 of {_percap} slots{_flag}; "
+          f"{_nobj} of them touch the object", flush=True)
+    if not _pairs:
+      print("         NO contact against the object at all -- the narrow phase found none.",
+            flush=True)
+    for _k, _v in sorted(_pairs.items(), key=lambda kv: kv[1][1]):
+      print("         %-26s %3d contact(s)  deepest dist %8.3f mm" % (_k, _v[0], _v[1] * 1000.0),
+            flush=True)
+  raise SystemExit(0)
+
 if A.rollout_steps:
   # Deterministic inference, not the stochastic rollout `learn` would collect: the point is to see
   # what the policy does, not what it explores.
