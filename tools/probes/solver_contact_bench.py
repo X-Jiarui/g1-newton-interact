@@ -28,7 +28,8 @@ import warp as wp
 
 import newton
 from newton import ModelBuilder
-from newton.geometry import ShapeConfig
+
+ShapeConfig = ModelBuilder.ShapeConfig
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--dt", type=float, default=0.002, help="the training timestep")
@@ -44,7 +45,7 @@ MASSES = [float(x) for x in A.masses.split(",")]
 
 def build(mass: float):
     """One cube on one anvil. Identical for every solver -- that is the point of the test."""
-    b = ModelBuilder(up_axis=newton.Axis.Z, gravity=-9.81)
+    b = ModelBuilder(up_axis=newton.Axis.Z, gravity=wp.vec3(0.0, 0.0, -9.81))
     # SolverMuJoCo stores solref/solimp as custom attributes; they have to be registered on the
     # builder before finalize or the solver has nowhere to read them from.
     newton.solvers.SolverMuJoCo.register_custom_attributes(b)
@@ -52,9 +53,10 @@ def build(mass: float):
     b.add_shape_box(-1, xform=wp.transform(wp.vec3(0.0, 0.0, ANVIL_TOP - 0.05), wp.quat_identity()),
                     hx=0.25, hy=0.25, hz=0.05, cfg=ShapeConfig(mu=1.0))
     # Start exactly touching. Dropping it from a height would measure the impact, not the wall.
+    # add_body already attaches a free joint; adding one explicitly builds a second, parallel
+    # joint between the same pair and Newton warns that the model is inconsistent.
     body = b.add_body(xform=wp.transform(wp.vec3(0.0, 0.0, ANVIL_TOP + A.half),
                                          wp.quat_identity()), label="cube")
-    b.add_joint_free(body)
     b.add_shape_box(body, hx=A.half, hy=A.half, hz=A.half, cfg=cfg)
     return b.finalize(device=A.device), body
 
@@ -127,8 +129,10 @@ ROWS = [
 def main():
     print(f"cube {2000*A.half:.0f} mm, anvil static, dt {1000*A.dt:.1f} ms, {A.steps} steps, "
           f"gravity only; load swept by mass")
-    print(f"masses {MASSES} kg -> loads "
-          f"{[round(m * 9.81, 1) for m in MASSES]} N\n")
+    _m0, _ = build(MASSES[0])
+    print(f"requested masses {MASSES} kg; the builder derives mass from shape density, "
+          f"first row lands at {float(wp.to_torch(_m0.body_mass)[0]):.3f} kg")
+    print(f"loads {[round(m * 9.81, 1) for m in MASSES]} N\n")
     hdr = "".join("%11s" % ("%.1fN" % (m * 9.81)) for m in MASSES)
     print("%-32s%s%13s" % ("solver / setting", hdr, "mm per N"))
     print("-" * (32 + 11 * len(MASSES) + 13))
