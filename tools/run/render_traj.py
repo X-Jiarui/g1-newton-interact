@@ -165,7 +165,7 @@ def frames(qpos, mocap):
     mujoco.mj_forward(m, d)
     if _track >= 0:
       cam.lookat[:] = d.xpos[_track]
-    renderer.update_scene(d, camera=cam)
+    renderer.update_scene(d, camera=cam, scene_option=vopt)
     out.append(renderer.render().copy())
   return out
 
