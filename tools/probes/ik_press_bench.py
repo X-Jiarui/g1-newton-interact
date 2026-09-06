@@ -945,7 +945,11 @@ def main():
       for v in sweep:
         for note in apply_setting(rig, f"ffl={v}"):
           pass
+        rig.start_recording(bool(A.dump) and A.dump_of in f"{name}|{v}")
         s = rig.press(A.force_closure)
+        if rig._rec:
+          print(f"  recorded {rig.write_recording(A.dump)} frames to {A.dump}", flush=True)
+          rig.start_recording(False)
         rows.append(dict(setting=name, cap=v, **s))
         if np.isfinite(s["settled_mm"]) and np.isfinite(s["force_N"]) and s["force_N"] > 0:
           xs.append(s["force_N"])
