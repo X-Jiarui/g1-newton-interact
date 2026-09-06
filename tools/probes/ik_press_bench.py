@@ -766,6 +766,10 @@ def apply_setting(rig, name):
                  f"{np.atleast_1d(readback(sv,'actuator_biasprm',w[0]))[:3]} forcerange "
                  f"{readback(sv,'actuator_forcerange',w[0])}; budget {before:.3f} -> "
                  f"{float(np.abs(m.actuator_forcerange[w,1]).sum()):.3f} N*m")
+  elif name.startswith("stack"):
+    # Every lever at once. dt is set before the model is built (--sim-timestep), so it is not here.
+    for sub in ("neutral", "ffl=0.62", "priority=1", "objsolref=0.002,1.0"):
+      notes += apply_setting(rig, sub)
   elif name.startswith("fixed"):
     # All three faces of the one defect, applied together.
     lim = float(name.split("=", 1)[1]) if "=" in name else 0.62
@@ -897,7 +901,8 @@ def main():
   rig.snapshot()
   rig._pristine = {f: getattr(rig.m, f).copy()
                    for f in ("geom_solref", "geom_solimp", "geom_priority",
-                             "actuator_forcerange", "actuator_forcelimited")}
+                             "actuator_forcerange", "actuator_forcelimited",
+                             "actuator_gainprm", "actuator_biasprm")}
   rig._pristine_impratio = float(rig.m.opt.impratio)
 
   if A.mode == "facts":
@@ -976,6 +981,8 @@ def main():
       reset_settings(rig)
       for note in apply_setting(rig, name):
         print(f"  [readback] {note}")
+      rig.restore()
+      rig.calibrate(approach=ap_name)
       for v in sweep:
         c = rig.press(v, park=True)
         rig.start_recording(bool(A.dump) and A.dump_of in f"{ap_name}|{name}|{v}")
@@ -1001,6 +1008,12 @@ def main():
       for v in sweep:
         for note in apply_setting(rig, f"ffl={v}"):
           pass
+        # Re-derive the open pose, the closed pose and the press target under THIS condition. With
+        # a 0.62 N*m cap the pose the fingers can actually reach is not the pose 30 N*m reaches, so
+        # a target calibrated once under baseline sends the fingers somewhere the cube is not --
+        # measured, every row past the first two read zero contacts for exactly that reason.
+        rig.restore()
+        rig.calibrate(approach=approaches[0])
         rig.start_recording(bool(A.dump) and A.dump_of in f"{name}|{v}")
         s = rig.press(A.force_closure)
         if rig._rec:
