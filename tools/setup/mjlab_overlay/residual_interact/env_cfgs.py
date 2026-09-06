@@ -923,6 +923,31 @@ def install_astra_body_pd(env) -> None:
     model.actuator_forcerange[ids, 1] = effort
 
 
+# Hand servo authority. The defaults are the historical values and are DELIBERATELY not the
+# physical ones, so a resumed run keeps the plant it was trained against; the override is how the
+# A/B gets run.
+#
+# Why this is a knob at all: the fingertip sits 20.9 mm inside a 40 mm cube in a trained rollout,
+# and every contact-side explanation was measured and excluded -- both narrow phases agree on the
+# depth, gap and margin are zero, the contact budget is a fifth used, the masks are open, and the
+# three object contacts carry 130, 193 and 332 N. The contact is doing its job. Holding that 654 N
+# at the fingertip's ~20 mm moment arm costs ~13 N*m, which fits inside a 30 N*m budget, so the
+# finger simply out-pushes it. The scene's own Wuji actuators -- which mjlab renames
+# `xml_motor_unused_*` and replaces with this cfg -- ask for kp 0.2-0.7 and 0.147-0.619 N*m, i.e.
+# 400-1500x less stiffness and 50-200x less torque. A finger held to 0.62 N*m could sustain ~31 N,
+# which on the measured 16 N/mm force-depth slope is ~2 mm of penetration rather than 21 mm.
+#
+# That last figure is arithmetic, not a measurement: the frozen-pose harness settles through
+# Newton's mirror data rather than its integration path, so the sweep has to happen in training.
+_HAND_KP = float(os.environ.get("APPLE_HAND_KP", "300.0"))
+_HAND_KD = float(os.environ.get("APPLE_HAND_KD", "8.0"))
+_HAND_EFFORT = float(os.environ.get("APPLE_HAND_EFFORT", "30.0"))
+if (_HAND_KP, _HAND_KD, _HAND_EFFORT) != (300.0, 8.0, 30.0):
+  print(f"[env-cfg] hand actuators -> kp {_HAND_KP} kd {_HAND_KD} effort {_HAND_EFFORT} N*m "
+        f"(defaults 300 / 8 / 30; the scene's own Wuji spec is kp 0.2-0.7, 0.147-0.619 N*m)",
+        flush=True)
+
+
 def _astra_body_actuator_cfgs() -> tuple[BuiltinPositionActuatorCfg, ...]:
   def body_group(
     target_names_expr: tuple[str, ...],
@@ -980,9 +1005,9 @@ def _astra_body_actuator_cfgs() -> tuple[BuiltinPositionActuatorCfg, ...]:
     body_group((".*_wrist_pitch_joint", ".*_wrist_yaw_joint"), 20, 0.00425),
     BuiltinPositionActuatorCfg(
       target_names_expr=_HAND_JOINT_EXPR,
-      stiffness=300.0,
-      damping=8.0,
-      effort_limit=30.0,
+      stiffness=_HAND_KP,
+      damping=_HAND_KD,
+      effort_limit=_HAND_EFFORT,
       frictionloss=0.0,
     ),
   )
