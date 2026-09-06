@@ -326,6 +326,48 @@ class Rig:
     self._hv = out
     return out
 
+  def _hand_world_verts(self):
+    """Every hand collider's hull vertices in WORLD coordinates, at the current pose."""
+    gx = wp.to_torch(self.d.geom_xpos).cpu().numpy()
+    gm = wp.to_torch(self.d.geom_xmat).cpu().numpy()
+    while gx.ndim > 2:
+      gx, gm = gx[0], gm[0]
+    out = []
+    for g, hv in self._hull_verts():
+      out.append(hv @ gm[g].reshape(3, 3).T + gx[g])
+    return np.concatenate(out, axis=0) if out else np.zeros((0, 3))
+
+  def find_clear_placement(self, close_rad=0.6, margin=0.002):
+    """The cube must start OUTSIDE the hand and be closed onto, never start inside it.
+
+    Placing it at the closed hand's convergence point put it inside the OPEN palm: measured, the
+    cube was ejected at ~0.5 m/s and travelled 0.98 m in the two seconds of settling, and every
+    condition read zero hand-object contacts. Same failure as starting an object at its recorded
+    grasp pose, arriving by a different route.
+
+    So: start at the convergence point, and slide out along palm -> fingertips until no hull vertex
+    of any hand collider is inside the cube, plus a margin. Pure geometry, computed once, identical
+    in every condition.
+    """
+    xp = self.xpos().cpu().numpy()
+    while xp.ndim > 2:
+      xp = xp[0]
+    palm = [b for b in range(self.m.nbody) if "right_palm" in bname(self.m, b)]
+    origin = xp[palm[0]] if palm else xp[self.tip_bodies].mean(axis=0)
+    axis = np.asarray(self.target) - origin
+    axis = axis / max(np.linalg.norm(axis), 1e-9)
+    V = self._hand_world_verts()
+    h = self._obj_mesh_extent()
+    for k in range(0, 400):
+      c = np.asarray(self.target) + axis * (k * 0.001)
+      d = h[None, :] - np.abs(V - c[None, :])
+      inside = d.min(axis=1)
+      worst = float(inside.max()) if inside.size else -1.0
+      if worst < -margin:
+        self.target = c
+        return c, k * 0.001, worst
+    raise RuntimeError("no clear placement found along the palm axis")
+
   def geometric_overlap_mm(self):
     """How far the hand's SURFACE actually lies inside the object's, with no physics at all.
 
@@ -383,8 +425,13 @@ class Rig:
       s1 = wp.to_torch(ct.rigid_contact_shape1).cpu().numpy()[:n]
       shapes = sorted(set(s0.tolist()) | set(s1.tolist()))
       print(f"  Newton CollisionPipeline: {n} contacts over shapes {shapes[:24]}")
+      lab = None
+      for f in ("shape_key", "shape_label", "shape_name"):
+        lab = getattr(self.env.nmodel, f, None)
+        if lab is not None:
+          break
       obj_shapes = [i for i in range(self.env.nmodel.shape_count)
-                    if "apple" in str(self.env.nmodel.shape_key[i])]
+                    if lab is not None and "apple" in str(lab[i])]
       print(f"  object shape id(s) {obj_shapes} present in Newton contacts: "
             f"{[i for i in obj_shapes if i in shapes]}")
       pairs = getattr(self.env.collision_pipeline, "shape_pairs_filtered", None)
@@ -731,9 +778,12 @@ def main():
     dump_facts(rig)
     t, spread = rig.calibrate_target()
     ok = rig.gravcomp_object(True)
+    c0, back, worst = rig.find_clear_placement()
     print(f"\n=== press rig ===")
     print(f"  fingertips converge at {np.round(t,4)} m, max pairwise spread {1000*spread:.1f} mm; "
           f"the object is a {np.round(2000*rig._obj_mesh_extent(),1)} mm box")
+    print(f"  clear start: backed off {1000*back:.0f} mm along the palm axis to {np.round(c0,4)}, "
+          f"closest hand vertex {-1000*worst:.2f} mm outside the cube")
     print(f"  object gravity compensation applied: {ok} "
           f"(readback {getattr(rig,'_gravcomp_readback','n/a')})")
     off = tuple(float(x) for x in A.object_offset.split(","))
@@ -766,7 +816,9 @@ def main():
   arm = 0.02   # right_finger*_link4 contact point to its joint, measured
   t, spread = rig.calibrate_target()
   rig.gravcomp_object(True)
-  print(f"press target {np.round(t,4)} m, tip spread {1000*spread:.1f} mm, "
+  c0, back, worst = rig.find_clear_placement()
+  print(f"press target {np.round(c0,4)} m (backed off {1000*back:.0f} mm so the cube starts clear "
+        f"by {-1000*worst:.2f} mm), tip spread {1000*spread:.1f} mm, "
         f"object {np.round(2000*rig._obj_mesh_extent(),1)} mm box, "
         f"gravcomp readback {getattr(rig,'_gravcomp_readback','n/a')}")
 
