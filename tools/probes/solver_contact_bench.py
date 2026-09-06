@@ -74,9 +74,14 @@ def settled_overlap(model, body, solver, steps):
     return (ANVIL_TOP + A.half - z) * 1000.0
 
 
-def mujoco_solver(model, solref=None, solimp=None):
-    sv = newton.solvers.SolverMuJoCo(model, njmax=64, nconmax=64, iterations=100,
-                                     ls_iterations=50, cone="pyramidal", impratio=20.0)
+def mujoco_solver(model, solref=None, solimp=None, native=False):
+    kw = dict(njmax=64, nconmax=64, iterations=100, ls_iterations=50,
+              cone="pyramidal", impratio=20.0)
+    if native:
+        # Exactly what `--native-contacts` configures: Newton's CollisionPipeline supplies the
+        # contacts and MuJoCo only integrates them. This is the split the whole question is about.
+        kw.update(use_mujoco_contacts=False, solver="newton", integrator="implicitfast")
+    sv = newton.solvers.SolverMuJoCo(model, **kw)
     if solref is not None:
         import warp as _wp
         mm = sv.mj_model
@@ -111,6 +116,10 @@ ROWS = [
      lambda m: mujoco_solver(m, (-1e5, -1e3), (0.9, 0.99, 0.001, 0.5, 2.0))),
     ("SolverMuJoCo  direct k=1e6",
      lambda m: mujoco_solver(m, (-1e6, -3e3), (0.9, 0.99, 0.001, 0.5, 2.0))),
+    ("MuJoCo NATIVE contacts (our env)",
+     lambda m: mujoco_solver(m, native=True)),
+    ("MuJoCo NATIVE + timeconst .004",
+     lambda m: mujoco_solver(m, (0.004, 1.0), (0.9, 0.99, 0.001, 0.5, 2.0), native=True)),
     ("SolverXPBD    iterations 2",
      lambda m: newton.solvers.SolverXPBD(m)),
     ("SolverXPBD    iterations 20",
