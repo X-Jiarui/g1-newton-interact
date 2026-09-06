@@ -647,13 +647,26 @@ if os.environ.get("CONTACT_CENSUS"):
                   and "apple" in (_cmj.mj_id2name(_m, _cmj.mjtObj.mjOBJ_JOINT, _j) or ""))
       _free_q[int(_m.jnt_qposadr[_oj0]):int(_m.jnt_qposadr[_oj0]) + 7] = True
       _pin_q = _ct.tensor(_cnp.nonzero(~_free_q)[0], device=_qpos_t.device, dtype=_ct.long)
+      # A velocity mask too, and NOT the qpos one. Zeroing every qvel each step froze the fingers
+      # solid: the sweep then reported the same penetration to three decimals across a 50x change
+      # in effort, and the fingertip did not move by so much as a micron.
+      _free_v = _cnp.zeros(_m.nv, dtype=bool)
+      for _j in range(_m.njnt):
+        _jn = (_cmj.mj_id2name(_m, _cmj.mjtObj.mjOBJ_JOINT, _j) or "").lower()
+        if "finger" not in _jn and "apple" not in _jn:
+          continue
+        _nd = {_cmj.mjtJoint.mjJNT_FREE: 6, _cmj.mjtJoint.mjJNT_BALL: 3}.get(
+            int(_m.jnt_type[_j]), 1)
+        _free_v[int(_m.jnt_dofadr[_j]):int(_m.jnt_dofadr[_j]) + _nd] = True
+      _pin_v = _ct.tensor(_cnp.nonzero(~_free_v)[0], device=_qvel_t.device, dtype=_ct.long)
       _eff = os.environ.get("CENSUS_HAND_EFFORT", "").strip()
       if _eff:
         _fr = _cwp.to_torch(_m_w.actuator_forcerange)
         _fr[..., _hand_act, 0] = -float(_eff)
         _fr[..., _hand_act, 1] = float(_eff)
-      print("[census] settle %d steps; %d hand actuator(s), %d hand qpos, effort %s N*m" % (
-          _settle, len(_hand_act), len(_hand_q), _eff or "unchanged"), flush=True)
+      print("[census] settle %d steps; %d hand actuator(s), %d hand qpos, %d free dof, "
+            "effort %s N*m" % (_settle, len(_hand_act), len(_hand_q), int(_free_v.sum()),
+                               _eff or "unchanged"), flush=True)
       _ctrl_t = _cwp.to_torch(_d.ctrl)
       _adr = _cnp.array([int(_m.jnt_qposadr[int(_m.actuator_trnid[_a, 0])])
                          for _a in range(_m.nu)])
@@ -667,7 +680,7 @@ if os.environ.get("CONTACT_CENSUS"):
         # whole robot integrate freely for 0.6 s put it on the floor: 396 contacts, none of them
         # on the object, which measures a fall rather than a grasp.
         _qpos_t[0, _pin_q] = _frozen[_pin_q]
-        _qvel_t[0, :] = 0.0
+        _qvel_t[0, _pin_v] = 0.0
         _xf[0, _oid0, 2] = float(_m.body_mass[_oid0]) * 9.81
         _mjw.step(_m_w, _d)
     else:
