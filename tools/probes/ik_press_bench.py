@@ -98,6 +98,18 @@ ap.add_argument("--nconmax", type=int, default=4096,
 ap.add_argument("--njmax", type=int, default=16384)
 ap.add_argument("--sep", default=";", help="separator between --settings entries; a comma is part "
                                            "of a solref value")
+ap.add_argument("--sim-timestep", type=float, default=0.0,
+                help="physics dt in seconds. The REFSAFE floor on solref timeconst is 2*dt, so at "
+                     "the default 5 ms nothing shorter than 10 ms can be asked for; halving dt "
+                     "halves the floor. Asserted against the compiled device model after a step.")
+ap.add_argument("--settle-tol", type=float, default=0.05,
+                help="mm of movement in the geometric overlap over the --hold window below which "
+                     "a press counts as settled. A row that does not meet it is reported as not "
+                     "settled rather than averaged in.")
+ap.add_argument("--drop-pin", type=int, default=0,
+                help="hold the cube rigidly during a drop. A free 0.36 kg cube hit by a 50 kg rigid "
+                     "robot is correctly knocked away, which is the right behaviour but leaves "
+                     "nothing to press against at higher energies.")
 ap.add_argument("--out", default=None, help="write the rows as csv here as well")
 A = ap.parse_args()
 
@@ -109,6 +121,8 @@ os.environ.setdefault("APPLE_OBJECT_PER_WORLD", "1")
 os.environ.setdefault("APPLE_SCENE_Z_OFFSET", "-0.03")
 os.environ.setdefault("APPLE_EAT_PKL", A.reference_pkl)
 os.environ.setdefault("PEN_LOG", "0")
+if A.sim_timestep > 0:
+  os.environ["SIM_TIMESTEP"] = repr(A.sim_timestep)
 sys.path.insert(0, os.path.join(ROOT, "src"))
 
 import mjw_compat  # noqa: E402
@@ -386,11 +400,12 @@ class Rig:
     self._cmd = self.target_from_qpos(extra=absolute_rad)
     return self._cmd
 
-  def pin_object(self):
+  def pin_object(self, at=None):
     """Hold the cube rigidly. Writing the pose of a FREE body is not the trap that writing a jointed
     robot's pose is: there is no chain for the integrator to fight, only six unconstrained dofs."""
     q, v = self.qpos(), self.qvel()
-    q[0, self.obj_qadr:self.obj_qadr + 3] = torch.tensor(self.target, dtype=q.dtype, device=q.device)
+    c = self.target if at is None else at
+    q[0, self.obj_qadr:self.obj_qadr + 3] = torch.tensor(c, dtype=q.dtype, device=q.device)
     q[0, self.obj_qadr + 3:self.obj_qadr + 7] = torch.tensor([1.0, 0.0, 0.0, 0.0],
                                                              dtype=q.dtype, device=q.device)
     v[0, self.obj_vadr:self.obj_vadr + 6] = 0.0
@@ -441,7 +456,8 @@ class Rig:
         self._rec[0].append(sq(self.qpos()).copy())
         self._rec[1].append((sq(self.d.mocap_pos).copy(), sq(self.d.mocap_quat).copy()))
       if i >= nsteps - hold:
-        hist.append(self.overlap_mm()[0] if measure_centre is None
+        hist.append(self.depth_into_cube_mm(sq(self.d.geom_xpos)[self.obj_geoms[0]])[0]
+                    if measure_centre is None
                     else self.depth_into_cube_mm(measure_centre)[0])
     h = np.array([x for x in hist if np.isfinite(x)])
     return float(h.max() - h.min()) if h.size >= 2 else float("nan")
@@ -544,7 +560,8 @@ class Rig:
     moved = 1000.0 * float(np.linalg.norm(
         sq(self.qpos())[self.obj_qadr:self.obj_qadr + 3] - self.target))
     return dict(settled_mm=ov, geom_mm=geo, ncon=n, force_N=f, pair_timeconst=tc,
-                drift_mm=drift, object_moved_mm=moved, finite=True)
+                drift_mm=drift, at_rest=bool(np.isfinite(drift) and drift <= A.settle_tol),
+                object_moved_mm=moved, finite=True)
 
 
   # ---------------------------------------------------------------- drop
@@ -650,8 +667,10 @@ class Rig:
     obj0 = sq(self.qpos())[self.obj_qadr:self.obj_qadr + 3].copy()
     gap0, _ = self.depth_into_cube_mm(sq(self.d.geom_xpos)[self.obj_geoms[0]])
 
-    worst, wcon, vmax, nmax = 0.0, 0.0, 0.0, 0
+    worst, wcon, vmax, nmax, nsustain = 0.0, 0.0, 0.0, 0, 0
     for i in range(steps):
+      if A.drop_pin:
+        self.pin_object(at=obj0)
       self.qvel()[0, pinv] = 0.0
       self.cmd()[0, :] = 0.0
       self.env._physics_step()
@@ -665,6 +684,7 @@ class Rig:
       if np.isfinite(ov):
         wcon = max(wcon, ov)
       nmax = max(nmax, n)
+      nsustain += 1 if n > 0 else 0
       vmax = max(vmax, float(abs(sq(self.qvel())[bv + 2])))
     settled, _ = self.depth_into_cube_mm(sq(self.d.geom_xpos)[self.obj_geoms[0]])
     ov, n, f, tc = self.overlap_mm()
@@ -716,15 +736,41 @@ def apply_setting(rig, name):
       got = "MISSING"
     notes.append(f"opt.impratio device -> {got}")
   elif name.startswith("ffl="):
+    # The mjlab servos only. The scene's own Wuji motors are dealt with by `neutral`, which has to
+    # run too: at 30 N*m they were noise, but against a 0.62 N*m cap the weak set is up to 93% of
+    # the budget on a single joint and fights the closure being measured.
     lim = float(name.split("=", 1)[1])
-    m.actuator_forcerange[rig.finger_acts, 0] = -lim
-    m.actuator_forcerange[rig.finger_acts, 1] = lim
-    m.actuator_forcelimited[rig.finger_acts] = 1
+    acts = rig.strong
+    m.actuator_forcerange[acts, 0] = -lim
+    m.actuator_forcerange[acts, 1] = lim
+    m.actuator_forcelimited[acts] = 1
     push(sv, "actuator_forcerange", m.actuator_forcerange)
     push(sv, "actuator_forcelimited", m.actuator_forcelimited)
-    notes.append(f"actuator_forcerange device -> "
-                 f"{readback(sv, 'actuator_forcerange', rig.finger_acts[0])} "
-                 f"on {len(rig.finger_acts)} finger actuators")
+    notes.append(f"actuator_forcerange device -> {readback(sv, 'actuator_forcerange', acts[0])} "
+                 f"on {len(acts)} mjlab finger servo(s)")
+  elif name == "neutral":
+    # Zero the leftover xml_motor_unused_* actuators outright: gain, bias and force range. mjlab
+    # renames them but never removes them, and their ctrl is never written.
+    w = rig.weak
+    before = float(np.abs(m.actuator_forcerange[w, 1]).sum())
+    m.actuator_gainprm[w, :] = 0.0
+    m.actuator_biasprm[w, :] = 0.0
+    m.actuator_forcerange[w, 0] = 0.0
+    m.actuator_forcerange[w, 1] = 0.0
+    m.actuator_forcelimited[w] = 1
+    for f in ("actuator_gainprm", "actuator_biasprm", "actuator_forcerange",
+              "actuator_forcelimited"):
+      push(sv, f, getattr(m, f))
+    notes.append(f"neutralised {len(w)} xml_motor_unused actuator(s): device gainprm "
+                 f"{np.atleast_1d(readback(sv,'actuator_gainprm',w[0]))[:1]} biasprm "
+                 f"{np.atleast_1d(readback(sv,'actuator_biasprm',w[0]))[:3]} forcerange "
+                 f"{readback(sv,'actuator_forcerange',w[0])}; budget {before:.3f} -> "
+                 f"{float(np.abs(m.actuator_forcerange[w,1]).sum()):.3f} N*m")
+  elif name.startswith("fixed"):
+    # All three faces of the one defect, applied together.
+    lim = float(name.split("=", 1)[1]) if "=" in name else 0.62
+    for sub in ("neutral", f"ffl={lim}", "priority=1"):
+      notes += apply_setting(rig, sub)
   else:
     raise SystemExit(f"unknown setting {name!r}")
   return notes
@@ -762,6 +808,16 @@ def dump_facts(rig):
   refsafe = int(m.opt.disableflags) & int(mujoco.mjtDisableBit.mjDSBL_REFSAFE)
   print(f"  REFSAFE disabled: {bool(refsafe)}  ->  solref timeconst is clamped UP to "
         f"2*dt = {2000*dev:.2f} ms. Nothing shorter can be asked for.")
+  want = float(os.environ.get("SIM_TIMESTEP", 0) or 0)
+  if want:
+    # SIM_TIMESTEP is documented as broken because mj_model.opt.timestep stays 0.002 after setting
+    # it. That check reads the wrong field: SolverMuJoCo.step does mjw_model.opt.timestep.fill_(dt)
+    # with the dt the env passes, so the compiled DEVICE value after a step is the one that matters.
+    if abs(dev - want) > 1e-9:
+      raise RuntimeError(f"SIM_TIMESTEP {want} did not reach the compiled model (device {dev})")
+    print(f"  SIM_TIMESTEP {1000*want:.2f} ms VERIFIED on the compiled device model after a step "
+          f"(the host mj_model.opt.timestep is stale at {1000*float(m.opt.timestep):.2f} ms and is "
+          f"what the 'switch is broken' note was reading)")
 
   print("\n=== object collider ===")
   for g in rig.obj_geoms:
@@ -863,7 +919,7 @@ def main():
     print(f"  falling mass: the whole robot as one rigid body, "
           f"{float(rig.m.body_mass.sum()) - float(rig.m.body_mass[rig.obj_body]):.2f} kg")
     print(f"\n{'setting':22s}{'drop mm':>9s}{'impact m/s':>12s}{'worst mm':>10s}"
-          f"{'settled mm':>12s}{'worst con':>12s}{'ncon':>6s}{'Fn (N)':>10s}{'obj moved':>11s}")
+          f"{'settled mm':>12s}{'worst con':>12s}{'ncon':>6s}{'Fn (N)':>10s}{'obj moved':>11s}{'contact':>10s}")
     print("-" * 104)
     rows = []
     for name in [x.strip() for x in A.settings.split(A.sep) if x.strip()]:
@@ -876,7 +932,7 @@ def main():
         rows.append(dict(setting=name, height=h, **r))
         print(f"{name[:22]:22s}{1000*h:9.0f}{r['fall_v']:12.3f}{r['worst_mm']:10.3f}"
               f"{r['settled_mm']:12.3f}{r['worst_contact_mm']:12.3f}{r['ncon_max']:6d}"
-              f"{r['force_N']:10.2f}{r['object_moved_mm']:11.2f}", flush=True)
+              f"{r['force_N']:10.2f}{r['object_moved_mm']:11.2f}{100*r['contact_frac']:9.0f}%", flush=True)
         if rig._rec:
           n = rig.write_recording(A.dump)
           print(f"  recorded {n} frames to {A.dump}", flush=True)
