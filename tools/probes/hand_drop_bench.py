@@ -50,6 +50,12 @@ ap.add_argument("--heights", default="0,0.002,0.01,0.05,0.2", help="metres above
 ap.add_argument("--dt", type=float, default=0.002)
 ap.add_argument("--steps", type=int, default=1500)
 ap.add_argument("--side", default="right")
+ap.add_argument("--margin", type=float, default=0.002,
+                help="metres of clear space between the hand and the object before the drop. The "
+                     "hand must never START inside: a run that begins overlapped shows the solver "
+                     "expelling an illegal initial condition, which is not a wall.")
+ap.add_argument("--noise-floor", type=float, default=0.10,
+                help="mm. Acceptance is the WORST overlap over the whole fall, not the settled one.")
 ap.add_argument("--max-tri-pairs", type=int, default=12_000_000,
                 help="Newton's default 1e6 triangle-pair buffer overflows on this scene -- the "
                      "object mesh is 107776 triangles against 21 hand hulls -- and everything past "
@@ -141,7 +147,21 @@ def deepest_inside(hand_xform, parts, obj_xform, planes):
     return best * 1000.0
 
 
-def build(parts, hand_mass, height, obj_free=True, hull=True):
+def clear_height(parts, planes, obj_z=0.02, margin=0.002):
+    """The lowest hand height at which no hand vertex is inside the object, plus a margin.
+
+    Scanned rather than guessed: the hand meshes are expressed in the wrist frame and straddle the
+    origin, so the nominal 0.04 m start had the hand already buried in the block.
+    """
+    obj_x = (0.0, 0.0, obj_z, 0.0, 0.0, 0.0, 1.0)
+    for k in range(0, 800):
+        z = k * 0.0005
+        if deepest_inside((0.0, 0.0, z, 0.0, 0.0, 0.0, 1.0), parts, obj_x, planes) <= 0.0:
+            return z + margin
+    raise SystemExit("no clear start height found")
+
+
+def build(parts, hand_mass, height, obj_free=True, hull=True, base_z=0.04):
     b = ModelBuilder(up_axis=newton.Axis.Z, gravity=wp.vec3(0.0, 0.0, -9.81))
     newton.solvers.SolverMuJoCo.register_custom_attributes(b)
 
@@ -159,7 +179,7 @@ def build(parts, hand_mass, height, obj_free=True, hull=True):
 
     # The hand: every collider welded into one rigid body, so the drop tests the CONTACT and not
     # the finger servos. Its mass is the sum of the real link masses.
-    hand = b.add_body(xform=wp.transform(wp.vec3(0.0, 0.0, 0.04 + height), wp.quat_identity()),
+    hand = b.add_body(xform=wp.transform(wp.vec3(0.0, 0.0, base_z + height), wp.quat_identity()),
                       mass=hand_mass, label="hand")
     hcfg = ShapeConfig(density=0.0, mu=1.0)
     for loc, f, name in parts:
@@ -241,21 +261,28 @@ ROWS = [
 def main():
     parts, hand_mass = hand_parts(A.frame)
     planes = object_planes()
+    base_z = clear_height(parts, planes, margin=A.margin)
+    start = deepest_inside((0.0, 0.0, base_z, 0.0, 0.0, 0.0, 1.0), parts,
+                           (0.0, 0.0, 0.02, 0.0, 0.0, 0.0, 1.0), planes)
+    if start > 0.0:
+        raise SystemExit(f"start pose is {1000*start:.3f} mm inside the object")
+    print(f"clear start height {1000*base_z:.1f} mm (deepest hand vertex {1000*start:.3f} mm "
+          f"inside, i.e. clear); every drop height is added on top of this")
     print(f"{A.side} hand: {len(parts)} colliding mesh(es), total mass {hand_mass:.4f} kg, "
           f"shape frozen at trace frame {A.frame}")
     print(f"object: {A.object_mesh} as a 128^3 SDF, free, resting on a static table")
     print(f"dt {1000*A.dt:.1f} ms, {A.steps} steps per drop; penetration measured geometrically\n")
     print("%-30s%s" % ("solver / setting",
                        "".join("%20s" % ("drop %.0f mm" % (1000 * h)) for h in HEIGHTS)))
-    print("%-30s%s" % ("", "".join("%20s" % "worst / settled mm" for _ in HEIGHTS)))
+    print("%-30s%s" % ("", "".join("%20s" % "WORST mm over fall" for _ in HEIGHTS)))
     print("-" * (30 + 20 * len(HEIGHTS)))
     for label, make in ROWS:
         cells = []
         for h in HEIGHTS:
             try:
-                model, hand, obj = build(parts, hand_mass, h)
+                model, hand, obj = build(parts, hand_mass, h, base_z=base_z)
                 worst, settled, _op = run(model, hand, obj, make(model), parts, planes, A.steps)
-                cells.append("%.2f / %.2f" % (worst, settled))
+                cells.append("%.2f%s" % (worst, "" if worst <= A.noise_floor else "  FAIL"))
             except Exception as exc:
                 cells.append(type(exc).__name__)
                 if len(cells) == 1:
