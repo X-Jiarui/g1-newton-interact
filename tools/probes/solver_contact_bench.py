@@ -43,7 +43,16 @@ ANVIL_TOP = 0.0
 MASSES = [float(x) for x in A.masses.split(",")]
 
 
-def build(mass: float):
+def cube_mesh(half: float):
+    """The same 40 mm cube, as a mesh -- so it can be collided through an SDF the way training is."""
+    v = np.array([[x, y, z] for x in (-half, half) for y in (-half, half) for z in (-half, half)],
+                 dtype=np.float32)
+    f = np.array([[0,2,3],[0,3,1],[4,5,7],[4,7,6],[0,1,5],[0,5,4],
+                  [2,6,7],[2,7,3],[0,4,6],[0,6,2],[1,3,7],[1,7,5]], dtype=np.int32)
+    return newton.Mesh(v, f.flatten())
+
+
+def build(mass: float, kind: str = "box"):
     """One cube on one anvil. Identical for every solver -- that is the point of the test."""
     b = ModelBuilder(up_axis=newton.Axis.Z, gravity=wp.vec3(0.0, 0.0, -9.81))
     # SolverMuJoCo stores solref/solimp as custom attributes; they have to be registered on the
@@ -57,7 +66,15 @@ def build(mass: float):
     # joint between the same pair and Newton warns that the model is inconsistent.
     body = b.add_body(xform=wp.transform(wp.vec3(0.0, 0.0, ANVIL_TOP + A.half),
                                          wp.quat_identity()), label="cube")
-    b.add_shape_box(body, hx=A.half, hy=A.half, hz=A.half, cfg=cfg)
+    if kind == "sdf":
+        # Built the way src/grab_objects.py builds the training object: real mesh, sampled into a
+        # signed distance field, added with force_sdf so the SDF is what actually collides.
+        mesh = cube_mesh(A.half)
+        mesh.build_sdf(max_resolution=128)
+        cfg.force_sdf = True
+        b.add_shape_mesh(body, mesh=mesh, cfg=cfg, label="cube_sdf")
+    else:
+        b.add_shape_box(body, hx=A.half, hy=A.half, hz=A.half, cfg=cfg)
     return b.finalize(device=A.device), body
 
 
@@ -108,30 +125,38 @@ def newton_penalty_solver(cls, model, ke=None, kd=None):
 
 
 ROWS = [
+    ("SDF object, NATIVE (our env)",
+     lambda m: mujoco_solver(m, native=True), "sdf"),
+    ("SDF object, NATIVE, timeconst .004",
+     lambda m: mujoco_solver(m, (0.004, 1.0), (0.9, 0.99, 0.001, 0.5, 2.0), native=True), "sdf"),
+    ("SDF object, MuJoCo own narrow phase",
+     lambda m: mujoco_solver(m), "sdf"),
+    ("SDF object, SolverXPBD it 20",
+     lambda m: newton.solvers.SolverXPBD(m, iterations=20), "sdf"),
     ("SolverMuJoCo  default solref",
-     lambda m: mujoco_solver(m)),
+     lambda m: mujoco_solver(m), "box"),
     ("SolverMuJoCo  timeconst .004",
-     lambda m: mujoco_solver(m, (0.004, 1.0), (0.9, 0.99, 0.001, 0.5, 2.0))),
+     lambda m: mujoco_solver(m, (0.004, 1.0), (0.9, 0.99, 0.001, 0.5, 2.0)), "box"),
     ("SolverMuJoCo  direct k=1e5",
-     lambda m: mujoco_solver(m, (-1e5, -1e3), (0.9, 0.99, 0.001, 0.5, 2.0))),
+     lambda m: mujoco_solver(m, (-1e5, -1e3), (0.9, 0.99, 0.001, 0.5, 2.0)), "box"),
     ("SolverMuJoCo  direct k=1e6",
-     lambda m: mujoco_solver(m, (-1e6, -3e3), (0.9, 0.99, 0.001, 0.5, 2.0))),
+     lambda m: mujoco_solver(m, (-1e6, -3e3), (0.9, 0.99, 0.001, 0.5, 2.0)), "box"),
     ("MuJoCo NATIVE contacts (our env)",
-     lambda m: mujoco_solver(m, native=True)),
+     lambda m: mujoco_solver(m, native=True), "box"),
     ("MuJoCo NATIVE + timeconst .004",
-     lambda m: mujoco_solver(m, (0.004, 1.0), (0.9, 0.99, 0.001, 0.5, 2.0), native=True)),
+     lambda m: mujoco_solver(m, (0.004, 1.0), (0.9, 0.99, 0.001, 0.5, 2.0), native=True), "box"),
     ("SolverXPBD    iterations 2",
-     lambda m: newton.solvers.SolverXPBD(m)),
+     lambda m: newton.solvers.SolverXPBD(m), "box"),
     ("SolverXPBD    iterations 20",
-     lambda m: newton.solvers.SolverXPBD(m, iterations=20)),
+     lambda m: newton.solvers.SolverXPBD(m, iterations=20), "box"),
     ("SolverSemiImplicit ke default",
-     lambda m: newton_penalty_solver(newton.solvers.SolverSemiImplicit, m)),
+     lambda m: newton_penalty_solver(newton.solvers.SolverSemiImplicit, m), "box"),
     ("SolverSemiImplicit ke 1e6",
-     lambda m: newton_penalty_solver(newton.solvers.SolverSemiImplicit, m, 1e6, 1e3)),
+     lambda m: newton_penalty_solver(newton.solvers.SolverSemiImplicit, m, 1e6, 1e3), "box"),
     ("SolverFeatherstone ke default",
-     lambda m: newton_penalty_solver(newton.solvers.SolverFeatherstone, m)),
+     lambda m: newton_penalty_solver(newton.solvers.SolverFeatherstone, m), "box"),
     ("SolverFeatherstone ke 1e6",
-     lambda m: newton_penalty_solver(newton.solvers.SolverFeatherstone, m, 1e6, 1e3)),
+     lambda m: newton_penalty_solver(newton.solvers.SolverFeatherstone, m, 1e6, 1e3), "box"),
 ]
 
 
@@ -145,11 +170,11 @@ def main():
     hdr = "".join("%11s" % ("%.1fN" % (m * 9.81)) for m in MASSES)
     print("%-32s%s%13s" % ("solver / setting", hdr, "mm per N"))
     print("-" * (32 + 11 * len(MASSES) + 13))
-    for label, make in ROWS:
+    for label, make, kind in ROWS:
         cells, xs, ys = [], [], []
         for mass in MASSES:
             try:
-                model, body = build(mass)
+                model, body = build(mass, kind)
                 ov = settled_overlap(model, body, make(model), A.steps)
                 if not math.isfinite(ov):
                     cells.append("blew up")
