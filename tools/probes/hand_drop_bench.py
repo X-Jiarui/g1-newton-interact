@@ -54,6 +54,7 @@ ap.add_argument("--device", default="cuda:0")
 A = ap.parse_args()
 
 HEIGHTS = [float(x) for x in A.heights.split(",")]
+VERBOSE = [True]
 
 
 def load_stl(path):
@@ -161,10 +162,28 @@ def build(parts, hand_mass, height, obj_free=True, hull=True):
         b.add_shape_mesh(hand, mesh=mesh, cfg=hcfg, label=f"hand_{name}")
 
     if hull:
-        # Exactly what the training env does to every robot mesh collider.
+        # Exactly what the training env does to every robot mesh collider. Verify it landed: with
+        # the raw meshes in place the narrow phase reports "Triangle pair buffer overflowed
+        # 2371072 > 1000000" and every result after that is meaningless.
         idx = [i for i in range(len(b.shape_type))
-               if (b.shape_label[i] or "").startswith("hand_")]
-        b.approximate_meshes(method="convex_hull", shape_indices=idx, keep_visual_shapes=True)
+               if "hand_" in (b.shape_label[i] or "")]
+        done = b.approximate_meshes(method="convex_hull", shape_indices=idx,
+                                    keep_visual_shapes=True)
+        if VERBOSE[0]:
+            tri = []
+            for i in idx:
+                src = b.shape_source[i]
+                tri.append(len(src.indices) // 3 if hasattr(src, "indices") else -1)
+            print(f"[bench] hulled {len(done)} of {len(idx)} hand collider(s); "
+                  f"triangles now min {min(tri)} max {max(tri)} total {sum(tri)}")
+            osrc = [b.shape_source[i] for i in range(len(b.shape_type))
+                    if "apple_sdf" in (b.shape_label[i] or "")]
+            if osrc:
+                o = osrc[0]
+                print(f"[bench] object mesh {len(o.indices)//3} triangles, "
+                      f"has_sdf={getattr(o, 'sdf', None) is not None}, "
+                      f"force_sdf flag on cfg={obj_cfg.force_sdf}")
+            VERBOSE[0] = False
     return b.finalize(device=A.device), hand, obj
 
 
