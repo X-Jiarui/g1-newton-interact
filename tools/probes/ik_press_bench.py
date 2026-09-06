@@ -655,14 +655,15 @@ class Rig:
       dd = self.h[None, :] - np.abs(P - centre[None, :])
       return float(dd.min(axis=1).max())
 
-    lo2, hi2 = 0.0, 1.0
-    for _ in range(60):
-      mid = 0.5 * (lo2 + hi2)
-      if depth_at(mid) < depth:
-        lo2 = mid
-      else:
-        hi2 = mid
-    travel = hi2
+    # depth_at is NOT monotone in s -- travel far enough and the hand comes out the far side, so a
+    # bisection saturates at its upper bound. Measured: it returned 1000 mm, which just drove the
+    # arm into its joint limits and never touched the block. Scan for the FIRST crossing instead.
+    grid = np.arange(0.0, 0.2, 0.0005)
+    hits = [sv for sv in grid if depth_at(sv) >= depth]
+    if not hits:
+      raise RuntimeError(f"no travel along the approach axis reaches {1000*depth:.1f} mm of depth; "
+                         f"best is {1000*max(depth_at(sv) for sv in grid):.2f} mm")
+    travel = float(hits[0])
     n = int(approach_steps)
     plan = np.zeros((n + int(hold_steps), len(arm_j)))
     for k in range(n + int(hold_steps)):
