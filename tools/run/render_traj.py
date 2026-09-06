@@ -140,6 +140,13 @@ def _mocap_slot(name: str) -> int:
     return -1
   return hits[0]
 
+def overlaps(path):
+  """Per-frame geometric overlap, if the trace carries it. Computed by the bench with no solver in
+  it, so the number burnt into the picture and the number in the table cannot drift apart."""
+  z = np.load(path, allow_pickle=True)
+  return z["overlap_mm"] if "overlap_mm" in z else None
+
+
 def frames(qpos, mocap):
   out = []
   n_mocap = m.nmocap
@@ -170,10 +177,12 @@ def frames(qpos, mocap):
   return out
 
 lq, lm = load(A.left)
+lov = overlaps(A.left)
 left = frames(lq, lm)
 print(f"left  {A.left_label}: {len(left)} frames")
 if A.right:
   rq, rm = load(A.right)
+  rov = overlaps(A.right)
   right = frames(rq, rm)
   print(f"right {A.right_label}: {len(right)} frames")
   n = min(len(left), len(right))
@@ -200,9 +209,13 @@ w = imageio_ffmpeg.write_frames(A.out, (A.width * (2 if right else 1), A.height)
                                 fps=A.fps, quality=7)
 w.send(None)
 for i in range(len(left)):
-  li = label(left[i], A.left_label, f"step {i * A.stride}")
+  _ls = (f"hand into cube: {lov[i]:6.3f} mm" if lov is not None and i < len(lov)
+         else f"step {i * A.stride}")
+  li = label(left[i], A.left_label, _ls)
   if right is not None:
-    ri = label(right[i], A.right_label, f"step {i * A.stride}")
+    _rs = (f"hand into cube: {rov[i]:6.3f} mm" if rov is not None and i < len(rov)
+           else f"step {i * A.stride}")
+    ri = label(right[i], A.right_label, _rs)
     frame = np.concatenate([li, ri], axis=1)
   else:
     frame = li
