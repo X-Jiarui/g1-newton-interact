@@ -1139,6 +1139,20 @@ def main():
     print(f"\n=== straight-line wrist press ===")
     print(f"  {sub} substeps of approach + {hold} held, at dt {1000*rig.env.physics_dt:.2f} ms "
           f"({A.approach_s:.1f} s + {A.hold_s:.1f} s)")
+    # Let the arm find its own servo/gravity equilibrium FIRST, and plan from there. Planning from
+    # the reset pose put the whole steady-state droop into the commanded trajectory: the arm was
+    # commanded 5-11 mm into the block and never touched it, because it hangs further below its
+    # target than the depth being commanded.
+    rig._cmd = rig.target_from_qpos()
+    rig.run(sub, 0, park_object=True)
+    before = sq(rig.qpos()).copy()
+    rig.snapshot(freeze_hold=True)
+    rig._cmd = rig.target_from_qpos()
+    rig.run(sub // 2, 0, park_object=True)
+    droop = 1000.0 * float(np.abs(sq(rig.qpos()) - before).max())
+    rig.snapshot(freeze_hold=True)
+    print(f"  arm settled under its own servo; residual movement over a further "
+          f"{sub//2} substeps is {droop:.3f} (joint units)")
     print(f"\n{'setting':16s}{'depth mm':>9s}{'standoff':>10s}{'start':>8s}"
           f"{'commanded':>11s}{'WORST':>9s}{'settled':>9s}{'contact':>9s}{'ncon':>6s}"
           f"{'maxFn':>10s}{'tau':>8s}{'pass':>6s}")
