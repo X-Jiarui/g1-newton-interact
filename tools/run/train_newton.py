@@ -627,6 +627,38 @@ if os.environ.get("CONTACT_CENSUS"):
     # of PD control toward the policy's target, so pinning qpos before the call does not hold the
     # robot during it, and the contacts read back belong to a pose the trace never contained.
     import mujoco_warp as _mjw
+    # Optionally settle first. A frozen pose says what force the contact carries THERE; it cannot
+    # say where the finger would come to rest. Driving every actuator to its recorded joint target
+    # and integrating does, and it is still confound-free: the target is fixed, so a setting that
+    # changes the resting depth changed the physics, not the policy's behaviour.
+    _settle = int(os.environ.get("CENSUS_SETTLE", "0"))
+    if _settle:
+      _eff = os.environ.get("CENSUS_HAND_EFFORT", "").strip()
+      if _eff:
+        _fr = _cwp.to_torch(_m_w.actuator_forcerange)
+        _hand = [_a for _a in range(_m.nu)
+                 if "finger" in (_cmj.mj_id2name(_m, _cmj.mjtObj.mjOBJ_ACTUATOR, _a) or "")
+                 and "unused" not in (_cmj.mj_id2name(_m, _cmj.mjtObj.mjOBJ_ACTUATOR, _a) or "")]
+        _fr[..., _hand, 0] = -float(_eff)
+        _fr[..., _hand, 1] = float(_eff)
+        print(f"[census] hand effort_limit -> +-{float(_eff)} N*m on {len(_hand)} actuator(s)",
+              flush=True)
+      _ctrl_t = _cwp.to_torch(_d.ctrl)
+      _adr = _cnp.array([int(_m.jnt_qposadr[int(_m.actuator_trnid[_a, 0])])
+                         for _a in range(_m.nu)])
+      _ctrl_t[0, :] = _ct.tensor(_qall[_f][_adr], dtype=_ctrl_t.dtype, device=_ctrl_t.device)
+      # Cancel the object's weight. At 0.36 kg gravity alone drops it 20 cm over this settle and
+      # the measurement becomes about falling, not about how far the finger presses in.
+      _xf = _cwp.to_torch(_d.xfrc_applied)
+      _oid0 = next(_i for _i in range(_m.nbody)
+                   if "apple" in (_cmj.mj_id2name(_m, _cmj.mjtObj.mjOBJ_BODY, _i) or "")
+                   and "robot" not in (_cmj.mj_id2name(_m, _cmj.mjtObj.mjOBJ_BODY, _i) or ""))
+      for _k in range(_settle):
+        _xf[0, _oid0, 2] = float(_m.body_mass[_oid0]) * 9.81
+        _mjw.step(_m_w, _d)
+    else:
+      _qpos_t[0, :] = _frozen
+      _qvel_t[0, :] = 0.0
     _mjw.kinematics(_m_w, _d)
     _mjw.collision(_m_w, _d)
     # Detection is only half the question. A contact the narrow phase reports but the solver never
