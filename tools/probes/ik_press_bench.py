@@ -346,6 +346,20 @@ class Rig:
       self._hold_q = sq(self.qpos()).copy()
 
   def restore(self):
+    # MuJoCo carries warm-start and applied-force buffers across steps, so one diverged press
+    # poisons every row after it: measured, the whole rest of a sweep came back NaN. Clearing them
+    # is what makes the conditions independent.
+    try:
+      self.sv.reset(self.env.state_in)
+    except Exception:
+      pass
+    for f in ("qacc_warmstart", "qfrc_applied", "xfrc_applied", "act"):
+      a = getattr(self.d, f, None)
+      if a is not None:
+        try:
+          wp.to_torch(a).zero_()
+        except Exception:
+          pass
     self.qpos()[:] = self._q0
     self.qvel()[:] = self._v0
     self.cmd()[:] = self._c0
@@ -518,12 +532,19 @@ class Rig:
       d, who = self.depth_into_cube_mm(self.target)
       return dict(commanded_mm=d, cmd_drift_mm=drift, deepest_geom=who)
     ov, n, f, tc = self.overlap_mm()
+    ok = bool(np.isfinite(sq(self.qpos())).all())
+    if not ok:
+      # A diverged press is a RESULT, not a number to average in. Report it as such and hand back a
+      # clean state so the next condition starts where every other one did.
+      self.restore()
+      return dict(settled_mm=float("inf"), geom_mm=float("inf"), ncon=n, force_N=f,
+                  pair_timeconst=tc, drift_mm=float("nan"), object_moved_mm=float("nan"),
+                  finite=False)
     geo, _ = self.depth_into_cube_mm(sq(self.d.geom_xpos)[self.obj_geoms[0]])
     moved = 1000.0 * float(np.linalg.norm(
         sq(self.qpos())[self.obj_qadr:self.obj_qadr + 3] - self.target))
     return dict(settled_mm=ov, geom_mm=geo, ncon=n, force_N=f, pair_timeconst=tc,
-                drift_mm=drift, object_moved_mm=moved,
-                finite=bool(np.isfinite(sq(self.qpos())).all()))
+                drift_mm=drift, object_moved_mm=moved, finite=True)
 
 
   # ---------------------------------------------------------------- drop
@@ -891,6 +912,8 @@ def main():
           f"{'geom':>9s}{'ncon':>6s}{'Fn (N)':>10s}{'tau':>8s}{'moved':>8s}{'drift':>8s}")
     print("-" * 100)
     for ap_name in approaches:
+     reset_settings(rig)
+     rig.restore()
      rig.calibrate(approach=ap_name)
      print(f"  -- approach {ap_name}: target {np.round(rig.target,4)}")
      for name in settings:
