@@ -869,6 +869,37 @@ class NewtonVecEnv:
       print(f"[newton-env] HAND_SOLIMP -> {_vals} on {len(_gs)} hand geom(s), "
             f"mjw shape {_push('geom_solimp', _mm.geom_solimp)}", flush=True)
 
+    # OBJECT_SOLIMP / TABLE_SOLREF: the two sides `--object-solref` never covered.
+    #
+    # solimp's dmax is the impedance the constraint reaches once the overlap exceeds `width`, and
+    # the residual penetration under a steady push goes as (1-d)/d -- 0.95 leaves 5.3%, 0.99 leaves
+    # 1.0%, so raising it is worth ~5x on top of whatever solref buys. It has to be set HERE and not
+    # via HAND_SOLIMP whenever OBJECT_PRIORITY is on, because the higher-priority geom's solimp wins
+    # outright and the hand's value is discarded.
+    #
+    # The table was left at the shared 0.02 while the object was stiffened to 0.004, so every
+    # object-on-table contact still runs at the soft default -- which is where the 1.88 mm settling
+    # in --object-solref's own measurement came from.
+    for _var, _field, _what in (("OBJECT_SOLIMP", "geom_solimp", "apple"),
+                                ("TABLE_SOLREF", "geom_solref", "table")):
+      _raw = os.environ.get(_var, "").strip()
+      if not _raw:
+        continue
+      import mujoco as _mjs
+      _mm = self.solver.mj_model
+      _vals = [float(x) for x in _raw.replace(" ", "").split(",")]
+      _arr = getattr(_mm, _field)
+      _hit = 0
+      for _g in range(_mm.ngeom):
+        if _what not in (_mjs.mj_id2name(_mm, _mjs.mjtObj.mjOBJ_GEOM, _g) or ""):
+          continue
+        _arr[_g][:len(_vals)] = _vals
+        _hit += 1
+      if _hit == 0:
+        raise RuntimeError(f"{_var} matched no {_what} geom")
+      print(f"[newton-env] {_var} -> {_vals} on {_hit} {_what} geom(s), "
+            f"mjw shape {_push(_field, _arr)}", flush=True)
+
     # Which side's contact parameters win. MuJoCo blends solref/solimp between two geoms only
     # while their priorities are EQUAL; the higher-priority geom's values are used outright when
     # they differ. That matters here because --object-solref already stiffens the object to 0.004
