@@ -634,6 +634,16 @@ if os.environ.get("CONTACT_CENSUS"):
     _flag = "  <-- AT CAPACITY" if _tot >= _percap else ""
     print(f"\n[census] frame {_f}: {_tot} contact(s) in world 0 of {_percap} slots{_flag}; "
           f"{_nobj} of them touch the object", flush=True)
+    # When the budget is full, WHO is holding it decides the fix, so break the whole buffer down
+    # by body pair -- not just the object's share, which is the thing being starved.
+    _all = {}
+    for _i in _cnp.nonzero(_live)[0]:
+      _k = tuple(sorted((_bname[int(_g[_i, 0])], _bname[int(_g[_i, 1])])))
+      _all[_k] = _all.get(_k, 0) + 1
+    print("         top pairs holding the buffer:", flush=True)
+    for _k, _n in sorted(_all.items(), key=lambda kv: -kv[1])[:12]:
+      print("           %5d  %s <-> %s  (%.0f%%)" % (_n, _k[0], _k[1], 100.0 * _n / _tot),
+            flush=True)
     if not _pairs:
       print("         NO contact against the object at all -- the narrow phase found none.",
             flush=True)
