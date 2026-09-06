@@ -70,6 +70,13 @@ ap.add_argument("--forces", default="0.15,0.62,2,10,30",
                 help="finger actuator torque caps, N*m (force mode)")
 ap.add_argument("--force-closure", type=float, default=1.4,
                 help="the fixed, generous closure used in force mode; the CAP is the variable")
+ap.add_argument("--pin-object", type=int, default=1,
+                help="hold the cube rigidly at the press target. A free 0.364 kg cube is PUNCHED "
+                     "out of the hand -- measured, it left by 0.59 m in 1.5 s and every condition "
+                     "read zero contacts -- because a finger joint with 30 N*m of authority cannot "
+                     "close gently. Pinning makes it an infinitely heavy anvil, which is the most "
+                     "FAVOURABLE case for the contact wall, so any penetration measured this way "
+                     "is a lower bound on what the free object suffers.")
 ap.add_argument("--settings", default="baseline")
 ap.add_argument("--out", default=None, help="write the rows as csv here as well")
 A = ap.parse_args()
@@ -334,13 +341,24 @@ class Rig:
     self._cmd = self.target_from_qpos(extra=absolute_rad)
     return self._cmd
 
-  def run(self, nsteps, hold, park_object=False, measure_centre=None):
+  def pin_object(self):
+    """Hold the cube rigidly. Writing the pose of a FREE body is not the trap that writing a jointed
+    robot's pose is: there is no chain for the integrator to fight, only six unconstrained dofs."""
+    q, v = self.qpos(), self.qvel()
+    q[0, self.obj_qadr:self.obj_qadr + 3] = torch.tensor(self.target, dtype=q.dtype, device=q.device)
+    q[0, self.obj_qadr + 3:self.obj_qadr + 7] = torch.tensor([1.0, 0.0, 0.0, 0.0],
+                                                             dtype=q.dtype, device=q.device)
+    v[0, self.obj_vadr:self.obj_vadr + 6] = 0.0
+
+  def run(self, nsteps, hold, park_object=False, measure_centre=None, pin=False):
     m_nu = self.m.nu
     if park_object:
       self.qpos()[0, self.obj_qadr + 2] += 5.0
       self.qvel()[0, self.obj_vadr:self.obj_vadr + 6] = 0.0
     hist = []
     for i in range(nsteps):
+      if pin:
+        self.pin_object()
       if self.base_vadr is not None:
         # Velocity-level pin. Writing the POSE of a jointed robot every step fights the integrator
         # and produced `Nan, Inf or huge value in QACC` within 80 ms on this very scene; zeroing the
@@ -426,7 +444,8 @@ class Rig:
     tgt = self.open_cmd + closure_frac * (self.closed_cmd - self.open_cmd)
     self.set_fingers(tgt)
     drift = self.run(A.settle, A.hold, park_object=park,
-                     measure_centre=(self.target if park else None))
+                     measure_centre=(self.target if park else None),
+                     pin=(bool(A.pin_object) and not park))
     if park:
       d, who = self.depth_into_cube_mm(self.target)
       return dict(commanded_mm=d, drift_mm=drift, deepest_geom=who)
