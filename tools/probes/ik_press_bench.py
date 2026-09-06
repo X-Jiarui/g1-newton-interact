@@ -638,7 +638,23 @@ class Rig:
     qadr = [int(m.jnt_qposadr[j]) for j in arm_j]
     vadr = [int(m.jnt_dofadr[j]) for j in arm_j]
 
-    travel = standoff + depth
+    # How far must the hand travel along u for its DEEPEST vertex to sit `depth` past the near
+    # face? Not standoff + depth: the clearance above is to the nearest vertex of the whole hand,
+    # which need not be the fingertip, so assuming the two are equal left the plan short of the
+    # block entirely -- measured, commanded depth 0.000 mm and zero contacts in every condition.
+    def depth_at(sv):
+      P = V + u[None, :] * sv
+      dd = self.h[None, :] - np.abs(P - centre[None, :])
+      return float(dd.min(axis=1).max())
+
+    lo2, hi2 = 0.0, 1.0
+    for _ in range(60):
+      mid = 0.5 * (lo2 + hi2)
+      if depth_at(mid) < depth:
+        lo2 = mid
+      else:
+        hi2 = mid
+    travel = hi2
     n = int(approach_steps)
     plan = np.zeros((n + int(hold_steps), len(arm_j)))
     for k in range(n + int(hold_steps)):
