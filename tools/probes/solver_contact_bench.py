@@ -36,11 +36,19 @@ ap.add_argument("--dt", type=float, default=0.002, help="the training timestep")
 ap.add_argument("--steps", type=int, default=3000)
 ap.add_argument("--half", type=float, default=0.02, help="cube half-extent, m (cubesmall is 40 mm)")
 ap.add_argument("--masses", default="0.364,1,3,10,30")
+ap.add_argument("--accels", default="",
+                help="sweep the LOAD instead of the mass: fixed 0.364 kg cube, gravity set to each "
+                     "of these m/s^2. Sweeping mass is not a load sweep -- the weight and the "
+                     "inertia rise together, so the acceleration the constraint has to cancel "
+                     "stays exactly g and the row is flat by construction. That artefact is why "
+                     "this bench read 7 microns 'flat across an 80x load sweep' and could not "
+                     "reproduce a 1.80 mm training mean. Try --accels 9.81,50,200,800,2700.")
 ap.add_argument("--device", default="cuda:0")
 A = ap.parse_args()
 
 ANVIL_TOP = 0.0
 MASSES = [float(x) for x in A.masses.split(",")]
+ACCELS = [float(x) for x in A.accels.split(",") if x.strip()]
 
 
 def cube_mesh(half: float):
@@ -52,9 +60,9 @@ def cube_mesh(half: float):
     return newton.Mesh(v, f.flatten())
 
 
-def build(mass: float, kind: str = "box"):
+def build(mass: float, kind: str = "box", accel: float = 9.81):
     """One cube on one anvil. Identical for every solver -- that is the point of the test."""
-    b = ModelBuilder(up_axis=newton.Axis.Z, gravity=wp.vec3(0.0, 0.0, -9.81))
+    b = ModelBuilder(up_axis=newton.Axis.Z, gravity=wp.vec3(0.0, 0.0, -accel))
     # SolverMuJoCo stores solref/solimp as custom attributes; they have to be registered on the
     # builder before finalize or the solver has nowhere to read them from.
     newton.solvers.SolverMuJoCo.register_custom_attributes(b)
@@ -167,20 +175,27 @@ def main():
     print(f"requested masses {MASSES} kg; the builder derives mass from shape density, "
           f"first row lands at {float(wp.to_torch(_m0.body_mass)[0]):.3f} kg")
     print(f"loads {[round(m * 9.81, 1) for m in MASSES]} N\n")
-    hdr = "".join("%11s" % ("%.1fN" % (m * 9.81)) for m in MASSES)
+    if ACCELS:
+        print("LOAD swept by gravity on a fixed 0.364 kg cube -- the acceleration the constraint "
+              "must cancel is the quantity that sets penetration, and a mass sweep holds it at g")
+    hdr = ("".join("%11s" % ("%.0fN" % (0.364 * a)) for a in ACCELS) if ACCELS
+           else "".join("%11s" % ("%.1fN" % (m * 9.81)) for m in MASSES))
+    _n = len(ACCELS or MASSES)
     print("%-32s%s%13s" % ("solver / setting", hdr, "mm per N"))
-    print("-" * (32 + 11 * len(MASSES) + 13))
+    print("-" * (32 + 11 * _n + 13))
     for label, make, kind in ROWS:
         cells, xs, ys = [], [], []
-        for mass in MASSES:
+        for _load in (ACCELS or MASSES):
+            mass = 0.364 if ACCELS else _load
+            accel = _load if ACCELS else 9.81
             try:
-                model, body = build(mass, kind)
+                model, body = build(mass, kind, accel)
                 ov = settled_overlap(model, body, make(model), A.steps)
                 if not math.isfinite(ov):
                     cells.append("blew up")
                     continue
                 cells.append("%.3f" % ov)
-                xs.append(mass * 9.81)
+                xs.append(mass * accel)
                 ys.append(ov)
             except Exception as exc:  # a solver that cannot run this scene is a result too
                 cells.append("n/a")
