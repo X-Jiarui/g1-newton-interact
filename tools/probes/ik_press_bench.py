@@ -633,8 +633,16 @@ class Rig:
 
     # Arm only. The fingers keep the pose they reset in: this is a wrist press, not a grasp, so
     # nothing about finger servo authority can enter the number.
-    arm_j = [j for j in range(m.njnt)
-             if any(k in jname(m, j) for k in ("right_shoulder", "right_elbow", "right_wrist"))]
+    # mjlab flattens the whole body path into the JOINT name too, so `"right_shoulder" in name`
+    # also matches every finger joint -- their path runs through the shoulder link. Match the
+    # joint's own name at the END of the path instead.
+    ARM = ("right_shoulder_pitch_joint", "right_shoulder_roll_joint", "right_shoulder_yaw_joint",
+           "right_elbow_joint", "right_wrist_roll_joint", "right_wrist_pitch_joint",
+           "right_wrist_yaw_joint")
+    arm_j = [j for j in range(m.njnt) if jname(m, j).endswith(ARM)]
+    if len(arm_j) != len(ARM):
+      raise RuntimeError(f"matched {len(arm_j)} arm joints, expected {len(ARM)}: "
+                         f"{[jname(m, j)[-30:] for j in arm_j]}")
     qadr = [int(m.jnt_qposadr[j]) for j in arm_j]
     vadr = [int(m.jnt_dofadr[j]) for j in arm_j]
 
@@ -689,6 +697,7 @@ class Rig:
     dfin = self.h[None, :] - np.abs(Vf - centre[None, :])
     commanded = 1000.0 * float(max(0.0, dfin.min(axis=1).max()))
 
+    moved = float(np.linalg.norm(dat2.xpos[tip] - p0))
     self._plan = plan
     self._plan_acts = []
     for j in arm_j:
@@ -698,7 +707,9 @@ class Rig:
                              [a for a in range(m.nu) if self.jnt_of_act[a] == j][0])
     self.target = centre
     return dict(centre=centre, axis=u, start_clear_mm=1000.0 * start_clear,
-                commanded_mm=commanded, n_joints=len(arm_j))
+                commanded_mm=commanded, n_joints=len(arm_j),
+                travel_mm=1000.0 * travel, tip_moved_mm=1000.0 * moved,
+                plan_delta=float(np.abs(plan[-1] - plan[0]).max()))
 
   def run_approach(self):
     """Replay the plan. Reports the MAXIMUM geometric overlap over the whole trajectory -- a press
@@ -1138,6 +1149,9 @@ def main():
         print(f"  [readback] {note}")
       for depth in [float(x) for x in A.depths.split(",")]:
         info = rig.plan_approach(A.standoff, depth, sub, hold)
+        print(f"  [plan] {info['n_joints']} arm joints, travel {info['travel_mm']:.1f} mm, "
+              f"tip actually moved {info['tip_moved_mm']:.1f} mm, max joint change "
+              f"{info['plan_delta']:.4f} rad", flush=True)
         rig.start_recording(bool(A.dump) and A.dump_of in f"{name}|{depth}")
         r = rig.run_approach()
         ok = r["worst_mm"] <= A.noise_floor and r["finite"]
