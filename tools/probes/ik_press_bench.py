@@ -712,42 +712,80 @@ class Rig:
                 travel_mm=1000.0 * travel, tip_moved_mm=1000.0 * moved,
                 plan_delta=float(np.abs(plan[-1] - plan[0]).max()))
 
-  def run_approach(self):
-    """Replay the plan. Reports the MAXIMUM geometric overlap over the whole trajectory -- a press
-    that dips into the block halfway and recovers has still passed through it."""
+  def plan_block_press(self, standoff, depth):
+    """Place the block `standoff` clear of the hand and work out how far it must travel to be
+    `depth` past the hand's surface. Measured off the LIVE sim pose, not a host copy."""
+    xp, gx = sq(self.d.xpos), sq(self.d.geom_xpos)
+    tip = self.tip_bodies[1]
+    palm = [b for b in range(self.m.nbody) if "right_palm" in bname(self.m, b)][0]
+    p0 = xp[tip].copy()
+    u = p0 - xp[palm]
+    u = u / max(np.linalg.norm(u), 1e-9)
+    V = np.concatenate(list(self.hand_world_verts().values()), axis=0)
+
+    def depth_at(c):
+      dd = self.h[None, :] - np.abs(V - np.asarray(c)[None, :])
+      return float(dd.min(axis=1).max())
+
+    grid = np.arange(0.0, 0.30, 0.0005)
+    clear = [t for t in grid if depth_at(p0 + u * t) <= -standoff]
+    if not clear:
+      raise RuntimeError("no clear standoff found along the approach axis")
+    t0 = float(clear[0])
+    centre0 = p0 + u * t0
+    # depth_at is not monotone -- push far enough and the block comes out the far side -- so scan
+    # for the FIRST crossing rather than bisecting.
+    travel = [t for t in grid if depth_at(centre0 - u * t) >= depth]
+    if not travel:
+      raise RuntimeError(f"no travel reaches {1000*depth:.1f} mm of depth; best "
+                         f"{1000*max(depth_at(centre0 - u * t) for t in grid):.2f} mm")
+    self._centre0, self._axis, self._travel = centre0, u, float(travel[0])
+    return dict(start_clear_mm=-1000.0 * depth_at(centre0), travel_mm=1000.0 * self._travel,
+                commanded_mm=1000.0 * depth_at(centre0 - u * self._travel))
+
+  def run_approach(self, approach_steps, hold_steps):
+    """Drive the block straight into the stationary hand and report the WORST geometric overlap
+    over the whole trajectory.
+
+    The block is kinematically prescribed, so the commanded depth is exact by construction: no IK,
+    no actuator saturation, no servo droop can enter the number. Driving the ARM instead was tried
+    first and none of those three could be kept out of it -- the arm hung further below its target
+    than the depth being commanded, and the IK thrashed 1.26 rad to move the tip 16 mm.
+
+    It is also the stricter direction: an immovable block rams a compliant hand, and only the
+    contact can stop it from occupying the same space.
+    """
     self.restore()
-    self.pin_object()
     self._cmd = self.target_from_qpos()
-    step0 = self.depth_into_cube_mm(self.target)[0]
+    n = int(approach_steps) + int(hold_steps)
+    self.pin_object(at=self._centre0)
+    step0 = self.depth_into_cube_mm(self._centre0)[0]
     if step0 > 0.0:
       raise RuntimeError(f"step 0 is {step0:.3f} mm INSIDE the block; a run that starts illegal "
                          f"cannot demonstrate a wall. Increase --standoff.")
     worst, series, forces = 0.0, [], []
-    n = len(self._plan)
     for i in range(n):
-      if A.pin_object:
-        self.pin_object()
+      frac = min(1.0, (i + 1) / max(int(approach_steps), 1))
+      c = self._centre0 - self._axis * (frac * self._travel)
+      self.pin_object(at=c)
       if self.base_vadr is not None:
         self.qvel()[0, self.base_vadr:self.base_vadr + 6] = 0.0
-      cmd = self._cmd.copy()
-      cmd[self._plan_acts] = self._plan[i]
-      self.cmd()[0, :] = torch.tensor(cmd, dtype=self.cmd().dtype, device=self.cmd().device)
+      self.cmd()[0, :] = torch.tensor(self._cmd, dtype=self.cmd().dtype, device=self.cmd().device)
       self.env._physics_step()
       self.env.state_in, self.env.state_out = self.env.state_out, self.env.state_in
-      d = self.depth_into_cube_mm(self.target)[0]
+      d = self.depth_into_cube_mm(c)[0]
       worst = max(worst, d)
-      ov, nc, f, tc = self.overlap_mm()
+      _ov, _n, f, _tc = self.overlap_mm()
+      forces.append(f if np.isfinite(f) else 0.0)
       if self._rec is not None and i % max(1, self.env.decimation) == 0:
         self._rec[0].append(sq(self.qpos()).copy())
         self._rec[1].append((sq(self.d.mocap_pos).copy(), sq(self.d.mocap_quat).copy()))
         series.append(d)
-      forces.append(f if np.isfinite(f) else 0.0)
-    tail = int(0.2 * n)
-    settled = float(np.mean([self.depth_into_cube_mm(self.target)[0]]))
     ov, nc, f, tc = self.overlap_mm()
     self._series = series
-    return dict(start_mm=step0, worst_mm=worst, settled_mm=settled, contact_mm=ov,
-                ncon=nc, force_N=float(np.max(forces)), pair_timeconst=tc,
+    return dict(start_mm=step0, worst_mm=worst,
+                settled_mm=self.depth_into_cube_mm(c)[0], contact_mm=ov, ncon=nc,
+                force_N=float(np.max(forces)), pair_timeconst=tc,
                 finite=bool(np.isfinite(sq(self.qpos())).all()))
 
 
@@ -1145,14 +1183,8 @@ def main():
     # target than the depth being commanded.
     rig._cmd = rig.target_from_qpos()
     rig.run(sub, 0, park_object=True)
-    before = sq(rig.qpos()).copy()
     rig.snapshot(freeze_hold=True)
-    rig._cmd = rig.target_from_qpos()
-    rig.run(sub // 2, 0, park_object=True)
-    droop = 1000.0 * float(np.abs(sq(rig.qpos()) - before).max())
-    rig.snapshot(freeze_hold=True)
-    print(f"  arm settled under its own servo; residual movement over a further "
-          f"{sub//2} substeps is {droop:.3f} (joint units)")
+    print(f"  arm settled under its own servo before the block is placed")
     print(f"\n{'setting':16s}{'depth mm':>9s}{'standoff':>10s}{'start':>8s}"
           f"{'commanded':>11s}{'WORST':>9s}{'settled':>9s}{'contact':>9s}{'ncon':>6s}"
           f"{'maxFn':>10s}{'tau':>8s}{'pass':>6s}")
@@ -1163,12 +1195,11 @@ def main():
       for note in apply_setting(rig, name):
         print(f"  [readback] {note}")
       for depth in [float(x) for x in A.depths.split(",")]:
-        info = rig.plan_approach(A.standoff, depth, sub, hold)
-        print(f"  [plan] {info['n_joints']} arm joints, travel {info['travel_mm']:.1f} mm, "
-              f"tip actually moved {info['tip_moved_mm']:.1f} mm, max joint change "
-              f"{info['plan_delta']:.4f} rad", flush=True)
+        info = rig.plan_block_press(A.standoff, depth)
+        print(f"  [plan] block travels {info['travel_mm']:.1f} mm from a "
+              f"{info['start_clear_mm']:.1f} mm standoff", flush=True)
         rig.start_recording(bool(A.dump) and A.dump_of in f"{name}|{depth}")
-        r = rig.run_approach()
+        r = rig.run_approach(sub, hold)
         ok = r["worst_mm"] <= A.noise_floor and r["finite"]
         rows.append(dict(setting=name, depth_mm=1000*depth,
                          standoff_mm=info["start_clear_mm"],
