@@ -625,6 +625,32 @@ if os.environ.get("CONTACT_CENSUS"):
     _qpos_t[0, :] = _frozen
     _qvel_t[0, :] = 0.0
 
+    # Does the pose the collider sees match the pose that was written? mjlab's state lives in
+    # Newton and mjw_data is a mirror it re-syncs, so a direct qpos write can be discarded before
+    # the narrow phase runs -- in which case the census describes the reset pose, where the hand
+    # is nowhere near the object, and every number below is about the wrong configuration.
+    _xp = _cwp.to_torch(_d.xpos)[0].detach().cpu().numpy()
+    _oid = next(_i for _i in range(_m.nbody)
+                if "apple" in (_cmj.mj_id2name(_m, _cmj.mjtObj.mjOBJ_BODY, _i) or "")
+                and "robot" not in (_cmj.mj_id2name(_m, _cmj.mjtObj.mjOBJ_BODY, _i) or ""))
+    _tid = next(_i for _i in range(_m.nbody)
+                if (_cmj.mj_id2name(_m, _cmj.mjtObj.mjOBJ_BODY, _i) or "")
+                .endswith("right_finger2_link4"))
+    _oj = next(_j for _j in range(_m.njnt) if _m.jnt_type[_j] == _cmj.mjtJoint.mjJNT_FREE
+               and "apple" in (_cmj.mj_id2name(_m, _cmj.mjtObj.mjOBJ_JOINT, _j) or ""))
+    _wrote = _qall[_f][int(_m.jnt_qposadr[_oj]):int(_m.jnt_qposadr[_oj]) + 3]
+    _sep = float(_cnp.linalg.norm(_xp[_oid] - _xp[_tid]))
+    print("[census] object xpos in sim %s vs qpos written %s  (delta %.4f m)" % (
+        _cnp.round(_xp[_oid], 4), _cnp.round(_wrote, 4),
+        float(_cnp.linalg.norm(_xp[_oid] - _wrote))), flush=True)
+    print("[census] fingertip xpos %s   tip-to-object separation %.4f m" % (
+        _cnp.round(_xp[_tid], 4), _sep), flush=True)
+    _og = next(_i for _i in range(_m.ngeom) if _isobj[_i])
+    _fg = [_i for _i in range(_m.ngeom) if "finger2_link4" in _bname[_i]]
+    print("[census] masks: object contype=%d conaffinity=%d | fingertip %s" % (
+        int(_m.geom_contype[_og]), int(_m.geom_conaffinity[_og]),
+        [(int(_m.geom_contype[_i]), int(_m.geom_conaffinity[_i])) for _i in _fg]), flush=True)
+
     _g = _cg.detach().cpu().numpy()
     _w = _cw.detach().cpu().numpy()
     _s = _cd.detach().cpu().numpy()
