@@ -92,6 +92,12 @@ ap.add_argument("--dump", default=None,
 ap.add_argument("--dump-of", default="",
                 help="only record the row whose label contains this string")
 ap.add_argument("--settings", default="baseline")
+ap.add_argument("--nconmax", type=int, default=4096,
+                help="the env sizes this for 2048 worlds; one pinned world with the legs' colliders "
+                     "off overflowed 512 (857 Newton contacts) and the excess is silently dropped")
+ap.add_argument("--njmax", type=int, default=16384)
+ap.add_argument("--sep", default=";", help="separator between --settings entries; a comma is part "
+                                           "of a solref value")
 ap.add_argument("--out", default=None, help="write the rows as csv here as well")
 A = ap.parse_args()
 
@@ -187,6 +193,7 @@ def build_env():
     from mjlab.tasks.residual_interact.env_cfgs import set_astra_body_dynamics
     set_astra_body_dynamics(cfg)
   return NewtonVecEnv(cfg, A.xml, num_envs=1, device="cuda:0",
+                      nconmax=A.nconmax, njmax=A.njmax,
                       sdf_object_stl=A.sdf_object, sdf_resolution=A.sdf_resolution,
                       native_contacts=bool(A.native_contacts),
                       hydro_object_table=False,          # --rigid-object-table
@@ -562,6 +569,26 @@ class Rig:
     push(self.sv, "geom_contype", m.geom_contype)
     push(self.sv, "geom_conaffinity", m.geom_conaffinity)
     got = int(np.atleast_1d(readback(self.sv, "geom_contype", off[0]))[0]) if off else -1
+
+    # One step at the recorded pose so geom_xpos is current, then find the base lift that clears
+    # the hand of the cube. Only the base translates, so raising it by dz raises every hand vertex
+    # by dz: the search is arithmetic, not simulation.
+    self.qpos()[0, :] = torch.tensor(self._drop_q, dtype=self.qpos().dtype,
+                                     device=self.qpos().device)
+    self.qvel()[0, :] = 0.0
+    self._cmd = np.zeros(m.nu, dtype=np.float64)
+    self.run(1, 0)
+    c = sq(self.d.geom_xpos)[self.obj_geoms[0]]
+    self._start_depth = self.depth_into_cube_mm(c)[0]
+    V = np.concatenate(list(self.hand_world_verts().values()), axis=0)
+    self._clear_dz = 0.0
+    for k in range(0, 300):
+      dz = k * 0.001
+      P = V + np.array([0.0, 0.0, dz])
+      d = self.h[None, :] - np.abs(P - c[None, :])
+      if float(d.min(axis=1).max()) < -0.002:
+        self._clear_dz = dz
+        break
     return len(self._pin_q), len(off), got
 
   def drop(self, height, steps=600):
@@ -577,14 +604,26 @@ class Rig:
     version of this did exactly that and blew the base velocity up to 1.2e5 m/s in one drop.
     """
     m = self.m
+    # MuJoCo carries warm-start and applied-force buffers across steps. Without clearing them a
+    # drop that diverged poisons every drop after it: measured, rows 2..5 all reported the same
+    # frozen number and a NaN object pose.
+    try:
+      self.sv.reset(self.env.state_in)
+    except Exception:
+      pass
     q, v = self.qpos(), self.qvel()
     q[0, :] = torch.tensor(self._drop_q, dtype=q.dtype, device=q.device)
     v[0, :] = 0.0
     base = [j for j in range(m.njnt) if int(m.jnt_type[j]) == 0
             and "floating_base" in jname(m, j)][0]
-    bv = int(m.jnt_dofadr[base])
+    bq, bv = int(m.jnt_qposadr[base]), int(m.jnt_dofadr[base])
+    # The recorded pose already has the hand 15.3 mm INSIDE the cube -- that is the training
+    # penetration this whole investigation is about, and it is a useless starting point for a drop.
+    # Raise the base until the hand is clear, then add the drop height on top. The robot is rigid
+    # and only the base translates, so the offset is exact arithmetic on the cached vertices.
+    q[0, bq + 2] += float(self._clear_dz + height)
+    v[0, bv + 2] = 0.0
     v0 = float(np.sqrt(2.0 * 9.81 * max(height, 0.0)))
-    v[0, bv + 2] = -v0
     self._cmd = np.zeros(m.nu, dtype=np.float64)   # no servo authority at all
     pinv = torch.as_tensor(self._pin_v, device=v.device)
     obj0 = sq(self.qpos())[self.obj_qadr:self.obj_qadr + 3].copy()
@@ -609,7 +648,7 @@ class Rig:
     settled, _ = self.depth_into_cube_mm(sq(self.d.geom_xpos)[self.obj_geoms[0]])
     ov, n, f, tc = self.overlap_mm()
     moved = 1000.0 * float(np.linalg.norm(sq(self.qpos())[self.obj_qadr:self.obj_qadr + 3] - obj0))
-    return dict(launch_v=v0, start_overlap_mm=gap0, worst_mm=worst, settled_mm=settled,
+    return dict(fall_v=v0, clear_dz_mm=1000*self._clear_dz, start_overlap_mm=gap0, worst_mm=worst, settled_mm=settled,
                 worst_contact_mm=wcon, ncon_max=nmax, ncon=n, force_N=f, vmax=vmax,
                 object_moved_mm=moved, finite=bool(np.isfinite(sq(self.qpos())).all()))
 
@@ -797,13 +836,16 @@ def main():
           f"base and the object's free joint are the only things left free")
     print(f"  {noff} leg/torso collider(s) switched off (contype readback {ct}) so the feet cannot "
           f"take the impulse the hand is supposed to")
+    print(f"  at the recorded pose the hand is already {rig._start_depth:.2f} mm INSIDE the cube "
+          f"(that is the training penetration); the base is raised {1000*rig._clear_dz:.0f} mm to "
+          f"clear it before any drop height is added")
     print(f"  falling mass: the whole robot as one rigid body, "
           f"{float(rig.m.body_mass.sum()) - float(rig.m.body_mass[rig.obj_body]):.2f} kg")
     print(f"\n{'setting':22s}{'drop mm':>9s}{'impact m/s':>12s}{'worst mm':>10s}"
           f"{'settled mm':>12s}{'worst con':>12s}{'ncon':>6s}{'Fn (N)':>10s}{'obj moved':>11s}")
     print("-" * 104)
     rows = []
-    for name in [x.strip() for x in A.settings.split(",") if x.strip()]:
+    for name in [x.strip() for x in A.settings.split(A.sep) if x.strip()]:
       reset_settings(rig)
       for note in apply_setting(rig, name):
         print(f"  [readback] {note}")
@@ -811,7 +853,7 @@ def main():
         rig.start_recording(bool(A.dump) and (A.dump_of in f"{name}|{h}"))
         r = rig.drop(h)
         rows.append(dict(setting=name, height=h, **r))
-        print(f"{name[:22]:22s}{1000*h:9.0f}{r['launch_v']:12.3f}{r['worst_mm']:10.3f}"
+        print(f"{name[:22]:22s}{1000*h:9.0f}{r['fall_v']:12.3f}{r['worst_mm']:10.3f}"
               f"{r['settled_mm']:12.3f}{r['worst_contact_mm']:12.3f}{r['ncon_max']:6d}"
               f"{r['force_N']:10.2f}{r['object_moved_mm']:11.2f}", flush=True)
         if rig._rec:
@@ -841,7 +883,7 @@ def main():
             f"solimp={np.round(c['solimp'],3)} Fn={c['force']:9.3f} N")
     return
 
-  settings = [s.strip() for s in A.settings.split(",") if s.strip()]
+  settings = [s.strip() for s in A.settings.split(A.sep) if s.strip()]
   rows = []
   if A.mode == "position":
     sweep = [float(x) for x in A.closures.split(",")]
