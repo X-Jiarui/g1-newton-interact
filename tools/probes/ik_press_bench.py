@@ -240,7 +240,15 @@ class Rig:
     return wp.to_torch(self.d.qvel)
 
   def ctrl(self):
+    """mjw_data.ctrl -- READ ONLY. Writing it is useless: SolverMuJoCo calls _apply_mjc_control at
+    the top of every step, so a direct write is overwritten before it is ever used. The first
+    version of this bench wrote here and measured zero hand-object contacts in every condition,
+    because the fingers never moved. The command goes through `cmd()`."""
     return wp.to_torch(self.d.ctrl)
+
+  def cmd(self):
+    """Newton's Control object, which is what the solver actually reads."""
+    return wp.to_torch(self.env.control.mujoco.ctrl).view(self.env.num_envs, -1)
 
   def xpos(self):
     return wp.to_torch(self.d.xpos)
@@ -352,12 +360,12 @@ class Rig:
   def snapshot(self):
     self._q0 = self.qpos().clone()
     self._v0 = self.qvel().clone()
-    self._c0 = self.ctrl().clone()
+    self._c0 = self.cmd().clone()
 
   def restore(self):
     self.qpos()[:] = self._q0
     self.qvel()[:] = self._v0
-    self.ctrl()[:] = self._c0
+    self.cmd()[:] = self._c0
 
   def gravcomp_object(self, on=True):
     """Cancel the object's own weight so the press has a well-posed equilibrium.
@@ -390,8 +398,8 @@ class Rig:
     for _ in range(steps):
       if self.base_vadr is not None:
         self.qvel()[0, self.base_vadr:self.base_vadr + 6] = 0.0
-      self.ctrl()[0, :] = torch.tensor(self._cmd, dtype=self.ctrl().dtype,
-                                       device=self.ctrl().device)
+      self.cmd()[0, :] = torch.tensor(self._cmd, dtype=self.cmd().dtype,
+                                      device=self.cmd().device)
       self.env._physics_step()
       self.env.state_in, self.env.state_out = self.env.state_out, self.env.state_in
     xp = self.xpos().cpu().numpy()
@@ -430,8 +438,10 @@ class Rig:
     `finger_delta_rad` further. Written straight to mjw_data.ctrl, so no action manager, no
     residual, no tracker enters the number."""
     m = self.m
-    q = self.qpos().cpu().numpy()[0]
-    c = self.ctrl()
+    q = self.qpos().cpu().numpy()
+    while q.ndim > 1:
+      q = q[0]
+    c = self.cmd()
     tgt = np.zeros(m.nu, dtype=np.float64)
     for a in range(m.nu):
       j = self.jnt_of_act[a]
@@ -455,13 +465,21 @@ class Rig:
     leaves the integrator's own solution alone.
     """
     hist = []
+    m_nu = self.m.nu
     for i in range(nsteps):
       if pin_base and self.base_vadr is not None:
         self.qvel()[0, self.base_vadr:self.base_vadr + 6] = 0.0
-      self.ctrl()[0, :] = torch.tensor(self._cmd, dtype=self.ctrl().dtype,
-                                       device=self.ctrl().device)
+      self.cmd()[0, :] = torch.tensor(self._cmd, dtype=self.cmd().dtype,
+                                      device=self.cmd().device)
       self.env._physics_step()
       self.env.state_in, self.env.state_out = self.env.state_out, self.env.state_in
+      if i == 0:
+        # Nothing is trusted because it was written. Confirm the command reached mjw_data.ctrl,
+        # which is the array the actuators are evaluated from.
+        got = self.ctrl().cpu().numpy().reshape(-1)[:m_nu]
+        err = float(np.max(np.abs(got - self._cmd)))
+        if err > 1e-4:
+          raise RuntimeError(f"the command did not reach mjw_data.ctrl: max error {err:.6f}")
       if i >= nsteps - hold:
         hist.append(self.overlap_mm()[0])
     ov, n, f = self.overlap_mm()
