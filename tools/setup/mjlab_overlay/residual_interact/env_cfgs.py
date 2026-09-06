@@ -2147,11 +2147,16 @@ def residual_interact_env_cfg(
                 armature=mdp.apple_mdp._ARMATURE_4010,
                 frictionloss=0.0,
               ),
+              # The SECOND hand actuator site. The first, in _astra_body_actuator_cfgs, is only
+              # installed when line ~867 runs; this one builds the robot entity directly and is
+              # what the cube runs actually compile. Editing one and not the other is how a hand
+              # effort sweep printed its new limit, changed nothing in the model, and produced an
+              # A/B whose independent variable never moved.
               BuiltinPositionActuatorCfg(
                 target_names_expr=_HAND_JOINT_EXPR,
-                stiffness=300.0,
-                damping=8.0,
-                effort_limit=30.0,
+                stiffness=_HAND_KP,
+                damping=_HAND_KD,
+                effort_limit=_HAND_EFFORT,
                 frictionloss=0.0,
               ),
             ),
