@@ -1914,6 +1914,34 @@ class NewtonVecEnv:
             self._pen_split[2] += float(_pos[_old_m].mean()) * 1000.0
             self._pen_split[3] += 1
             self._pen_split[5] = max(self._pen_split[5], float(_pos[_old_m].max()) * 1000.0)
+          # Compliance, and why it is the number to watch instead of raw penetration.
+          #
+          # Comparing penetration between two rollouts is worthless on its own: a policy whose
+          # grasp got WORSE stands further off the object, presses more lightly, and scores a
+          # shallower overlap for the wrong reason. Millimetres per newton cannot be gamed that
+          # way -- it is a property of the contact model, so a hand that barely touches shrinks
+          # numerator and denominator together and the ratio holds still. Only physics moves it.
+          #
+          # The normal force is the SUM over the friction-cone pyramid edges. Reading efc_force at
+          # the contact's first address instead returns one edge, which on this scene reads 0.00 N
+          # next to a true 15.76 N -- and reported as force it produced a 654 N fiction that
+          # survived a whole round of conclusions.
+          try:
+            _adr_t = _wpl.to_torch(_c.efc_address)
+            _efc_t = _wpl.to_torch(self.solver.mjw_data.efc.force)
+            _wid_t = _wpl.to_torch(_c.worldid).long()
+            if _adr_t.dim() == 1:
+              _adr_t = _adr_t.unsqueeze(1)
+            _ok = _adr_t >= 0
+            _idx0 = _wid_t.unsqueeze(1).expand_as(_adr_t).clamp(0, _efc_t.shape[0] - 1)
+            _fn = (_efc_t[_idx0, _adr_t.clamp(min=0).long()] * _ok).sum(dim=1)[_sel]
+            if not hasattr(self, "_pen_cmp"):
+              self._pen_cmp = [0.0, 0.0, 0]
+            self._pen_cmp[0] += float(_pos.sum()) * 1000.0
+            self._pen_cmp[1] += float(_fn.clamp(min=0.0).sum())
+            self._pen_cmp[2] += int(_pos.numel())
+          except Exception:
+            self._pen_cmp = None
           if self._pen_acc[5] >= 200:
             _k = self._pen_acc[5]
             print(f"[pen-stat] mean={self._pen_acc[0]/_k:.4f}mm max={self._pen_acc[1]:.4f}mm "
@@ -1924,6 +1952,14 @@ class NewtonVecEnv:
                   f"{(_ps[0]/_ps[1] if _ps[1] else float('nan')):.4f}mm max={_ps[4]:.4f}mm | "
                   f"settled: mean={(_ps[2]/_ps[3] if _ps[3] else float('nan')):.4f}mm "
                   f"max={_ps[5]:.4f}mm", flush=True)
+            _cm = getattr(self, "_pen_cmp", None)
+            if _cm and _cm[2]:
+              _mp, _mf = _cm[0] / _cm[2], _cm[1] / _cm[2]
+              print(f"[pen-compliance] {(_mp / _mf if _mf > 1e-9 else float('nan')):.4f} mm/N  "
+                    f"(mean pen {_mp:.4f}mm over mean normal force {_mf:.4f}N, "
+                    f"{_cm[2]} contacts) -- the ratio is what a physics change moves; a grasp "
+                    f"that merely got worse shrinks both terms and leaves it alone", flush=True)
+              self._pen_cmp = [0.0, 0.0, 0]
             self._pen_split = [0.0, 0, 0.0, 0, 0.0, 0.0]
             self._pen_acc = [0.0, 0.0, 0.0, 0.0, 0.0, 0]
 
