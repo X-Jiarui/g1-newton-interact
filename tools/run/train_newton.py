@@ -459,6 +459,98 @@ if A.resume:
   runner.load(A.resume)
   print(f"warm-started from {A.resume}")
 
+# --- frozen-pose press test -----------------------------------------------------------------
+# The airtight version of "does this contact setting resist penetration". Every observational
+# comparison of two rollouts is confounded: the physics changes the trajectory, so a setting can
+# score a shallower overlap merely by keeping the hand further away or by squeezing less. Here the
+# geometry AND the load are imposed:
+#
+#   * the robot's joints are pinned to one recorded pose and re-pinned every control step, so the
+#     hand is an immovable obstacle in exactly the same place under every setting;
+#   * the object is pushed into that hand by a known external force in NEWTONS, swept over a range;
+#   * the settled overlap is read off.
+#
+# The output is a penetration-vs-force curve whose x axis is real units and whose geometry is
+# identical across settings, so both questions are answerable: is this setting stiffer, and what
+# would a retrained policy that presses N times harder actually get.
+if os.environ.get("PRESS_TEST"):
+  import numpy as _pnp, torch as _pt, warp as _pwp, mujoco as _pmj
+  _out = os.environ["PRESS_TEST"]
+  _npz = _pnp.load(os.environ["PRESS_QPOS"], allow_pickle=True)
+  _qall = _npz["qpos"]
+  _frame = int(os.environ.get("PRESS_FRAME", "-1")) % len(_qall)
+  _forces = [float(x) for x in os.environ.get("PRESS_FORCES", "1,2,5,10,20,50,100").split(",")]
+  _settle = int(os.environ.get("PRESS_SETTLE", "60"))
+
+  _m = env.solver.mj_model
+  _d = env.solver.mjw_data
+  _objb = next(i for i in range(_m.nbody)
+               if "apple" in (_pmj.mj_id2name(_m, _pmj.mjtObj.mjOBJ_BODY, i) or "")
+               and "robot" not in (_pmj.mj_id2name(_m, _pmj.mjtObj.mjOBJ_BODY, i) or ""))
+  _palmb = next(i for i in range(_m.nbody)
+                if (_pmj.mj_id2name(_m, _pmj.mjtObj.mjOBJ_BODY, i) or "").endswith("right_palm_link"))
+  _free = next(j for j in range(_m.njnt) if _m.jnt_type[j] == _pmj.mjtJoint.mjJNT_FREE
+               and "apple" in (_pmj.mj_id2name(_m, _pmj.mjtObj.mjOBJ_JOINT, j) or ""))
+  _oq = int(_m.jnt_qposadr[_free])
+
+  _rob = _pnp.array([bool("robot" in (_pmj.mj_id2name(_m, _pmj.mjtObj.mjOBJ_BODY,
+                                                      int(_m.geom_bodyid[g])) or ""))
+                     for g in range(_m.ngeom)])
+  _obg = _pnp.array([int(_m.geom_bodyid[g]) == _objb for g in range(_m.ngeom)])
+
+  _qpos_t = _pwp.to_torch(_d.qpos)
+  _qvel_t = _pwp.to_torch(_d.qvel)
+  _xfrc = _pwp.to_torch(_d.xfrc_applied) if hasattr(_d, "xfrc_applied") else None
+  if _xfrc is None:
+    raise SystemExit("mjw_data has no xfrc_applied; press test cannot apply a known load")
+  _frozen = _pt.tensor(_qall[_frame], dtype=_qpos_t.dtype, device=_qpos_t.device)
+  import torch as _rt
+  _zero_act = _rt.zeros((env.num_envs, env.num_actions), device="cuda:0")
+
+  def _overlap_mm():
+    _c = _d.contact
+    _g = _pwp.to_torch(_c.geom).detach().cpu().numpy()
+    _w = _pwp.to_torch(_c.worldid).detach().cpu().numpy()
+    _s = _pwp.to_torch(_c.dist).detach().cpu().numpy()
+    _best = 0.0
+    for _i in range(_g.shape[0]):
+      if int(_w[_i]) != 0:
+        continue
+      _a, _b = int(_g[_i, 0]), int(_g[_i, 1])
+      if _a < 0 or _b < 0:
+        continue
+      if (_rob[_a] and _obg[_b]) or (_rob[_b] and _obg[_a]):
+        _best = min(_best, float(_s[_i]))
+    return -_best * 1000.0
+
+  print(f"[press] frame {_frame} of {len(_qall)}; forces {_forces} N; {_settle} settle steps each",
+        flush=True)
+  with open(_out, "w") as _fh:
+    _fh.write("force_N,overlap_mm,contacts\n")
+    for _F in _forces:
+      _qpos_t[0, :] = _frozen
+      _qvel_t[0, :] = 0.0
+      _xfrc[0, :, :] = 0.0
+      for _k in range(_settle):
+        with _rt.inference_mode():
+          env.step(_zero_act)
+        # Re-pin the robot every control step. The object's own free joint (from _oq on) is left
+        # alone -- it is the only thing allowed to move, which is what makes the load meaningful.
+        _qpos_t[0, :_oq] = _frozen[:_oq]
+        _qvel_t[0, :_oq - 1] = 0.0
+        _op = _pwp.to_torch(_d.xpos)[0, _objb].detach()
+        _pp = _pwp.to_torch(_d.xpos)[0, _palmb].detach()
+        _dir = (_pp - _op)
+        _dir = _dir / _dir.norm().clamp_min(1e-9)
+        _xfrc[0, _objb, :3] = _dir * _F
+      _ov = _overlap_mm()
+      _nc = int(((_rob[_pwp.to_torch(_d.contact.geom).detach().cpu().numpy()[:, 0].clip(0)]
+                  & _obg[_pwp.to_torch(_d.contact.geom).detach().cpu().numpy()[:, 1].clip(0)])).sum())
+      print(f"[press] {_F:8.2f} N -> overlap {_ov:7.3f} mm  ({_nc} contacts)", flush=True)
+      _fh.write(f"{_F},{_ov},{_nc}\n")
+  print(f"[press] wrote {_out}", flush=True)
+  raise SystemExit(0)
+
 if A.rollout_steps:
   # Deterministic inference, not the stochastic rollout `learn` would collect: the point is to see
   # what the policy does, not what it explores.
