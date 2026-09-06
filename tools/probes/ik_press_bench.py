@@ -253,13 +253,22 @@ class Rig:
     (ncon, nedges); the normal force is the sum across the second axis.
     """
     c = self.d.contact
-    n = int(wp.to_torch(self.d.ncon).cpu().numpy().reshape(-1)[0])
-    geom = wp.to_torch(c.geom).cpu().numpy()
-    dist = wp.to_torch(c.dist).cpu().numpy()
-    solref = wp.to_torch(c.solref).cpu().numpy()
-    solimp = wp.to_torch(c.solimp).cpu().numpy()
-    incm = wp.to_torch(c.includemargin).cpu().numpy()
-    adr = wp.to_torch(c.efc_address).cpu().numpy()
+    cnt = getattr(self.d, "nacon", None)
+    if cnt is None:
+      cnt = getattr(self.d, "ncon")
+    n = int(wp.to_torch(cnt).cpu().numpy().reshape(-1)[0])
+    def sq(a):
+      # mjWarp lays contact arrays out per world; at one world the leading axis is a singleton.
+      v = wp.to_torch(a).cpu().numpy()
+      while v.ndim > 1 and v.shape[0] == 1:
+        v = v[0]
+      return v
+    geom = sq(c.geom)
+    dist = sq(c.dist)
+    solref = sq(c.solref)
+    solimp = sq(c.solimp)
+    incm = sq(c.includemargin)
+    adr = sq(c.efc_address)
     try:
       efc = wp.to_torch(self.d.efc.force).cpu().numpy().reshape(-1)
     except Exception:
@@ -292,6 +301,52 @@ class Rig:
     d = np.array([c["dist"] for c in keep])
     f = np.array([c["force"] for c in keep])
     return -1000.0 * float(d.min()), len(keep), float(np.nansum(f))
+
+  # ---- geometric ground truth ---------------------------------------------------------
+  def _hull_verts(self):
+    """Cache every hand collider's hull vertices in its own geom frame."""
+    if getattr(self, "_hv", None) is not None:
+      return self._hv
+    m = self.m
+    out = []
+    for g in self.hand_geoms:
+      if int(m.geom_type[g]) != 7 or int(m.geom_dataid[g]) < 0:
+        continue
+      did = int(m.geom_dataid[g])
+      va, vn = int(m.mesh_vertadr[did]), int(m.mesh_vertnum[did])
+      out.append((g, m.mesh_vert[va:va + vn].reshape(-1, 3).astype(np.float64)))
+    self._hv = out
+    return out
+
+  def geometric_overlap_mm(self):
+    """How far the hand's SURFACE actually lies inside the object's, with no physics at all.
+
+    `contact.dist` under an SDF collider has been suspected of not being the geometric
+    interpenetration it looks like. This is the check: pure geometry, no solver, no contact model.
+    The object is a box, so testing a vertex against its six faces is exact.
+    """
+    m = self.m
+    gx = wp.to_torch(self.d.geom_xpos).cpu().numpy()
+    gm = wp.to_torch(self.d.geom_xmat).cpu().numpy()
+    while gx.ndim > 2:
+      gx, gm = gx[0], gm[0]
+    og = self.obj_geoms[0]
+    R = gm[og].reshape(3, 3)
+    p0 = gx[og]
+    did = int(m.geom_dataid[og])
+    va, vn = int(m.mesh_vertadr[did]), int(m.mesh_vertnum[did])
+    V = m.mesh_vert[va:va + vn].reshape(-1, 3).astype(np.float64)
+    lo, hi = V.min(0), V.max(0)
+    c, h = 0.5 * (lo + hi), 0.5 * (hi - lo)
+    best, bestg = 0.0, None
+    for g, hv in self._hull_verts():
+      P = (hv @ gm[g].reshape(3, 3).T + gx[g] - p0) @ R          # into the object geom frame
+      d = h[None, :] - np.abs(P - c[None, :])
+      inside = d.min(axis=1)
+      k = float(inside.max()) if inside.size else 0.0
+      if k > best:
+        best, bestg = k, g
+    return 1000.0 * best, bestg
 
   # ---- the command -------------------------------------------------------------------
   def snapshot(self):
@@ -365,7 +420,11 @@ class Rig:
     drift = float(h.max() - h.min()) if h.size >= 2 else float("nan")
     q = self.qpos().cpu().numpy()
     ok = bool(np.isfinite(q).all())
-    return dict(overlap_mm=ov, ncon=n, force_N=f, drift_mm=drift, finite=ok)
+    geo, _ = self.geometric_overlap_mm()
+    keep, _, _ = self.hand_object_contacts()
+    sr = float(keep[0]["solref"][0]) if keep else float("nan")
+    return dict(overlap_mm=ov, geom_mm=geo, ncon=n, force_N=f, drift_mm=drift,
+                pair_timeconst=sr, finite=ok)
 
 
 # --------------------------------------------------------------------------------------- switches
@@ -444,11 +503,19 @@ def dump_facts(rig):
   print(f"  cone {int(m.opt.cone)}  impratio {float(m.opt.impratio)}  "
         f"iterations {int(m.opt.iterations)}  ls_iterations {int(m.opt.ls_iterations)}  "
         f"integrator {int(m.opt.integrator)}")
+  # SolverMuJoCo writes `mj_model.opt.timestep = dt` and `mjw_model.opt.timestep.fill_(dt)` on
+  # every step, so the value BEFORE the first step is meaningless. Read it back after one.
+  env._physics_step()
+  env.state_in, env.state_out = env.state_out, env.state_in
+  dev_dt2 = getattr(sv.mjw_model.opt, "timestep", None)
+  dev_dt2 = float(wp.to_torch(dev_dt2).cpu().numpy().reshape(-1)[0]) if hasattr(dev_dt2, "dtype") \
+      else dev_dt2
+  print(f"  after ONE solver.step: host {float(m.opt.timestep)}  device {dev_dt2}")
   refsafe = int(m.opt.disableflags) & int(mujoco.mjtDisableBit.mjDSBL_REFSAFE)
   clamp = 2.0 * float(m.opt.timestep)
   print(f"  disableflags {int(m.opt.disableflags)}  REFSAFE disabled: {bool(refsafe)}")
   print(f"  -> solref timeconst is clamped up to 2*opt.timestep = {clamp*1000:.2f} ms "
-        f"unless REFSAFE is disabled")
+        f"unless REFSAFE is disabled; anything shorter than that CANNOT be asked for")
   if abs(float(m.opt.timestep) - float(env.physics_dt)) > 1e-9:
     print(f"  !! MISMATCH: the clamp uses opt.timestep ({1000*float(m.opt.timestep):.2f} ms) but "
           f"Newton integrates {1000*float(env.physics_dt):.2f} ms")
@@ -521,9 +588,13 @@ def dump_facts(rig):
               + ("   <-- NONZERO OVERRIDES geom solref entirely" if nz else ""))
     mode = getattr(getattr(env.nmodel, "mujoco", None), "solref_mode", None)
     if mode is not None:
+      # RETRACTED first reading: 2 is not FORCE_SPACE. newton/_src/solvers/mujoco/constants.py
+      # says FORCE_SPACE=0, RAW=1, MJCF_DEFAULT=2. Mode 2 means the geom's authored solref is
+      # used as-is, so the shape-material ke/kd override in the contact kernel never fires here.
       v = wp.to_torch(mode).cpu().numpy()
-      print(f"  shape solref_mode: unique {np.unique(v).tolist()} "
-            f"(2 = FORCE_SPACE, which recomputes solref from shape ke/kd)")
+      names = {0: "FORCE_SPACE(ke/kd override)", 1: "RAW", 2: "MJCF_DEFAULT(geom solref used)"}
+      print(f"  shape solref_mode: "
+            + ", ".join(f"{int(k)}={names.get(int(k), '?')}" for k in np.unique(v)))
 
 
 def dump_live_contacts(rig, limit=12):
@@ -555,6 +626,9 @@ def main():
     r = rig.step_settled(200, 50)
     print(f"  {r}")
     dump_live_contacts(rig)
+    g, gg = rig.geometric_overlap_mm()
+    print(f"\n  geometric overlap (no physics at all): {g:.3f} mm"
+          + (f" on {gname(rig.m, gg)[-40:]}" if gg is not None else ""))
     return
 
   if A.mode == "pose":
