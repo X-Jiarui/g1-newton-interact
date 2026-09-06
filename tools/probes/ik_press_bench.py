@@ -47,7 +47,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 
 ap = argparse.ArgumentParser()
-ap.add_argument("--mode", default="facts", choices=("facts", "position", "force"))
+ap.add_argument("--mode", default="facts", choices=("facts", "position", "force", "drop"))
 ap.add_argument("--xml", default=os.path.join(ROOT, "assets/scene_stapler/scene.xml"))
 ap.add_argument("--sdf-object", default=os.path.expanduser(
     "~/jiarui/scaled_grab_dataset_wuji_all/meshes/cubesmall.stl"))
@@ -77,6 +77,20 @@ ap.add_argument("--pin-object", type=int, default=1,
                      "close gently. Pinning makes it an infinitely heavy anvil, which is the most "
                      "FAVOURABLE case for the contact wall, so any penetration measured this way "
                      "is a lower bound on what the free object suffers.")
+ap.add_argument("--approach", default="envelop",
+                help="how the hand meets the block: envelop (all five fingertips close on it), "
+                     "fingertip (one fingertip presses a face), knuckle (a mid-phalanx edge), or "
+                     "'all'. The failure may depend on which surfaces meet, so this is swept "
+                     "alongside the contact settings.")
+ap.add_argument("--trace", default="/home/jiarui/traces_train/R30_CUBE_freerun.npz",
+                help="drop mode: the recorded pose the robot is frozen in")
+ap.add_argument("--frame", type=int, default=285)
+ap.add_argument("--heights", default="0,0.002,0.01,0.05,0.2",
+                help="drop mode: metres the base is raised before gravity takes over")
+ap.add_argument("--dump", default=None,
+                help="record qpos and mocap per control step to this npz, for render_traj.py")
+ap.add_argument("--dump-of", default="",
+                help="only record the row whose label contains this string")
 ap.add_argument("--settings", default="baseline")
 ap.add_argument("--out", default=None, help="write the rows as csv here as well")
 A = ap.parse_args()
@@ -221,6 +235,7 @@ class Rig:
             if int(m.jnt_type[j]) == 0 and "floating_base" in jname(m, j)]
     self.base_vadr = int(m.jnt_dofadr[base[0]]) if base else None
     self._hv = None
+    self._rec = None
     self.h = self.obj_half()
 
   # ---------------------------------------------------------------- state
@@ -318,8 +333,10 @@ class Rig:
     return keep, rows, n
 
   # ---------------------------------------------------------------- command
-  def snapshot(self):
+  def snapshot(self, freeze_hold=False):
     self._q0, self._v0, self._c0 = self.qpos().clone(), self.qvel().clone(), self.cmd().clone()
+    if freeze_hold or getattr(self, "_hold_q", None) is None:
+      self._hold_q = sq(self.qpos()).copy()
 
   def restore(self):
     self.qpos()[:] = self._q0
@@ -327,8 +344,15 @@ class Rig:
     self.cmd()[:] = self._c0
 
   def target_from_qpos(self, extra=None):
+    """Non-finger actuators hold the RESET pose, not wherever they happen to be.
+
+    Deriving the hold target from the live qpos made the arm hold a different pose in every phase --
+    it sags under gravity between them -- so the point the fingertips converged on moved between
+    calibration and press, and the cube was never where the fingers went. Freezing it means the
+    whole command is one constant.
+    """
     m = self.m
-    q = sq(self.qpos())
+    q = self._hold_q if getattr(self, "_hold_q", None) is not None else sq(self.qpos())
     tgt = np.array([q[self.jadr[self.jnt_of_act[a]]] for a in range(m.nu)], dtype=np.float64)
     if extra is not None:
       tgt[self.finger_acts] = extra
@@ -349,6 +373,25 @@ class Rig:
     q[0, self.obj_qadr + 3:self.obj_qadr + 7] = torch.tensor([1.0, 0.0, 0.0, 0.0],
                                                              dtype=q.dtype, device=q.device)
     v[0, self.obj_vadr:self.obj_vadr + 6] = 0.0
+
+  def start_recording(self, on):
+    self._rec = ([], []) if on else None
+
+  def write_recording(self, path):
+    """Same npz format the training env dumps, so tools/run/render_traj.py replays it unchanged.
+    The mocap poses travel with it: the table is a mocap-driven body and qpos alone leaves it at
+    the origin, under the robot's feet."""
+    if not self._rec or not self._rec[0]:
+      return None
+    m = self.m
+    order = [b for b in range(m.nbody) if m.body_mocapid[b] >= 0]
+    names = [x for _, x in sorted(zip([int(m.body_mocapid[b]) for b in order],
+                                      [bname(m, b) for b in order]))]
+    np.savez_compressed(path, qpos=np.stack(self._rec[0]),
+                        mocap_pos=np.stack([a for a, _ in self._rec[1]]),
+                        mocap_quat=np.stack([b for _, b in self._rec[1]]),
+                        mocap_names=np.array(names))
+    return len(self._rec[0])
 
   def run(self, nsteps, hold, park_object=False, measure_centre=None, pin=False):
     m_nu = self.m.nu
@@ -373,6 +416,9 @@ class Rig:
         if err > 1e-4:
           raise RuntimeError(f"the command never reached mjw_data.ctrl (max error {err:.6f}); "
                              f"writing mjw_data.ctrl directly does not work")
+      if getattr(self, "_rec", None) is not None and i % max(1, self.env.decimation) == 0:
+        self._rec[0].append(sq(self.qpos()).copy())
+        self._rec[1].append((sq(self.d.mocap_pos).copy(), sq(self.d.mocap_quat).copy()))
       if i >= nsteps - hold:
         hist.append(self.overlap_mm()[0] if measure_centre is None
                     else self.depth_into_cube_mm(measure_centre)[0])
@@ -389,7 +435,7 @@ class Rig:
             float(keep[int(np.argmin(d))]["solref"][0]))
 
   # ---------------------------------------------------------------- setup
-  def calibrate(self, settle=250):
+  def calibrate(self, settle=250, approach="envelop"):
     """Two poses, both derived from the scene rather than guessed, both identical in every
     condition: where the CLOSED fingertips converge (the press target), and the OPEN hand the press
     starts from. The cube starts at the target with the hand open, so it is never initialised inside
@@ -402,7 +448,19 @@ class Rig:
     self.set_fingers(hi)
     self.run(settle, 0, park_object=True)
     xp = sq(self.d.xpos)
-    self.target = xp[self.tip_bodies].mean(axis=0)
+    if approach == "envelop":
+      # All five fingertips close on the block at once: five small contacts, the real grasp.
+      self.target = xp[self.tip_bodies].mean(axis=0)
+    elif approach == "fingertip":
+      # One fingertip drives into one face. The smallest, sharpest contact the hand can make.
+      self.target = xp[self.tip_bodies[1]].copy()
+    elif approach == "knuckle":
+      # A mid-phalanx: a long flat edge rather than a tip, and a different SDF neighbourhood.
+      kb = [b for b in range(self.m.nbody)
+            if "right_finger2_link3" in bname(self.m, b)]
+      self.target = xp[kb[0]].copy() if kb else xp[self.tip_bodies[1]].copy()
+    else:
+      raise SystemExit(f"unknown --approach {approach!r}")
     self.closed_spread = float(np.max(np.linalg.norm(
         xp[self.tip_bodies][:, None] - xp[self.tip_bodies][None], axis=-1)))
     self.closed_cmd = self.target_from_qpos(extra=hi)[self.finger_acts]
@@ -455,6 +513,90 @@ class Rig:
         sq(self.qpos())[self.obj_qadr:self.obj_qadr + 3] - self.target))
     return dict(settled_mm=ov, geom_mm=geo, ncon=n, force_N=f, pair_timeconst=tc,
                 drift_mm=drift, object_moved_mm=moved,
+                finite=bool(np.isfinite(sq(self.qpos())).all()))
+
+
+  # ---------------------------------------------------------------- drop
+  def setup_drop(self, trace, frame):
+    """Freeze the whole robot in a recorded pose and let gravity carry it onto the cube.
+
+    Everything but the floating base and the object's own free joint is pinned to the recorded
+    values every substep, so the robot is one rigid body: the drop tests the CONTACT, not the finger
+    servos, and it does it inside the real scene with the real Wuji colliders rather than in a rig
+    welded together by hand.
+
+    Only the PINNED dofs' velocities are zeroed. Zeroing all of qvel freezes the base and the object
+    too -- the two things the drop is about -- and nothing then falls at all.
+
+    The legs' colliders are switched off. Raising the base lifts the feet exactly as far as it lifts
+    the hand, so with them on the feet reach the floor at the same instant the hand reaches the cube
+    and take the whole impulse; the hand would never load the block. With them off the only thing
+    that stops the fall is the hand on the object, which is the measurement.
+    """
+    m = self.m
+    q = np.load(trace, allow_pickle=True)["qpos"]
+    row = q[int(frame) % len(q)]
+    if row.size != m.nq:
+      raise SystemExit(f"trace qpos has {row.size} columns, the model has nq={m.nq}")
+    self._drop_q = row.astype(np.float64).copy()
+
+    free_q, free_v = [], []
+    for j in range(m.njnt):
+      if int(m.jnt_type[j]) != 0:
+        continue
+      n = jname(m, j)
+      if "floating_base" in n or "apple" in n:
+        free_q += list(range(int(m.jnt_qposadr[j]), int(m.jnt_qposadr[j]) + 7))
+        free_v += list(range(int(m.jnt_dofadr[j]), int(m.jnt_dofadr[j]) + 6))
+    self._pin_q = np.array([i for i in range(m.nq) if i not in set(free_q)], dtype=np.int64)
+    self._pin_v = np.array([i for i in range(m.nv) if i not in set(free_v)], dtype=np.int64)
+
+    leg = ("hip", "knee", "ankle", "pelvis", "waist")
+    off = [g for g in range(m.ngeom)
+           if any(k in bname(m, int(m.geom_bodyid[g])) for k in leg)]
+    m.geom_contype[off] = 0
+    m.geom_conaffinity[off] = 0
+    push(self.sv, "geom_contype", m.geom_contype)
+    push(self.sv, "geom_conaffinity", m.geom_conaffinity)
+    got = int(np.atleast_1d(readback(self.sv, "geom_contype", off[0]))[0]) if off else -1
+    return len(self._pin_q), len(off), got
+
+  def drop(self, height, steps=800):
+    """One drop. The base is raised by `height`; nothing else changes."""
+    m = self.m
+    q, v = self.qpos(), self.qvel()
+    q[0, :] = torch.tensor(self._drop_q, dtype=q.dtype, device=q.device)
+    base = [j for j in range(m.njnt) if int(m.jnt_type[j]) == 0
+            and "floating_base" in jname(m, j)][0]
+    ba = int(m.jnt_qposadr[base])
+    q[0, ba + 2] += float(height)
+    v[0, :] = 0.0
+    self._cmd = np.zeros(m.nu, dtype=np.float64)   # no servo authority at all
+    pinq = torch.as_tensor(self._pin_q, device=q.device)
+    pinv = torch.as_tensor(self._pin_v, device=v.device)
+    hold = torch.as_tensor(self._drop_q[self._pin_q], dtype=q.dtype, device=q.device)
+    obj0 = sq(self.qpos())[self.obj_qadr:self.obj_qadr + 3].copy()
+
+    worst, vmax = 0.0, 0.0
+    for i in range(steps):
+      self.qpos()[0, pinq] = hold
+      self.qvel()[0, pinv] = 0.0
+      self.cmd()[0, :] = 0.0
+      self.env._physics_step()
+      self.env.state_in, self.env.state_out = self.env.state_out, self.env.state_in
+      if self._rec is not None and i % max(1, self.env.decimation) == 0:
+        self._rec[0].append(sq(self.qpos()).copy())
+        self._rec[1].append((sq(self.d.mocap_pos).copy(), sq(self.d.mocap_quat).copy()))
+      c = sq(self.d.geom_xpos)[self.obj_geoms[0]]
+      d, _ = self.depth_into_cube_mm(c)
+      worst = max(worst, d)
+      vmax = max(vmax, float(abs(sq(self.qvel())[int(m.jnt_dofadr[base]) + 2])))
+    c = sq(self.d.geom_xpos)[self.obj_geoms[0]]
+    settled, who = self.depth_into_cube_mm(c)
+    ov, n, f, tc = self.overlap_mm()
+    moved = 1000.0 * float(np.linalg.norm(sq(self.qpos())[self.obj_qadr:self.obj_qadr + 3] - obj0))
+    return dict(worst_mm=worst, settled_mm=settled, contact_mm=ov, ncon=n, force_N=f,
+                impact_v=vmax, object_moved_mm=moved,
                 finite=bool(np.isfinite(sq(self.qpos())).all()))
 
 
@@ -604,6 +746,18 @@ def dump_facts(rig):
           + ", ".join(f"{int(k)}={names.get(int(k),'?')}" for k in np.unique(sq(mode))))
 
 
+def write_csv(rows):
+  if not (A.out and rows):
+    return
+  import csv
+  keys = sorted({k for r in rows for k in r})
+  with open(A.out, "w", newline="") as fh:
+    w = csv.DictWriter(fh, fieldnames=keys)
+    w.writeheader()
+    w.writerows(rows)
+  print(f"\nwrote {A.out}")
+
+
 # ---------------------------------------------------------------------------------- main
 def main():
   print(f"one Newton world: {A.xml}\n  object {A.sdf_object}", flush=True)
@@ -619,8 +773,42 @@ def main():
   if A.mode == "facts":
     dump_facts(rig)
 
+  approaches = (["envelop", "fingertip", "knuckle"] if A.approach == "all"
+                else [x.strip() for x in A.approach.split(",") if x.strip()])
+
+  if A.mode == "drop":
+    npin, noff, ct = rig.setup_drop(A.trace, A.frame)
+    print(f"\n=== drop rig ===")
+    print(f"  {npin} of {rig.m.nq} qpos coordinates pinned to trace frame {A.frame}; the floating "
+          f"base and the object's free joint are the only things left free")
+    print(f"  {noff} leg/torso collider(s) switched off (contype readback {ct}) so the feet cannot "
+          f"take the impulse the hand is supposed to")
+    print(f"  falling mass: the whole robot as one rigid body, "
+          f"{float(rig.m.body_mass.sum()) - float(rig.m.body_mass[rig.obj_body]):.2f} kg")
+    print(f"\n{'setting':22s}{'drop mm':>9s}{'impact m/s':>12s}{'worst mm':>10s}"
+          f"{'settled mm':>12s}{'contact mm':>12s}{'ncon':>6s}{'Fn (N)':>10s}{'obj moved':>11s}")
+    print("-" * 104)
+    rows = []
+    for name in [x.strip() for x in A.settings.split(",") if x.strip()]:
+      reset_settings(rig)
+      for note in apply_setting(rig, name):
+        print(f"  [readback] {note}")
+      for h in [float(x) for x in A.heights.split(",")]:
+        rig.start_recording(bool(A.dump) and (A.dump_of in f"{name}|{h}"))
+        r = rig.drop(h)
+        rows.append(dict(setting=name, height=h, **r))
+        print(f"{name[:22]:22s}{1000*h:9.0f}{r['impact_v']:12.3f}{r['worst_mm']:10.3f}"
+              f"{r['settled_mm']:12.3f}{r['contact_mm']:12.3f}{r['ncon']:6d}"
+              f"{r['force_N']:10.2f}{r['object_moved_mm']:11.2f}", flush=True)
+        if rig._rec:
+          n = rig.write_recording(A.dump)
+          print(f"  recorded {n} frames to {A.dump}", flush=True)
+          rig.start_recording(False)
+    write_csv(rows)
+    return
+
   gc = rig.gravcomp_object(True)
-  t, spread, clear = rig.calibrate()
+  t, spread, clear = rig.calibrate(approach=approaches[0])
   print(f"\n=== press rig ===")
   print(f"  press target (closed fingertip centroid) {np.round(t,4)} m; closed tip spread "
         f"{1000*spread:.1f} mm against a {np.round(2000*rig.h,1)} mm cube")
@@ -646,15 +834,22 @@ def main():
     print(f"\n{'setting':22s}{'closure':>8s}{'commanded':>11s}{'settled':>10s}"
           f"{'geom':>9s}{'ncon':>6s}{'Fn (N)':>10s}{'tau':>8s}{'moved':>8s}{'drift':>8s}")
     print("-" * 100)
-    for name in settings:
+    for ap_name in approaches:
+     rig.calibrate(approach=ap_name)
+     print(f"  -- approach {ap_name}: target {np.round(rig.target,4)}")
+     for name in settings:
       reset_settings(rig)
       for note in apply_setting(rig, name):
         print(f"  [readback] {note}")
       for v in sweep:
         c = rig.press(v, park=True)
+        rig.start_recording(bool(A.dump) and A.dump_of in f"{ap_name}|{name}|{v}")
         s = rig.press(v)
-        rows.append(dict(setting=name, closure=v, **c, **s))
-        print(f"{name[:22]:22s}{v:8.2f}{c['commanded_mm']:11.3f}{s['settled_mm']:10.3f}"
+        if rig._rec:
+          print(f"  recorded {rig.write_recording(A.dump)} frames to {A.dump}", flush=True)
+          rig.start_recording(False)
+        rows.append(dict(setting=name, approach=ap_name, closure=v, **c, **s))
+        print(f"{ap_name[:9]:9s}{name[:22]:22s}{v:8.2f}{c['commanded_mm']:11.3f}{s['settled_mm']:10.3f}"
               f"{s['geom_mm']:9.3f}{s['ncon']:6d}{s['force_N']:10.3f}"
               f"{s['pair_timeconst']:8.4f}{s['object_moved_mm']:8.2f}{s['drift_mm']:8.3f}",
               flush=True)
@@ -681,14 +876,7 @@ def main():
               f"{s['ncon']:6d}{s['force_N']:10.3f}{slope:10.5f}"
               f"{s['object_moved_mm']:8.2f}{s['drift_mm']:8.3f}", flush=True)
 
-  if A.out and rows:
-    import csv
-    keys = sorted({k for r in rows for k in r})
-    with open(A.out, "w", newline="") as fh:
-      w = csv.DictWriter(fh, fieldnames=keys)
-      w.writeheader()
-      w.writerows(rows)
-    print(f"\nwrote {A.out}")
+  write_csv(rows)
 
 
 main()

@@ -50,6 +50,11 @@ ap.add_argument("--heights", default="0,0.002,0.01,0.05,0.2", help="metres above
 ap.add_argument("--dt", type=float, default=0.002)
 ap.add_argument("--steps", type=int, default=1500)
 ap.add_argument("--side", default="right")
+ap.add_argument("--max-tri-pairs", type=int, default=12_000_000,
+                help="Newton's default 1e6 triangle-pair buffer overflows on this scene -- the "
+                     "object mesh is 107776 triangles against 21 hand hulls -- and everything past "
+                     "the cap is silently dropped. The training env raises it to 12e6 for the same "
+                     "reason (src/newton_vec_env.py, MAX_TRI_PAIRS).")
 ap.add_argument("--device", default="cuda:0")
 A = ap.parse_args()
 
@@ -190,9 +195,18 @@ def build(parts, hand_mass, height, obj_free=True, hull=True):
 def run(model, hand, obj, solver, parts, planes, steps):
     s0, s1 = model.state(), model.state()
     control = model.control()
+    # `model.collide()` allocates the default 1e6 triangle-pair buffer, which this scene overflows
+    # by 2.4x on every step ("Triangle pair buffer overflowed 2371072 > 1000000"). Everything past
+    # the cap is dropped, so the contacts are a truncated subset and every number after it is
+    # meaningless. A CollisionPipeline sized the way the training env sizes it fixes that, and has
+    # the side benefit of being the same narrow phase training runs.
+    from newton import CollisionPipeline
+    pipeline = CollisionPipeline(model, reduce_contacts=True, broad_phase="nxn",
+                                 max_triangle_pairs=A.max_tri_pairs)
+    contacts = pipeline.contacts()
     worst = 0.0
     for _ in range(steps):
-        contacts = model.collide(s0)
+        pipeline.collide(s0, contacts)
         solver.step(s0, s1, control, contacts, A.dt)
         s0, s1 = s1, s0
         q = wp.to_torch(s0.body_q).detach().cpu().numpy()
