@@ -630,6 +630,28 @@ if os.environ.get("CONTACT_CENSUS"):
     _s = _cd.detach().cpu().numpy()
     _live = (_g[:, 0] >= 0) & (_g[:, 1] >= 0) & (_w == 0)
     _tot = int(_live.sum())
+    # "floor <-> floor" held 96% of the buffer on the previous run, which is not a contact any
+    # scene can have. Before believing the budget is full, check whether those rows are real:
+    # an unused slot is padding, and padding is recognisable by a solver counter that disagrees
+    # with the row count, or by every row carrying the same sentinel distance.
+    _ncon = None
+    for _attr in ("ncon", "ncon_hfield", "collision_pair_count"):
+      if hasattr(_d, _attr):
+        try:
+          _ncon = _cwp.to_torch(getattr(_d, _attr)).detach().cpu().numpy().reshape(-1)[:4]
+        except Exception:
+          _ncon = getattr(_d, _attr)
+        break
+    _self = (_g[:, 0] == _g[:, 1]) & _live
+    print(f"[census] solver ncon={_ncon}; rows with geom1==geom2: {int(_self.sum())}", flush=True)
+    if _self.any():
+      _sd = _s[_self]
+      print("[census]   their dist: min %.6g max %.6g  unique %d  -> %s" % (
+          _sd.min(), _sd.max(), len(_cnp.unique(_cnp.round(_sd, 9))),
+          "PADDING, not contacts" if len(_cnp.unique(_cnp.round(_sd, 9))) <= 2
+          else "genuinely varied"), flush=True)
+    _live = _live & ~_self
+    _tot = int(_live.sum())
     _pairs = {}
     for _i in _cnp.nonzero(_live)[0]:
       _a, _b = int(_g[_i, 0]), int(_g[_i, 1])
