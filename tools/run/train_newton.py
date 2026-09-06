@@ -530,10 +530,21 @@ if os.environ.get("PRESS_TEST"):
         flush=True)
   with open(_out, "w") as _fh:
     _fh.write("force_N,overlap_mm,contacts\n")
+    # Back the object OFF along the press axis before each level. Initialising it at the recorded
+    # pose starts it already ~9 mm inside a pinned, closed hand with no escape direction, and the
+    # number that comes back is "how much of that initial overlap failed to resolve" -- flat and
+    # non-monotonic in force, which is what the first version of this test measured.
+    _backoff = float(os.environ.get("PRESS_BACKOFF", "0.02"))
+    _objm = float(_m.body_mass[_objb])
     for _F in _forces:
       _qpos_t[0, :] = _frozen
       _qvel_t[0, :] = 0.0
       _xfrc[0, :, :] = 0.0
+      _op0 = _pwp.to_torch(_d.xpos)[0, _objb].detach().clone()
+      _pp0 = _pwp.to_torch(_d.xpos)[0, _palmb].detach().clone()
+      _ax = (_pp0 - _op0)
+      _ax = _ax / _ax.norm().clamp_min(1e-9)
+      _qpos_t[0, _oq:_oq + 3] -= _ax * _backoff
       for _k in range(_settle):
         with _rt.inference_mode():
           env.step(_zero_act)
@@ -541,11 +552,11 @@ if os.environ.get("PRESS_TEST"):
         # alone -- it is the only thing allowed to move, which is what makes the load meaningful.
         _qpos_t[0, :_oq] = _frozen[:_oq]
         _qvel_t[0, :_oq - 1] = 0.0
-        _op = _pwp.to_torch(_d.xpos)[0, _objb].detach()
-        _pp = _pwp.to_torch(_d.xpos)[0, _palmb].detach()
-        _dir = (_pp - _op)
-        _dir = _dir / _dir.norm().clamp_min(1e-9)
-        _xfrc[0, _objb, :3] = _dir * _F
+        # Press along the fixed axis, and cancel the object's own weight: at 0.36 kg gravity is
+        # 3.5 N, which would otherwise swamp every test force below ~10 N and make the curve read
+        # the floor rather than the grip.
+        _xfrc[0, _objb, :3] = _ax * _F
+        _xfrc[0, _objb, 2] += _objm * 9.81
       _ov = _overlap_mm()
       _nc = int(((_rob[_pwp.to_torch(_d.contact.geom).detach().cpu().numpy()[:, 0].clip(0)]
                   & _obg[_pwp.to_torch(_d.contact.geom).detach().cpu().numpy()[:, 1].clip(0)])).sum())
