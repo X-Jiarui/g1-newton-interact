@@ -675,6 +675,7 @@ if os.environ.get("CONTACT_CENSUS"):
       _oid0 = next(_i for _i in range(_m.nbody)
                    if "apple" in (_cmj.mj_id2name(_m, _cmj.mjtObj.mjOBJ_BODY, _i) or "")
                    and "robot" not in (_cmj.mj_id2name(_m, _cmj.mjtObj.mjOBJ_BODY, _i) or ""))
+      _q0 = _qpos_t[0].detach().clone()
       for _k in range(_settle):
         # Everything but the fingers and the object is held at the recorded pose. Letting the
         # whole robot integrate freely for 0.6 s put it on the floor: 396 contacts, none of them
@@ -683,6 +684,15 @@ if os.environ.get("CONTACT_CENSUS"):
         _qvel_t[0, _pin_v] = 0.0
         _xf[0, _oid0, 2] = float(_m.body_mass[_oid0]) * 9.81
         _mjw.step(_m_w, _d)
+      # Did anything actually integrate? Two settle designs in a row reported penetrations
+      # identical to three decimals with the fingertip not moving a micron, which is the
+      # signature of a settle that never ran -- not of a physical result.
+      _dq = (_qpos_t[0] - _q0).abs()
+      _fq = _ct.tensor(_hand_q, device=_dq.device, dtype=_ct.long)
+      _oa0 = int(_m.jnt_qposadr[_oj0])
+      print("[census]   settle moved: all qpos max %.6g | finger max %.6g rad | object max %.6g m"
+            % (float(_dq.max()), float(_dq[_fq].max()), float(_dq[_oa0:_oa0 + 3].max())),
+            flush=True)
     else:
       _qpos_t[0, :] = _frozen
       _qvel_t[0, :] = 0.0
