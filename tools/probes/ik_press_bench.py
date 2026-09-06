@@ -359,14 +359,63 @@ class Rig:
     self.qvel()[:] = self._v0
     self.ctrl()[:] = self._c0
 
+  def gravcomp_object(self, on=True):
+    """Cancel the object's own weight so the press has a well-posed equilibrium.
+
+    Deliberate and documented: a 0.364 kg object in mid-air falls 4.9 m in the second it takes the
+    contact to settle, and the first version of this bench measured exactly that -- zero
+    hand-object contacts in every condition. Removing 3.6 N of weight is small beside the press
+    forces being swept and is identical in every condition, so it cannot move a comparison.
+    """
+    m = self.m
+    if not hasattr(m, "body_gravcomp"):
+      return False
+    m.body_gravcomp[self.obj_body] = 1.0 if on else 0.0
+    push(self.sv, "body_gravcomp", m.body_gravcomp)
+    got = readback(self.sv, "body_gravcomp", self.obj_body)
+    self._gravcomp_readback = float(np.atleast_1d(got)[0])
+    return abs(self._gravcomp_readback - (1.0 if on else 0.0)) < 1e-6
+
+  def calibrate_target(self, close_rad=0.6, steps=300):
+    """Where do the five right fingertips actually converge when the hand closes?
+
+    Placing the object at the OPEN hand's tip centroid leaves it outside the fingers entirely. The
+    closed hand's centroid is the point the grasp is actually about, and it is computed from the
+    scene rather than guessed, so it is the same number in every condition.
+    """
+    self.restore()
+    q = self.qpos()
+    q[0, self.obj_qadr + 2] += 5.0                 # park the object far above; it must not collide
+    self.hold_command(close_rad)
+    for _ in range(steps):
+      if self.base_vadr is not None:
+        self.qvel()[0, self.base_vadr:self.base_vadr + 6] = 0.0
+      self.ctrl()[0, :] = torch.tensor(self._cmd, dtype=self.ctrl().dtype,
+                                       device=self.ctrl().device)
+      self.env._physics_step()
+      self.env.state_in, self.env.state_out = self.env.state_out, self.env.state_in
+    xp = self.xpos().cpu().numpy()
+    while xp.ndim > 2:
+      xp = xp[0]
+    self.target = xp[self.tip_bodies].mean(axis=0)
+    spread = np.max(np.linalg.norm(xp[self.tip_bodies][:, None] - xp[self.tip_bodies][None],
+                                   axis=-1))
+    self.restore()
+    return self.target, float(spread)
+
   def place_object(self, offset=(0.0, 0.0, 0.0), clearance=0.0):
     """Put the object at the centroid of the five right fingertips, clear of contact.
 
     Deterministic and condition-independent: the same three numbers in every run, so the geometry
     the press starts from cannot differ between settings.
     """
-    xp = self.xpos().cpu().numpy()[0]
-    c = xp[self.tip_bodies].mean(axis=0) + np.asarray(offset, dtype=float)
+    xp = self.xpos().cpu().numpy()
+    while xp.ndim > 2:
+      xp = xp[0]
+    base = getattr(self, "target", None)
+    if base is None:
+      base = xp[self.tip_bodies].mean(axis=0)
+    c = np.asarray(base, dtype=float) + np.asarray(offset, dtype=float)
     q = self.qpos()
     q[0, self.obj_qadr:self.obj_qadr + 3] = torch.tensor(c, dtype=q.dtype, device=q.device)
     q[0, self.obj_qadr + 3:self.obj_qadr + 7] = torch.tensor([1.0, 0.0, 0.0, 0.0],
@@ -512,7 +561,7 @@ def dump_facts(rig):
       else dev_dt2
   print(f"  after ONE solver.step: host {float(m.opt.timestep)}  device {dev_dt2}")
   refsafe = int(m.opt.disableflags) & int(mujoco.mjtDisableBit.mjDSBL_REFSAFE)
-  clamp = 2.0 * float(m.opt.timestep)
+  clamp = 2.0 * float(dev_dt2)     # the DEVICE value after a step is the one the solver clamps by
   print(f"  disableflags {int(m.opt.disableflags)}  REFSAFE disabled: {bool(refsafe)}")
   print(f"  -> solref timeconst is clamped up to 2*opt.timestep = {clamp*1000:.2f} ms "
         f"unless REFSAFE is disabled; anything shorter than that CANNOT be asked for")
@@ -601,6 +650,13 @@ def dump_live_contacts(rig, limit=12):
   m = rig.m
   keep, cons, n = rig.hand_object_contacts()
   print(f"\n  contact array: ncon={n}, real rows {len(cons)}, hand<->object {len(keep)}")
+  if not keep:
+    # Trap 6: a classifier keyed on the wrong names reports "no object contacts" when there are
+    # some. Print what actually matched rather than trusting the filter.
+    print("  no hand<->object pair matched; every real contact, so the filter can be checked:")
+    for c in cons[:limit]:
+      print(f"    {gname(m,c['g1'])[-40:]:40s} <-> {gname(m,c['g2'])[-40:]:40s} "
+            f"dist={1000*c['dist']:+8.3f} mm")
   for c in keep[:limit]:
     print(f"    {gname(m,c['g1'])[-34:]:34s} <-> {gname(m,c['g2'])[-24:]:24s} "
           f"dist={1000*c['dist']:+8.3f} mm  solref={np.round(c['solref'],5)} "
@@ -618,12 +674,18 @@ def main():
 
   if A.mode == "facts":
     dump_facts(rig)
+    t, spread = rig.calibrate_target()
+    ok = rig.gravcomp_object(True)
+    print(f"\n=== press rig ===")
+    print(f"  fingertips converge at {np.round(t,4)} m, max pairwise spread {1000*spread:.1f} mm; "
+          f"the object is a {np.round(2000*rig._obj_mesh_extent(),1)} mm box")
+    print(f"  object gravity compensation applied: {ok} "
+          f"(readback {getattr(rig,'_gravcomp_readback','n/a')})")
     off = tuple(float(x) for x in A.object_offset.split(","))
     c = rig.place_object(off)
-    rig.hold_command(0.0)
-    print(f"\n=== after 200 substeps holding the reset pose, object at fingertip centroid "
-          f"{np.round(c,4)} ===")
-    r = rig.step_settled(200, 50)
+    rig.hold_command(0.6)
+    print(f"=== object placed at {np.round(c,4)}, fingers commanded +0.6 rad, 400 substeps ===")
+    r = rig.step_settled(400, 100)
     print(f"  {r}")
     dump_live_contacts(rig)
     g, gg = rig.geometric_overlap_mm()
@@ -646,6 +708,11 @@ def main():
   settings = [s.strip() for s in A.settings.split(",") if s.strip()]
   off = tuple(float(x) for x in A.object_offset.split(","))
   arm = 0.02   # right_finger*_link4 contact point to its joint, measured
+  t, spread = rig.calibrate_target()
+  rig.gravcomp_object(True)
+  print(f"press target {np.round(t,4)} m, tip spread {1000*spread:.1f} mm, "
+        f"object {np.round(2000*rig._obj_mesh_extent(),1)} mm box, "
+        f"gravcomp readback {getattr(rig,'_gravcomp_readback','n/a')}")
 
   rows = []
   if A.mode == "position":
