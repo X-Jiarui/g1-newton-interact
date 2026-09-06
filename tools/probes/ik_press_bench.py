@@ -564,25 +564,34 @@ class Rig:
     got = int(np.atleast_1d(readback(self.sv, "geom_contype", off[0]))[0]) if off else -1
     return len(self._pin_q), len(off), got
 
-  def drop(self, height, steps=800):
-    """One drop. The base is raised by `height`; nothing else changes."""
+  def drop(self, height, steps=600):
+    """One drop, at the impact speed a fall of `height` would produce.
+
+    The robot is launched downward at sqrt(2 g h) rather than actually dropped from h. Same momentum
+    arriving in the step where the surfaces meet, but no free-flight to simulate and -- more
+    importantly -- no need for the feet and the hand to somehow not reach their contacts at the same
+    instant. Gravity stays on, so after impact the hand keeps pressing rather than bouncing clear.
+
+    The joints are pinned by zeroing the pinned DOFS' velocities every step, and qpos is written
+    ONCE at the start. Writing qpos every step is the trap: it fights the integrator, and the first
+    version of this did exactly that and blew the base velocity up to 1.2e5 m/s in one drop.
+    """
     m = self.m
     q, v = self.qpos(), self.qvel()
     q[0, :] = torch.tensor(self._drop_q, dtype=q.dtype, device=q.device)
+    v[0, :] = 0.0
     base = [j for j in range(m.njnt) if int(m.jnt_type[j]) == 0
             and "floating_base" in jname(m, j)][0]
-    ba = int(m.jnt_qposadr[base])
-    q[0, ba + 2] += float(height)
-    v[0, :] = 0.0
+    bv = int(m.jnt_dofadr[base])
+    v0 = float(np.sqrt(2.0 * 9.81 * max(height, 0.0)))
+    v[0, bv + 2] = -v0
     self._cmd = np.zeros(m.nu, dtype=np.float64)   # no servo authority at all
-    pinq = torch.as_tensor(self._pin_q, device=q.device)
     pinv = torch.as_tensor(self._pin_v, device=v.device)
-    hold = torch.as_tensor(self._drop_q[self._pin_q], dtype=q.dtype, device=q.device)
     obj0 = sq(self.qpos())[self.obj_qadr:self.obj_qadr + 3].copy()
+    gap0, _ = self.depth_into_cube_mm(sq(self.d.geom_xpos)[self.obj_geoms[0]])
 
-    worst, vmax = 0.0, 0.0
+    worst, wcon, vmax, nmax = 0.0, 0.0, 0.0, 0
     for i in range(steps):
-      self.qpos()[0, pinq] = hold
       self.qvel()[0, pinv] = 0.0
       self.cmd()[0, :] = 0.0
       self.env._physics_step()
@@ -590,17 +599,19 @@ class Rig:
       if self._rec is not None and i % max(1, self.env.decimation) == 0:
         self._rec[0].append(sq(self.qpos()).copy())
         self._rec[1].append((sq(self.d.mocap_pos).copy(), sq(self.d.mocap_quat).copy()))
-      c = sq(self.d.geom_xpos)[self.obj_geoms[0]]
-      d, _ = self.depth_into_cube_mm(c)
+      d, _ = self.depth_into_cube_mm(sq(self.d.geom_xpos)[self.obj_geoms[0]])
       worst = max(worst, d)
-      vmax = max(vmax, float(abs(sq(self.qvel())[int(m.jnt_dofadr[base]) + 2])))
-    c = sq(self.d.geom_xpos)[self.obj_geoms[0]]
-    settled, who = self.depth_into_cube_mm(c)
+      ov, n, f, _tc = self.overlap_mm()
+      if np.isfinite(ov):
+        wcon = max(wcon, ov)
+      nmax = max(nmax, n)
+      vmax = max(vmax, float(abs(sq(self.qvel())[bv + 2])))
+    settled, _ = self.depth_into_cube_mm(sq(self.d.geom_xpos)[self.obj_geoms[0]])
     ov, n, f, tc = self.overlap_mm()
     moved = 1000.0 * float(np.linalg.norm(sq(self.qpos())[self.obj_qadr:self.obj_qadr + 3] - obj0))
-    return dict(worst_mm=worst, settled_mm=settled, contact_mm=ov, ncon=n, force_N=f,
-                impact_v=vmax, object_moved_mm=moved,
-                finite=bool(np.isfinite(sq(self.qpos())).all()))
+    return dict(launch_v=v0, start_overlap_mm=gap0, worst_mm=worst, settled_mm=settled,
+                worst_contact_mm=wcon, ncon_max=nmax, ncon=n, force_N=f, vmax=vmax,
+                object_moved_mm=moved, finite=bool(np.isfinite(sq(self.qpos())).all()))
 
 
 # ---------------------------------------------------------------------------------- switches
@@ -789,7 +800,7 @@ def main():
     print(f"  falling mass: the whole robot as one rigid body, "
           f"{float(rig.m.body_mass.sum()) - float(rig.m.body_mass[rig.obj_body]):.2f} kg")
     print(f"\n{'setting':22s}{'drop mm':>9s}{'impact m/s':>12s}{'worst mm':>10s}"
-          f"{'settled mm':>12s}{'contact mm':>12s}{'ncon':>6s}{'Fn (N)':>10s}{'obj moved':>11s}")
+          f"{'settled mm':>12s}{'worst con':>12s}{'ncon':>6s}{'Fn (N)':>10s}{'obj moved':>11s}")
     print("-" * 104)
     rows = []
     for name in [x.strip() for x in A.settings.split(",") if x.strip()]:
@@ -800,8 +811,8 @@ def main():
         rig.start_recording(bool(A.dump) and (A.dump_of in f"{name}|{h}"))
         r = rig.drop(h)
         rows.append(dict(setting=name, height=h, **r))
-        print(f"{name[:22]:22s}{1000*h:9.0f}{r['impact_v']:12.3f}{r['worst_mm']:10.3f}"
-              f"{r['settled_mm']:12.3f}{r['contact_mm']:12.3f}{r['ncon']:6d}"
+        print(f"{name[:22]:22s}{1000*h:9.0f}{r['launch_v']:12.3f}{r['worst_mm']:10.3f}"
+              f"{r['settled_mm']:12.3f}{r['worst_contact_mm']:12.3f}{r['ncon_max']:6d}"
               f"{r['force_N']:10.2f}{r['object_moved_mm']:11.2f}", flush=True)
         if rig._rec:
           n = rig.write_recording(A.dump)
