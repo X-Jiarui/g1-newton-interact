@@ -587,11 +587,20 @@ if os.environ.get("CONTACT_CENSUS"):
   _frames = [int(x) % len(_qall) for x in
              os.environ.get("CENSUS_FRAMES", "200,285,300,350").split(",")]
 
-  _bname = [(_cmj.mj_id2name(_m, _cmj.mjtObj.mjOBJ_BODY, int(_m.geom_bodyid[g])) or "?")
-            .replace("robot/", "") for g in range(_m.ngeom)]
-  _isobj = [("apple" in _bname[g] and "robot" not in
-             (_cmj.mj_id2name(_m, _cmj.mjtObj.mjOBJ_BODY, int(_m.geom_bodyid[g])) or ""))
-            for g in range(_m.ngeom)]
+  # Name geoms by their OWN name first. Going through geom_bodyid collapsed 96% of the buffer to
+  # "world <-> world" on the first run: mjlab flattens the body path into one enormous name, and
+  # the SDF replacement colliders hang off the worldbody, so a body-name lookup cannot see the
+  # object at all -- which read out as "no object contact" when the classifier was simply blind.
+  def _nm(g):
+    _gn = _cmj.mj_id2name(_m, _cmj.mjtObj.mjOBJ_GEOM, g)
+    if _gn:
+      return _gn.replace("robot/", "").split("/")[-1]
+    _bn = (_cmj.mj_id2name(_m, _cmj.mjtObj.mjOBJ_BODY, int(_m.geom_bodyid[g])) or "?")
+    return _bn.split("_robot_")[-1] if "_robot_" in _bn else _bn.replace("robot/", "")
+  _bname = [_nm(g) for g in range(_m.ngeom)]
+  _isobj = [("apple" in _bname[g] or "object" in _bname[g]) for g in range(_m.ngeom)]
+  print("[census] object geom(s):", [(g, _bname[g], int(_m.geom_type[g]))
+                                     for g in range(_m.ngeom) if _isobj[g]], flush=True)
 
   _qpos_t = _cwp.to_torch(_d.qpos)
   _qvel_t = _cwp.to_torch(_d.qvel)
