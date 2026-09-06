@@ -581,7 +581,10 @@ if os.environ.get("CONTACT_CENSUS"):
   # pinned -- robot AND object -- so the contacts reported belong to exactly the configuration
   # tools/probes/overlap_geometry.py measured the geometry of, with nothing re-simulated.
   import numpy as _cnp, torch as _ct, warp as _cwp, mujoco as _cmj
-  _m = env.solver.mj_model
+  _m = env.solver.mj_model                     # CPU model: names, masks, indices
+  _m_w = getattr(env.solver, "mjw_model", None)  # warp model: what the kernels run against
+  if _m_w is None:
+    raise SystemExit("solver exposes no mjw_model; census cannot run collision directly")
   _d = env.solver.mjw_data
   _qall = _cnp.load(os.environ["CENSUS_QPOS"], allow_pickle=True)["qpos"]
   _frames = [int(x) % len(_qall) for x in
@@ -617,13 +620,15 @@ if os.environ.get("CONTACT_CENSUS"):
 
   for _f in _frames:
     _frozen = _ct.tensor(_qall[_f], dtype=_qpos_t.dtype, device=_qpos_t.device)
-    for _ in range(3):
-      _qpos_t[0, :] = _frozen
-      _qvel_t[0, :] = 0.0
-      with _ct.inference_mode():
-        env.step(_zero)
     _qpos_t[0, :] = _frozen
     _qvel_t[0, :] = 0.0
+    # Kinematics and collision ONLY -- no dynamics. Stepping the env instead put the arm 105 mm
+    # from the object when the recorded pose has it at 22 mm: env.step runs ten physics substeps
+    # of PD control toward the policy's target, so pinning qpos before the call does not hold the
+    # robot during it, and the contacts read back belong to a pose the trace never contained.
+    import mujoco_warp as _mjw
+    _mjw.kinematics(_m_w, _d)
+    _mjw.collision(_m_w, _d)
 
     # Does the pose the collider sees match the pose that was written? mjlab's state lives in
     # Newton and mjw_data is a mirror it re-syncs, so a direct qpos write can be discarded before
