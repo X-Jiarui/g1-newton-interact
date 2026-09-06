@@ -605,6 +605,16 @@ if os.environ.get("CONTACT_CENSUS"):
   print("[census] object geom(s):", [(g, _bname[g], int(_m.geom_type[g]))
                                      for g in range(_m.ngeom) if _isobj[g]], flush=True)
 
+  # What authority does the hand actually get, as compiled? An effort limit that never reaches
+  # physics has bitten this repo before, so read it off the model rather than trusting the cfg.
+  _ja = lambda _a: (_cmj.mj_id2name(_m, _cmj.mjtObj.mjOBJ_JOINT, int(_m.actuator_trnid[_a, 0]))
+                    or "").lower()
+  _ha = [_a for _a in range(_m.nu) if "finger" in _ja(_a)]
+  _hk = sorted({(round(float(_m.actuator_gainprm[_a, 0]), 4),
+                 round(float(_m.actuator_forcerange[_a, 1]), 4)) for _a in _ha})
+  print("[census] hand actuators: %d, distinct (kp, effort N*m) as compiled: %s"
+        % (len(_ha), _hk), flush=True)
+
   _qpos_t = _cwp.to_torch(_d.qpos)
   _qvel_t = _cwp.to_torch(_d.qvel)
   _cg = _cwp.to_torch(_d.contact.geom)
