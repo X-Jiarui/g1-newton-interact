@@ -505,7 +505,10 @@ if os.environ.get("PRESS_TEST"):
     raise SystemExit("mjw_data has no xfrc_applied; press test cannot apply a known load")
   _frozen = _pt.tensor(_qall[_frame], dtype=_qpos_t.dtype, device=_qpos_t.device)
   import torch as _rt
-  _zero_act = _rt.zeros((env.num_envs, env.num_actions), device="cuda:0")
+  # NewtonVecEnv exposes no num_actions; the action width lives on the wrapped manager.
+  _nact = int(getattr(getattr(env, "_env", env).action_manager, "total_action_dim", 0)) or \
+      int(_pwp.to_torch(env.solver.mjw_data.ctrl).shape[-1])
+  _zero_act = _rt.zeros((env.num_envs, _nact), device="cuda:0")
 
   def _overlap_mm():
     _c = _d.contact
