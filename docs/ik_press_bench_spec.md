@@ -145,7 +145,7 @@ Everything below is a knob that has been suspected at some point. Sweep them one
 `--native-contacts` on/off; `--object-solref` (timeconst form, e.g. `0.002,1.0` `0.004,1.0`
 `0.02,1.0`); `OBJECT_SOLIMP` dmax 0.95 vs 0.99; `OBJECT_PRIORITY` 0 vs 1; `HAND_SOLREF`;
 `--solver-kwargs` `cone` (pyramidal/elliptic), `impratio`, `iterations`, `ls_iterations`;
-`SIM_TIMESTEP` **(see §8 — this switch is currently broken)**; `FINGER_FORCE_LIMIT` (finger actuator
+`SIM_TIMESTEP` (works; drops the timeconst floor from 10 ms to 2 ms — see §8); `FINGER_FORCE_LIMIT` (finger actuator
 torque cap in N·m, default 30, the physical Wuji spec is 0.147–0.649).
 
 Note on `solref` written **negative**: MuJoCo reads `(-stiffness, -damping)` directly instead of
@@ -178,13 +178,18 @@ Read these. Each one produced a wrong published conclusion.
    `mujoco.mj_contactForce`, which agrees to four decimals. On CPU MuJoCo just use `mj_contactForce`.
 
 2. **Switches that print but do not reach physics.** `APPLE_HAND_EFFORT` sets an mjlab actuator cfg
-   whose entity spec is cached; the run logs `effort 0.62` and simulates 30.0. `SIM_TIMESTEP` logs
-   `1.000 ms (was 5.000)` while the compiled `mj_model.opt.timestep` stays `0.00200` — and it *does*
-   change `decimation`, so it silently changes the control rate instead. **Two A/B runs were wasted
-   on switches whose independent variable never moved.** After setting any switch, read the value
-   back off the compiled model and assert it. `FINGER_FORCE_LIMIT` and `--object-solref` and
-   `OBJECT_PRIORITY` are verified to work; `SIM_TIMESTEP` is verified broken and fixing it is a good
-   early task.
+   whose entity spec is cached; the run logs `effort 0.62` and simulates 30.0. One A/B run was wasted on a switch whose independent
+   variable never moved. After setting any switch, read the value back off the compiled model and
+   assert it.
+
+   **But read the RIGHT model, after a step.** `SolverMuJoCo.step` does `opt.timestep.fill_(dt)`, so
+   `mj_model.opt.timestep` (CPU, pre-step) only ever carries the XML's authored 0.002 and never
+   participates in the integration. Reading it produced a second, opposite error: `SIM_TIMESTEP` was
+   declared broken and a valid training run was killed over it. It is **not** broken — set to 0.001
+   the post-step `opt.timestep` reads 0.001, `decimation` rescales 4 → 20, the control rate holds at
+   50.0 Hz, and the REFSAFE floor drops from 10 ms to 2 ms. `FINGER_FORCE_LIMIT`, `--object-solref`,
+   `OBJECT_PRIORITY` and `SIM_TIMESTEP` are all verified to work; `APPLE_HAND_EFFORT` is the one
+   that does not.
 
 3. **A frozen pose cannot tell you about stability.** `mj_forward` reports the force the solver would
    apply at that instant. It says nothing about whether integrating diverges. Always settle.
