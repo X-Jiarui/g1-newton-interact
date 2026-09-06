@@ -47,7 +47,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 
 ap = argparse.ArgumentParser()
-ap.add_argument("--mode", default="facts", choices=("facts", "position", "force", "drop"))
+ap.add_argument("--mode", default="facts",
+                choices=("facts", "position", "force", "drop", "approach"))
 ap.add_argument("--xml", default=os.path.join(ROOT, "assets/scene_stapler/scene.xml"))
 ap.add_argument("--sdf-object", default=os.path.expanduser(
     "~/jiarui/scaled_grab_dataset_wuji_all/meshes/cubesmall.stl"))
@@ -110,6 +111,19 @@ ap.add_argument("--drop-pin", type=int, default=0,
                 help="hold the cube rigidly during a drop. A free 0.36 kg cube hit by a 50 kg rigid "
                      "robot is correctly knocked away, which is the right behaviour but leaves "
                      "nothing to press against at higher energies.")
+ap.add_argument("--standoff", type=float, default=0.03,
+                help="metres of clear space between the hand's nearest collider vertex and the "
+                     "block face before the approach starts. Step 0 must be clear: a run seeded "
+                     "from a training rollout frame starts 9.4 mm INSIDE the block and then shows "
+                     "the solver expelling an illegal initial condition, which is not a wall.")
+ap.add_argument("--depths", default="0.003,0.010,0.030",
+                help="metres past the near face the wrist is commanded to. The command is made "
+                     "impossible on purpose; correct physics stops responding to commanding deeper.")
+ap.add_argument("--approach-s", type=float, default=1.0, help="seconds of straight-line travel")
+ap.add_argument("--hold-s", type=float, default=1.0, help="seconds held at the impossible target")
+ap.add_argument("--noise-floor", type=float, default=0.10,
+                help="mm. Acceptance is max geometric overlap over the WHOLE trajectory, not the "
+                     "settled value.")
 ap.add_argument("--out", default=None, help="write the rows as csv here as well")
 A = ap.parse_args()
 
@@ -423,10 +437,16 @@ class Rig:
     order = [b for b in range(m.nbody) if m.body_mocapid[b] >= 0]
     names = [x for _, x in sorted(zip([int(m.body_mocapid[b]) for b in order],
                                       [bname(m, b) for b in order]))]
+    extra = {}
+    ser = getattr(self, "_series", None)
+    if ser is not None and len(ser) == len(self._rec[0]):
+      # Computed geometrically, per frame, with no solver in it -- so the number burnt into the
+      # video and the number in the table cannot drift apart.
+      extra["overlap_mm"] = np.asarray(ser, dtype=np.float64)
     np.savez_compressed(path, qpos=np.stack(self._rec[0]),
                         mocap_pos=np.stack([a for a, _ in self._rec[1]]),
                         mocap_quat=np.stack([b for _, b in self._rec[1]]),
-                        mocap_names=np.array(names))
+                        mocap_names=np.array(names), **extra)
     return len(self._rec[0])
 
   def run(self, nsteps, hold, park_object=False, measure_centre=None, pin=False):
@@ -562,6 +582,145 @@ class Rig:
     return dict(settled_mm=ov, geom_mm=geo, ncon=n, force_N=f, pair_timeconst=tc,
                 drift_mm=drift, at_rest=bool(np.isfinite(drift) and drift <= A.settle_tol),
                 object_moved_mm=moved, finite=True)
+
+
+  # ---------------------------------------------------------------- straight-line approach
+  def plan_approach(self, standoff, depth, approach_steps, hold_steps):
+    """Precompute the whole commanded trajectory ONCE, on the host model, by damped-least-squares IK.
+
+    Nothing about this depends on the contact settings: it is pure kinematics against
+    `mj_model`, solved before any condition runs, so every condition is driven by the identical
+    list of joint targets. That is what makes the comparison a physics comparison.
+
+    The hand starts `standoff` clear of the block and is commanded along a straight line to a point
+    `depth` PAST the near face -- a target it cannot reach if the contact works. The block is placed
+    relative to the hand rather than the hand relative to the block, so the start is clear by
+    construction and the assertion below is a check, not a hope.
+    """
+    m = self.m
+    dat = mujoco.MjData(m)
+    dat.qpos[:] = self._hold_q
+    dat.qvel[:] = 0
+    mujoco.mj_forward(m, dat)
+
+    tip = self.tip_bodies[1]
+    palm = [b for b in range(m.nbody) if "right_palm" in bname(m, b)][0]
+    p0 = dat.xpos[tip].copy()
+    u = p0 - dat.xpos[palm]
+    u = u / max(np.linalg.norm(u), 1e-9)
+
+    # Hand hull vertices in world at the start pose, so the clearance search is exact arithmetic.
+    V = []
+    for g, hv in self.hull_verts():
+      V.append(hv @ dat.geom_xmat[g].reshape(3, 3).T + dat.geom_xpos[g])
+    V = np.concatenate(V, axis=0)
+
+    def clearance(c):
+      """Signed distance from the hand to an axis-aligned block at c; >0 means clear."""
+      d = self.h[None, :] - np.abs(V - np.asarray(c)[None, :])
+      return -float(d.min(axis=1).max())
+
+    lo, hi = 0.0, 1.0
+    for _ in range(60):
+      mid = 0.5 * (lo + hi)
+      if clearance(p0 + u * mid) < standoff:
+        lo = mid
+      else:
+        hi = mid
+    t_block = hi
+    centre = p0 + u * t_block
+    start_clear = clearance(centre)
+
+    # Arm only. The fingers keep the pose they reset in: this is a wrist press, not a grasp, so
+    # nothing about finger servo authority can enter the number.
+    arm_j = [j for j in range(m.njnt)
+             if any(k in jname(m, j) for k in ("right_shoulder", "right_elbow", "right_wrist"))]
+    qadr = [int(m.jnt_qposadr[j]) for j in arm_j]
+    vadr = [int(m.jnt_dofadr[j]) for j in arm_j]
+
+    travel = standoff + depth
+    n = int(approach_steps)
+    plan = np.zeros((n + int(hold_steps), len(arm_j)))
+    for k in range(n + int(hold_steps)):
+      frac = min(1.0, (k + 1) / max(n, 1))
+      p_t = p0 + u * (frac * travel)
+      for _ in range(40):
+        mujoco.mj_forward(m, dat)
+        err = p_t - dat.xpos[tip]
+        if np.linalg.norm(err) < 1e-5:
+          break
+        jp = np.zeros((3, m.nv))
+        jr = np.zeros((3, m.nv))
+        mujoco.mj_jacBody(m, dat, jp, jr, tip)
+        J = jp[:, vadr]
+        dq = J.T @ np.linalg.solve(J @ J.T + 1e-4 * np.eye(3), err)
+        dq = np.clip(dq, -0.05, 0.05)
+        for i, a in enumerate(qadr):
+          dat.qpos[a] += dq[i]
+      plan[k] = [dat.qpos[a] for a in qadr]
+
+    # Where the commanded tip actually ends up, and how deep that is: the "commanded" column is
+    # measured off the plan, never asserted.
+    dat2 = mujoco.MjData(m)
+    dat2.qpos[:] = self._hold_q
+    for i, a in enumerate(qadr):
+      dat2.qpos[a] = plan[-1][i]
+    mujoco.mj_forward(m, dat2)
+    Vf = []
+    for g, hv in self.hull_verts():
+      Vf.append(hv @ dat2.geom_xmat[g].reshape(3, 3).T + dat2.geom_xpos[g])
+    Vf = np.concatenate(Vf, axis=0)
+    dfin = self.h[None, :] - np.abs(Vf - centre[None, :])
+    commanded = 1000.0 * float(max(0.0, dfin.min(axis=1).max()))
+
+    self._plan = plan
+    self._plan_acts = []
+    for j in arm_j:
+      cands = [a for a in range(m.nu) if self.jnt_of_act[a] == j
+               and float(m.actuator_gainprm[a, 0]) > 10.0]
+      self._plan_acts.append(cands[0] if cands else
+                             [a for a in range(m.nu) if self.jnt_of_act[a] == j][0])
+    self.target = centre
+    return dict(centre=centre, axis=u, start_clear_mm=1000.0 * start_clear,
+                commanded_mm=commanded, n_joints=len(arm_j))
+
+  def run_approach(self):
+    """Replay the plan. Reports the MAXIMUM geometric overlap over the whole trajectory -- a press
+    that dips into the block halfway and recovers has still passed through it."""
+    self.restore()
+    self.pin_object()
+    self._cmd = self.target_from_qpos()
+    step0 = self.depth_into_cube_mm(self.target)[0]
+    if step0 > 0.0:
+      raise RuntimeError(f"step 0 is {step0:.3f} mm INSIDE the block; a run that starts illegal "
+                         f"cannot demonstrate a wall. Increase --standoff.")
+    worst, series, forces = 0.0, [], []
+    n = len(self._plan)
+    for i in range(n):
+      if A.pin_object:
+        self.pin_object()
+      if self.base_vadr is not None:
+        self.qvel()[0, self.base_vadr:self.base_vadr + 6] = 0.0
+      cmd = self._cmd.copy()
+      cmd[self._plan_acts] = self._plan[i]
+      self.cmd()[0, :] = torch.tensor(cmd, dtype=self.cmd().dtype, device=self.cmd().device)
+      self.env._physics_step()
+      self.env.state_in, self.env.state_out = self.env.state_out, self.env.state_in
+      d = self.depth_into_cube_mm(self.target)[0]
+      worst = max(worst, d)
+      ov, nc, f, tc = self.overlap_mm()
+      if self._rec is not None and i % max(1, self.env.decimation) == 0:
+        self._rec[0].append(sq(self.qpos()).copy())
+        self._rec[1].append((sq(self.d.mocap_pos).copy(), sq(self.d.mocap_quat).copy()))
+        series.append(d)
+      forces.append(f if np.isfinite(f) else 0.0)
+    tail = int(0.2 * n)
+    settled = float(np.mean([self.depth_into_cube_mm(self.target)[0]]))
+    ov, nc, f, tc = self.overlap_mm()
+    self._series = series
+    return dict(start_mm=step0, worst_mm=worst, settled_mm=settled, contact_mm=ov,
+                ncon=nc, force_N=float(np.max(forces)), pair_timeconst=tc,
+                finite=bool(np.isfinite(sq(self.qpos())).all()))
 
 
   # ---------------------------------------------------------------- drop
@@ -941,6 +1100,41 @@ def main():
         if rig._rec:
           n = rig.write_recording(A.dump)
           print(f"  recorded {n} frames to {A.dump}", flush=True)
+          rig.start_recording(False)
+    write_csv(rows)
+    return
+
+  if A.mode == "approach":
+    rig.gravcomp_object(True)
+    sub = max(1, int(round(A.approach_s / rig.env.physics_dt)))
+    hold = max(1, int(round(A.hold_s / rig.env.physics_dt)))
+    print(f"\n=== straight-line wrist press ===")
+    print(f"  {sub} substeps of approach + {hold} held, at dt {1000*rig.env.physics_dt:.2f} ms "
+          f"({A.approach_s:.1f} s + {A.hold_s:.1f} s)")
+    print(f"\n{'setting':16s}{'depth mm':>9s}{'standoff':>10s}{'start':>8s}"
+          f"{'commanded':>11s}{'WORST':>9s}{'settled':>9s}{'contact':>9s}{'ncon':>6s}"
+          f"{'maxFn':>10s}{'tau':>8s}{'pass':>6s}")
+    print("-" * 111)
+    rows = []
+    for name in [x.strip() for x in A.settings.split(A.sep) if x.strip()]:
+      reset_settings(rig)
+      for note in apply_setting(rig, name):
+        print(f"  [readback] {note}")
+      for depth in [float(x) for x in A.depths.split(",")]:
+        info = rig.plan_approach(A.standoff, depth, sub, hold)
+        rig.start_recording(bool(A.dump) and A.dump_of in f"{name}|{depth}")
+        r = rig.run_approach()
+        ok = r["worst_mm"] <= A.noise_floor and r["finite"]
+        rows.append(dict(setting=name, depth_mm=1000*depth,
+                         standoff_mm=info["start_clear_mm"],
+                         commanded_mm=info["commanded_mm"], passes=ok, **r))
+        print(f"{name[:16]:16s}{1000*depth:9.1f}{info['start_clear_mm']:10.2f}"
+              f"{r['start_mm']:8.3f}{info['commanded_mm']:11.3f}{r['worst_mm']:9.3f}"
+              f"{r['settled_mm']:9.3f}{r['contact_mm']:9.3f}{r['ncon']:6d}"
+              f"{r['force_N']:10.2f}{r['pair_timeconst']:8.4f}"
+              f"{('YES' if ok else 'no'):>6s}", flush=True)
+        if rig._rec:
+          print(f"  recorded {rig.write_recording(A.dump)} frames to {A.dump}", flush=True)
           rig.start_recording(False)
     write_csv(rows)
     return
