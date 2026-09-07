@@ -112,7 +112,12 @@ class Press:
             raise SystemExit(f"matched {len(self.arm_j)} of {len(ARM)} arm joints")
         self.arm_q = np.array([int(m.jnt_qposadr[j]) for j in self.arm_j])
         self.arm_v = np.array([int(m.jnt_dofadr[j]) for j in self.arm_j])
-        self.arm_a = [a for a in range(m.nu) if rig.jnt_of_act[a] in set(self.arm_j)]
+        # TWO actuators per joint here as well, not just on the fingers: mjlab adds its own servo
+        # and leaves the scene's `xml_motor_unused_*` one in place. Both must be commanded, or the
+        # leftover one holds the joint at its own target and fights the press.
+        slot = {j: i for i, j in enumerate(self.arm_j)}
+        self.arm_a = [a for a in range(m.nu) if rig.jnt_of_act[a] in slot]
+        self.arm_a_slot = np.array([slot[rig.jnt_of_act[a]] for a in self.arm_a])
         self.tip_body = sorted(rig.tip_bodies)[0]
         self.cpu = mujoco.MjData(m)
 
@@ -195,7 +200,7 @@ def main():
         q = B.sq(rig.qpos()).copy()
         arm_target, err = press.solve(q, target)
         cmd = hold.copy()
-        cmd[press.arm_a] = arm_target
+        cmd[press.arm_a] = arm_target[press.arm_a_slot]
         advance(cmd)
 
         obj_c = B.sq(rig.d.xpos)[rig.obj_body].copy()
