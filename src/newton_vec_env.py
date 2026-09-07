@@ -852,6 +852,38 @@ class NewtonVecEnv:
           f"simulated. Use FINGER_FORCE_LIMIT={_ahe} instead, which writes mj_model and mjw_model "
           f"directly.")
 
+    # NEUTRALISE_LEFTOVER silences the scene's own Wuji finger motors.
+    #
+    # Every finger joint carries TWO actuators: mjlab's (kp 300, 30 N*m) and the scene's own, which
+    # mjlab renames `xml_motor_unused_*` but never removes and never writes. Left at ctrl 0 they are
+    # position servos pulling the finger OPEN -- measured in a live env, mean 0.157 N*m and up to
+    # 0.655. Against a 30 N*m budget that is noise; against a 0.62 N*m cap it is a quarter of it on
+    # average and 93% on individual joints, so any finger-torque experiment is contaminated without
+    # this. Identify them by gain, not by name: mjlab's compiled actuators are unnamed.
+    if os.environ.get("NEUTRALISE_LEFTOVER", "").strip() not in ("", "0"):
+      import mujoco as _mjn
+      _mmn = self.solver.mj_model
+      _left = [_a for _a in range(_mmn.nu)
+               if "finger" in (_mjn.mj_id2name(_mmn, _mjn.mjtObj.mjOBJ_JOINT,
+                                               int(_mmn.actuator_trnid[_a, 0])) or "").lower()
+               and float(_mmn.actuator_gainprm[_a, 0]) < 10.0]
+      if not _left:
+        raise RuntimeError("NEUTRALISE_LEFTOVER matched no weak finger actuator")
+      _budget = float(sum(abs(_mmn.actuator_forcerange[_a, 1]) for _a in _left))
+      for _a in _left:
+        _mmn.actuator_gainprm[_a, :] = 0.0
+        _mmn.actuator_biasprm[_a, :] = 0.0
+        _mmn.actuator_forcerange[_a, :] = 0.0
+      import warp as _wn
+      for _f in ("actuator_gainprm", "actuator_biasprm", "actuator_forcerange"):
+        _wn.to_torch(getattr(self.solver.mjw_model, _f))[:] = _wn.to_torch(
+          _wn.array(getattr(_mmn, _f), dtype=float))
+      _after = float(sum(abs(_mmn.actuator_forcerange[_a, 1]) for _a in _left))
+      print(f"[newton-env] NEUTRALISE_LEFTOVER -> {len(_left)} xml_motor_unused actuator(s); "
+            f"their torque budget {_budget:.3f} -> {_after:.3f} N*m", flush=True)
+      if _after > 1e-9:
+        raise RuntimeError("NEUTRALISE_LEFTOVER did not take")
+
     _ffl = os.environ.get("FINGER_FORCE_LIMIT", "").strip()
     if _ffl:
       import mujoco as _mjf2
