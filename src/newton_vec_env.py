@@ -2071,7 +2071,11 @@ class NewtonVecEnv:
             _gi = _gm[_sel][_wi]
             _wid_w = int(_wpl.to_torch(_c.worldid).long()[_sel][_wi])
             _age_w = int(self._env.episode_length_buf[min(_wid_w, self.num_envs - 1)])
-            if not hasattr(self, "_pen_where"):
+            # Guard on the thing being built, not on `_pen_where`: the flush sets `_pen_where`
+            # to None, so a run whose penetration stays at 0 long enough to flush before its first
+            # maximum skips this block forever and then crashes on `_pen_names`. That hit exactly
+            # the best-performing configuration, whose penetration really was 0.
+            if not hasattr(self, "_pen_names"):
               import mujoco as _mjw2
               self._pen_names = [(_mjw2.mj_id2name(self.solver.mj_model,
                                                    _mjw2.mjtObj.mjOBJ_GEOM, _g) or f"geom{_g}")
