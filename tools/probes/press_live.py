@@ -68,6 +68,22 @@ ap.add_argument("--ik-iters", type=int, default=120,
                 help="DLS iterations per waypoint, warm-started from the previous one")
 ap.add_argument("--damping", type=float, default=0.05, help="damped-least-squares lambda")
 ap.add_argument("--once", action="store_true", help="stop after one press instead of looping")
+ap.add_argument("--pose", default="palm_down", choices=("palm_down", "palm_in"),
+                help="palm_down: palm faces the floor, fingers naturally curled, index and middle "
+                     "left straighter so they meet the top face first. "
+                     "palm_in: palm faces the robot, index extended, the rest closed into a fist, "
+                     "poking straight down.")
+ap.add_argument("--place-block", type=int, default=1,
+                help="move the table and block to a comfortable reach directly under the hand. "
+                     "Where the reference clip puts them is 80 cm from the settled fingertip -- "
+                     "past the G1's reach even with the waist in the chain -- so the arm can never "
+                     "track the plan and the run measures reachability, not the wall. Moving the "
+                     "table changes nothing about the contact being tested.")
+ap.add_argument("--drop-below", type=float, default=0.16,
+                help="metres below the settled fingertip to put the block's top face")
+ap.add_argument("--dump", default=None, help="record qpos/mocap per control step for render_traj")
+ap.add_argument("--w-rot", type=float, default=0.35,
+                help="weight on the palm-orientation half of the IK task")
 ap.add_argument("--no-waist", action="store_true",
                 help="plan with the arm alone. It does not reach the block from a standing rest "
                      "pose -- kept so that fact stays reproducible")
@@ -134,8 +150,53 @@ class Press:
         slot = {j: i for i, j in enumerate(self.arm_j)}
         self.arm_a = [a for a in range(m.nu) if rig.jnt_of_act[a] in slot]
         self.arm_a_slot = np.array([slot[rig.jnt_of_act[a]] for a in self.arm_a])
-        self.tip_body = sorted(rig.tip_bodies)[0]
+        self._q_ref = B.sq(rig.qpos()).copy()
+        # The INDEX finger, not whatever sorts first -- that is finger1, the thumb. The Wuji hand
+        # numbers thumb..pinky as finger1..finger5.
+        def _body(sub):
+            hits = [b for b in range(m.nbody)
+                    if sub in (mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_BODY, b) or "")]
+            if not hits:
+                raise SystemExit(f"no body matching {sub!r}")
+            return hits[0]
+        self.index_body = _body("right_finger2_link4")
+        self.middle_body = _body("right_finger3_link4")
+        self.palm_body = _body("right_palm_link")
+        self.tip_body = self.index_body
         self.cpu = mujoco.MjData(m)
+        # Which way does the palm face? Defined from the hand's own motion rather than guessed:
+        # the fingers curl TOWARD the palm, so the displacement of the fingertips between fully
+        # open and fully closed, expressed in the palm frame, is the palm normal.
+        self.palm_axis_local = self._palm_axis()
+
+    def _palm_axis(self):
+        import mujoco
+        m, rig = self.rig.m, self.rig
+        fj = sorted({rig.jnt_of_act[a] for a in rig.finger_acts})
+        qa = [int(m.jnt_qposadr[j]) for j in fj]
+        lo = np.array([m.jnt_range[j][0] for j in fj])
+        hi = np.array([m.jnt_range[j][1] for j in fj])
+        tips = sorted(rig.tip_bodies)
+
+        def mean_tip(vals):
+            self.cpu.qpos[:] = self._q_ref
+            for a, v in zip(qa, vals):
+                self.cpu.qpos[a] = v
+            mujoco.mj_forward(m, self.cpu)
+            return np.mean([self.cpu.xpos[b] for b in tips], axis=0)
+
+        d = mean_tip(hi) - mean_tip(lo)
+        self.cpu.qpos[:] = self._q_ref
+        mujoco.mj_forward(m, self.cpu)
+        R = self.cpu.xmat[self.palm_body].reshape(3, 3)
+        a = R.T @ d
+        return a / max(np.linalg.norm(a), 1e-9)
+
+    def palm_axis_world(self, q):
+        import mujoco
+        self.cpu.qpos[:] = q
+        mujoco.mj_forward(self.rig.m, self.cpu)
+        return self.cpu.xmat[self.palm_body].reshape(3, 3) @ self.palm_axis_local
 
     def tip_world(self, q):
         import mujoco
@@ -143,7 +204,32 @@ class Press:
         mujoco.mj_forward(self.rig.m, self.cpu)
         return self.cpu.xpos[self.tip_body].copy()
 
-    def solve(self, q, target, iters=None):
+    def finger_targets(self, pose):
+        """The hand SHAPE is part of the plan, not an afterthought: the fingers are commanded into
+        it before the descent starts, so what meets the block is the surface we intended.
+
+        Fractions of each joint's own range, so the same numbers mean the same shape on every
+        finger regardless of its individual limits.
+        """
+        m, rig = self.rig.m, self.rig
+        if pose == "palm_down":
+            # Naturally curled, with index and middle left straighter so their tips are the lowest
+            # thing on the hand and meet the top face first.
+            frac = {1: 0.55, 2: 0.18, 3: 0.18, 4: 0.55, 5: 0.55}
+        else:
+            # A fist with the index extended: one fingertip pokes straight down.
+            frac = {1: 0.85, 2: 0.00, 3: 0.90, 4: 0.90, 5: 0.90}
+        out = {}
+        for a in rig.finger_acts:
+            n = B.jname(m, rig.jnt_of_act[a])
+            k = next((i for i in frac if f"right_finger{i}_joint" in n), None)
+            if k is None:
+                continue
+            lo, hi = m.actuator_ctrlrange[a]
+            out[a] = float(lo + frac[k] * (hi - lo))
+        return out
+
+    def solve(self, q, target, iters=None, axis_des=None):
         """Damped least squares on the arm chain only, run to convergence.
 
         Position task only: adding an orientation task made the solver swing 1.26 rad to move the
@@ -158,12 +244,26 @@ class Press:
             self.cpu.qpos[:] = q
             mujoco.mj_forward(m, self.cpu)
             err = target - self.cpu.xpos[self.tip_body]
-            if np.linalg.norm(err) < 1e-5:
-                break
             jacp = np.zeros((3, m.nv))
             mujoco.mj_jacBody(m, self.cpu, jacp, None, self.tip_body)
-            J = jacp[:, self.arm_v]
-            dq = J.T @ np.linalg.solve(J @ J.T + (A.damping ** 2) * np.eye(3), err)
+            if axis_des is None:
+                if np.linalg.norm(err) < 1e-5:
+                    break
+                J, e6 = jacp[:, self.arm_v], err
+            else:
+                # Align the palm's own normal with a world direction. An AXIS task, not a full
+                # orientation task: it leaves the spin about that axis free, so the solver has room
+                # to satisfy the position task as well. A full orientation target here made the
+                # solver swing 1.26 rad to move the tip 16 mm.
+                jacr = np.zeros((3, m.nv))
+                mujoco.mj_jacBody(m, self.cpu, None, jacr, self.palm_body)
+                a_cur = self.cpu.xmat[self.palm_body].reshape(3, 3) @ self.palm_axis_local
+                rot_err = np.cross(a_cur, axis_des)
+                if np.linalg.norm(err) < 1e-5 and np.linalg.norm(rot_err) < 1e-4:
+                    break
+                J = np.vstack([jacp[:, self.arm_v], A.w_rot * jacr[:, self.arm_v]])
+                e6 = np.concatenate([err, A.w_rot * rot_err])
+            dq = J.T @ np.linalg.solve(J @ J.T + (A.damping ** 2) * np.eye(J.shape[0]), e6)
             q[self.arm_q] += np.clip(dq, -0.05, 0.05)
             for k, j in enumerate(self.arm_j):
                 if m.jnt_limited[j]:
@@ -171,7 +271,7 @@ class Press:
                     q[self.arm_q[k]] = float(np.clip(q[self.arm_q[k]], lo, hi))
         return q[self.arm_q].copy(), float(np.linalg.norm(err))
 
-    def plan(self, q0, waypoints, iters):
+    def plan(self, q0, waypoints, iters, axis_des=None):
         """Solve the whole path offline, each waypoint warm-started from the last.
 
         Re-solving from the LIVE qpos every control step does not work: the servo lags the command,
@@ -182,7 +282,7 @@ class Press:
         q = q0.copy()
         out, worst = [], 0.0
         for w in waypoints:
-            arm, e = self.solve(q, w, iters)
+            arm, e = self.solve(q, w, iters, axis_des=axis_des)
             q[self.arm_q] = arm
             out.append(arm.copy())
             worst = max(worst, e)
@@ -248,45 +348,117 @@ def main():
     print("[press-live] mocap bodies after settle: "
           + ", ".join(f"{B.bname(m, b).split('_')[-1]} z={B.sq(rig.d.xpos)[b][2]:.4f}" for b in tb))
 
-    # 2. Plan, from where things actually ended up.
+    # 2. Shape the hand FIRST. The pose is part of the plan: what meets the block has to be the
+    #    surface we chose, not whatever shape the reset happened to leave.
+    fing = press.finger_targets(A.pose)
+    for a, v in fing.items():
+        hold[a] = v
+    n_shape = int(1.5 / dt)
+    advance(hold, n_shape)
+    print(f"[press-live] pose '{A.pose}': commanded {len(fing)} finger actuator(s); "
+          f"palm axis in the palm frame {np.round(press.palm_axis_local, 3)}")
+
+    # 3. Orient the palm. palm_down points its normal at the floor; palm_in points it back at the
+    #    robot, computed from the pelvis rather than assumed to be -x.
+    q = B.sq(rig.qpos()).copy()
+    tip = press.tip_world(q)
+    if A.pose == "palm_down":
+        axis_des = np.array([0.0, 0.0, -1.0])
+    else:
+        pelvis = [b for b in range(m.nbody) if B.bname(m, b).endswith("robot_pelvis")]
+        pv = B.sq(rig.d.xpos)[pelvis[0]] - tip if pelvis else np.array([-1.0, 0.0, 0.0])
+        pv[2] = 0.0
+        axis_des = pv / max(np.linalg.norm(pv), 1e-9)
+    n_orient = int(A.reach_s / dt)
+    orient_traj, e_or = press.plan(q, [tip] * n_orient, A.ik_iters, axis_des=axis_des)
+    for k in range(n_orient):
+        cmd = hold.copy()
+        cmd[press.arm_a] = orient_traj[k][press.arm_a_slot]
+        advance(cmd)
+    hold[press.arm_a] = orient_traj[-1][press.arm_a_slot]
+    q = B.sq(rig.qpos()).copy()
+    tip = press.tip_world(q)
+    got = press.palm_axis_world(q)
+    print(f"[press-live] palm axis now {np.round(got,3)} vs wanted {np.round(axis_des,3)} "
+          f"(angle {np.degrees(np.arccos(np.clip(got @ axis_des, -1, 1))):.1f} deg); "
+          f"index fingertip at {np.round(tip,4)}")
+
+    # 4. Put the block where the hand can actually reach it.
+    #
+    #    Where the reference clip leaves it, the settled fingertip is 80 cm away -- past the G1's
+    #    reach even with the waist in the chain. The arm then never tracks the plan (error grew from
+    #    21 mm to 125 mm against a STATIONARY target) and the run measures reachability, not the
+    #    wall. The table is a mocap body, so it moves by writing mocap_pos; mocap persists, and the
+    #    press drives the arm directly afterwards.
+    if A.place_block:
+        tg = [g for g in range(m.ngeom) if "table" in B.gname(m, g)]
+        mocap = [b for b in range(m.nbody) if int(m.body_mocapid[b]) >= 0
+                 and "table" in B.bname(m, b)]
+        if not tg or not mocap:
+            raise SystemExit("no table geom / mocap body found")
+        slot = int(m.body_mocapid[mocap[0]])
+        did = int(m.geom_dataid[tg[0]])
+        va, vn = int(m.mesh_vertadr[did]), int(m.mesh_vertnum[did])
+        TV = m.mesh_vert[va:va + vn].reshape(-1, 3)
+        t_half = float(0.5 * (TV[:, 2].max() - TV[:, 2].min()))
+        g_z = float(B.sq(rig.d.geom_xpos)[tg[0]][2])
+        mp = B.sq(rig.d.mocap_pos).copy()
+        off = g_z - float(mp[slot][2])          # geom sits this far above its mocap body
+
+        top = tip - np.array([0.0, 0.0, A.drop_below])
+        centre = top - np.array([0.0, 0.0, float(rig.h[2])])
+        mp[slot] = np.array([centre[0], centre[1],
+                             centre[2] - float(rig.h[2]) - t_half - off])
+        wp.to_torch(rig.d.mocap_pos)[:] = torch.as_tensor(
+            mp, dtype=wp.to_torch(rig.d.mocap_pos).dtype,
+            device=wp.to_torch(rig.d.mocap_pos).device).reshape(wp.to_torch(rig.d.mocap_pos).shape)
+        qq = rig.qpos()
+        qq[0, rig.obj_qadr:rig.obj_qadr + 3] = torch.tensor(
+            centre + np.array([0.0, 0.0, 0.004]), dtype=qq.dtype, device=qq.device)
+        qq[0, rig.obj_qadr + 3:rig.obj_qadr + 7] = torch.tensor(
+            [1.0, 0.0, 0.0, 0.0], dtype=qq.dtype, device=qq.device)
+        rig.qvel()[0, rig.obj_vadr:rig.obj_vadr + 6] = 0.0
+        advance(hold, int(1.0 / dt))            # let it land on the table under gravity
+        print(f"[press-live] table moved: half-height {1000*t_half:.1f} mm, geom/mocap offset "
+              f"{1000*off:.1f} mm; block now {np.round(B.sq(rig.d.xpos)[rig.obj_body], 4)}")
+
+    # 5. Plan the descent from where the hand and the block actually are.
     q = B.sq(rig.qpos()).copy()
     obj_c = B.sq(rig.d.xpos)[rig.obj_body].copy()
     top = obj_c + np.array([0.0, 0.0, float(rig.h[2])])
     tip = press.tip_world(q)
-    start = top + np.array([0.0, 0.0, A.standoff])
+    start = np.array([top[0], top[1], tip[2]])
     goal = top - np.array([0.0, 0.0, A.through])
     pen0 = signed_depth_mm(rig, obj_c, rig.press_geoms)
     print(f"[press-live] block centre {np.round(obj_c,4)}  top face z {top[2]:.4f}")
-    print(f"[press-live] fingertip now {np.round(tip,4)}  ->  start {np.round(start,4)}  "
-          f"->  commanded {np.round(goal,4)}  ({1000*A.through:.0f} mm below the face, on purpose)")
-    print(f"[press-live] step-0 overlap {pen0:+.3f} mm "
+    print(f"[press-live] fingertip {np.round(tip,4)} -> over the block {np.round(start,4)} "
+          f"-> commanded {np.round(goal,4)} ({1000*A.through:.0f} mm below the face, on purpose)")
+    print(f"[press-live] step-0 gap {pen0:+.3f} mm "
           f"({'CLEAR' if pen0 <= 0.0 else 'ALREADY INSIDE -- the run would be meaningless'})")
+    if pen0 > 0.0:
+        raise SystemExit("step 0 is inside the block; refusing to run")
 
     n_reach = int(A.reach_s / dt)
     n_down, n_hold = int(A.approach_s / dt), int(A.hold_s / dt)
-
-    # Plan the whole thing before moving: reach from wherever the arm settled up to the standoff
-    # point, then straight down through the block. Both phases are solved offline and warm-started.
     reach_pts = [tip + (start - tip) * (i + 1) / n_reach for i in range(n_reach)]
     down_pts = [start + (goal - start) * min(1.0, (i + 1) / n_down) for i in range(n_down + n_hold)]
-    traj, worst_ik = press.plan(q, reach_pts + down_pts, iters=A.ik_iters)
+    pts = reach_pts + down_pts
+    traj, worst_ik = press.plan(q, pts, A.ik_iters, axis_des=axis_des)
     print(f"[press-live] planned {len(traj)} waypoints; worst IK residual {1000*worst_ik:.2f} mm")
-    if worst_ik > 0.01:
-        print(f"[press-live] the plan does not reach: {1000*worst_ik:.1f} mm of residual means the "
-              f"arm cannot get there, so any contact result would be about reachability, not the "
-              f"wall. Move the block or extend the arm's range.")
+    if worst_ik > 0.005:
+        print(f"[press-live] WARNING the plan does not close: {1000*worst_ik:.1f} mm of residual "
+              f"means any contact result would be about reachability, not the wall.")
 
-    worst, contact_steps, step = 0.0, 0, 0
-    t0 = 0.0
+    worst, contact_steps, step, t0 = 0.0, 0, 0, 0.0
+    rec_q, rec_mp, rec_mq, rec_pen, rec_n, rec_f = [], [], [], [], [], []
 
     while env.viewer is None or env.viewer.is_running():
         k = step % len(traj)
         phase_down = k >= n_reach
-        target = (reach_pts + down_pts)[k]
+        target = pts[k]
         cmd = hold.copy()
         cmd[press.arm_a] = traj[k][press.arm_a_slot]
         advance(cmd)
-        err = 0.0
 
         obj_c = B.sq(rig.d.xpos)[rig.obj_body].copy()
         pen = signed_depth_mm(rig, obj_c, rig.press_geoms)
@@ -294,9 +466,17 @@ def main():
         track = 1000.0 * float(np.linalg.norm(tip_now - target))
         keep, _rows, _n = rig.hand_object()
         fn = float(sum(c["force"] for c in keep)) if keep else 0.0
-        if phase_down:                       # only the press itself is scored
+        if phase_down:
             worst = max(worst, pen)
             contact_steps += 1 if keep else 0
+
+        if A.dump:
+            rec_q.append(B.sq(rig.qpos()).copy())
+            rec_mp.append(B.sq(rig.d.mocap_pos).copy())
+            rec_mq.append(B.sq(rig.d.mocap_quat).copy())
+            rec_pen.append(pen)
+            rec_n.append(len(keep))
+            rec_f.append(fn)
 
         if env.viewer is not None:
             env.viewer.begin_frame(t0)
@@ -306,9 +486,7 @@ def main():
                               ("normal_force_N", fn),
                               ("commanded_depth_mm", 1000.0 * (top[2] - target[2])),
                               ("worst_penetration_mm", worst),
-                              ("tracking_error_mm", track),
-                              ("block_moved_mm", 1000.0 * float(np.linalg.norm(obj_c - top +
-                                                np.array([0, 0, float(rig.h[2])]))))):
+                              ("tracking_error_mm", track)):
                 env.viewer.log_array(name, np.array([val], dtype=np.float32))
             env.viewer.end_frame()
         t0 += dt
@@ -317,15 +495,25 @@ def main():
             print(f"[press-live] {step:5d}  commanded {1000*(top[2]-target[2]):+7.2f} mm  "
                   f"gap {pen:+8.2f} mm  worst {worst:+7.3f}  contacts {len(keep):3d}  "
                   f"Fn {fn:8.2f} N  tip {np.round(tip_now,3)}  block {np.round(obj_c,3)}  "
-                  f"tracking err {track:6.1f} mm",
-                  flush=True)
+                  f"track {track:6.1f} mm", flush=True)
         step += 1
         if A.once and step >= len(traj):
             break
 
+    if A.dump and rec_q:
+        names = [x for _, x in sorted(zip(
+            [int(m.body_mocapid[b]) for b in range(m.nbody) if m.body_mocapid[b] >= 0],
+            [B.bname(m, b) for b in range(m.nbody) if m.body_mocapid[b] >= 0]))]
+        np.savez_compressed(A.dump, qpos=np.stack(rec_q), mocap_pos=np.stack(rec_mp),
+                            mocap_quat=np.stack(rec_mq), mocap_names=np.array(names),
+                            overlap_mm=np.asarray(rec_pen), ncon=np.asarray(rec_n, dtype=float),
+                            contact_force_N=np.asarray(rec_f))
+        print(f"[press-live] wrote {A.dump} ({len(rec_q)} frames)")
+
     verdict = ("INVALID -- nothing ever touched, so the penetration number means nothing"
-               if contact_steps < 50 else f"worst penetration {worst:+.3f} mm over {step} steps")
+               if contact_steps < 50 else f"worst penetration {worst:+.3f} mm")
     print(f"[press-live] {verdict}  (contact on {contact_steps} of {step} steps)")
 
 
-main()
+if __name__ == "__main__":
+    main()
