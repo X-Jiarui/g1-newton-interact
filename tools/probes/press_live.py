@@ -88,6 +88,10 @@ ap.add_argument("--place-block", type=int, default=0,
                      "table changes nothing about the contact being tested.")
 ap.add_argument("--drop-below", type=float, default=0.16,
                 help="metres below the settled fingertip to put the block's top face")
+ap.add_argument("--corrections", type=int, default=6,
+                help="rounds of static-error correction on the descent. The servo's droop depends "
+                     "on the arm's configuration, so one feedforward cannot cover a 110 mm reach")
+ap.add_argument("--correct-s", type=float, default=1.5, help="seconds per correction ramp")
 ap.add_argument("--dump", default=None, help="record qpos/mocap per control step for render_traj")
 ap.add_argument("--w-rot", type=float, default=0.35,
                 help="weight on the palm-orientation half of the IK task")
@@ -523,24 +527,18 @@ def main():
     worst, contact_steps, step, t0 = 0.0, 0, 0, 0.0
     rec_q, rec_mp, rec_mq, rec_pen, rec_n, rec_f = [], [], [], [], [], []
 
-    while env.viewer is None or env.viewer.is_running():
-        k = step % len(traj)
-        phase_down = k >= n_reach
-        target = pts[k]
-        cmd = hold.copy()
-        cmd[press.arm_a] = traj[k][press.arm_a_slot]
+    def tick(cmd, target):
+        """One control step, plus every measurement and the live plots."""
+        nonlocal worst, contact_steps, step, t0
         advance(cmd)
-
         obj_c = B.sq(rig.d.xpos)[rig.obj_body].copy()
         pen = signed_depth_mm(rig, obj_c, rig.press_geoms)
         tip_now = press.tip_world(B.sq(rig.qpos()))
-        track = 1000.0 * float(np.linalg.norm(tip_now - (target - (tip_cmd - tip))))
+        track = 1000.0 * float(np.linalg.norm(tip_now - target))
         keep, _rows, _n = rig.hand_object()
         fn = float(sum(c["force"] for c in keep)) if keep else 0.0
-        if phase_down:
-            worst = max(worst, pen)
-            contact_steps += 1 if keep else 0
-
+        worst = max(worst, pen)
+        contact_steps += 1 if keep else 0
         if A.dump:
             rec_q.append(B.sq(rig.qpos()).copy())
             rec_mp.append(B.sq(rig.d.mocap_pos).copy())
@@ -548,28 +546,61 @@ def main():
             rec_pen.append(pen)
             rec_n.append(len(keep))
             rec_f.append(fn)
-
         if env.viewer is not None:
             env.viewer.begin_frame(t0)
             env.viewer.log_state(env.state_in)
-            for name, val in (("penetration_mm", pen),
-                              ("hand_object_contacts", len(keep)),
-                              ("normal_force_N", fn),
-                              ("commanded_depth_mm", 1000.0 * (top[2] - target[2])),
-                              ("worst_penetration_mm", worst),
-                              ("tracking_error_mm", track)):
-                env.viewer.log_array(name, np.array([val], dtype=np.float32))
+            for nm, val in (("penetration_mm", pen), ("hand_object_contacts", len(keep)),
+                            ("normal_force_N", fn), ("worst_penetration_mm", worst),
+                            ("commanded_depth_mm", 1000.0 * (top[2] - target[2])),
+                            ("tracking_error_mm", track)):
+                env.viewer.log_array(nm, np.array([val], dtype=np.float32))
             env.viewer.end_frame()
         t0 += dt
-
-        if step % 20 == 0:
-            print(f"[press-live] {step:5d}  commanded {1000*(top[2]-target[2]):+7.2f} mm  "
-                  f"gap {pen:+8.2f} mm  worst {worst:+7.3f}  contacts {len(keep):3d}  "
-                  f"Fn {fn:8.2f} N  tip {np.round(tip_now,3)}  block {np.round(obj_c,3)}  "
-                  f"track {track:6.1f} mm", flush=True)
+        if step % 25 == 0:
+            print(f"[press-live] {step:5d}  gap {pen:+8.2f} mm  worst {worst:+7.3f}  "
+                  f"contacts {len(keep):3d}  Fn {fn:8.2f} N  tip {np.round(tip_now,3)}  "
+                  f"block {np.round(obj_c,3)}  reach err {track:6.1f} mm", flush=True)
         step += 1
-        if A.once and step >= len(traj):
+        return tip_now
+
+    def ramp_to(arm_target, secs, target_pt):
+        """Interpolate the arm COMMAND in joint space and hold it there."""
+        n = max(1, int(secs / dt))
+        a0 = hold[press.arm_a].copy()
+        a1 = arm_target[press.arm_a_slot]
+        for i in range(n):
+            c = hold.copy()
+            c[press.arm_a] = a0 + (a1 - a0) * (i + 1) / n
+            tick(c, target_pt)
+        hold[press.arm_a] = a1
+
+    # Reach across to sit over the block, then press down through it.
+    arm_reach, _e = press.solve(q_cmd, pts[n_reach - 1], A.ik_iters, axis_des=axis_des)
+    ramp_to(arm_reach, A.reach_s, start)
+    arm_down, _e = press.solve(q_cmd, pts[-1], A.ik_iters, axis_des=axis_des)
+    ramp_to(arm_down, A.approach_s, goal)
+
+    # The position servo droops under gravity and the droop DEPENDS on the arm's configuration, so
+    # one feedforward offset cannot cover a 110 mm descent: the arm was commanded down 110 mm and
+    # moved 4 mm. Correct it the way a static error is always corrected -- measure what is left and
+    # add it to the command -- and repeat. Because the goal is INSIDE the block, this keeps pushing
+    # until the CONTACT is what balances the servo, which is exactly the position-control test:
+    # commanded deeper, and the wall is the only thing that can refuse.
+    for it in range(A.corrections):
+        tip_now = press.tip_world(B.sq(rig.qpos()))
+        err = goal - tip_now
+        if np.linalg.norm(err) < 1e-4:
             break
+        q_now = B.sq(rig.qpos()).copy()
+        for a, sl in zip(press.arm_a, press.arm_a_slot):
+            q_now[press.arm_q[sl]] = hold[a]
+        tip_c = press.tip_world(q_now)
+        arm_c, res = press.solve(q_now, tip_c + err, A.ik_iters, axis_des=axis_des)
+        print(f"[press-live] correction {it+1}: {1000*float(np.linalg.norm(err)):.1f} mm short, "
+              f"pushing the command that much further (IK residual {1000*res:.2f} mm)", flush=True)
+        ramp_to(arm_c, A.correct_s, goal)
+        for _ in range(int(A.hold_s / dt)):
+            tick(hold, goal)
 
     if A.dump and rec_q:
         names = [x for _, x in sorted(zip(
