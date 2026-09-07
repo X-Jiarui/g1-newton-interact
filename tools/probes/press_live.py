@@ -186,6 +186,22 @@ class Press:
         return out, worst
 
 
+def signed_depth_mm(rig, centre, geoms):
+    """Signed: positive inside, NEGATIVE clear, in mm.
+
+    `Rig.depth_into_cube_mm` starts its running maximum at 0.0, so it returns exactly +0.000 for
+    every non-penetrating pose and cannot distinguish "just touching" from "30 cm away". That made
+    the step-0 clearance assertion vacuous and hid a run in which the arm never moved.
+    """
+    best = -1e9
+    c = np.asarray(centre)[None, :]
+    for _g, P in rig.hand_world_verts(geoms).items():
+        d = rig.h[None, :] - np.abs(P - c)
+        if d.size:
+            best = max(best, float(d.min(axis=1).max()))
+    return 1000.0 * best
+
+
 def main():
     env = build_env(A.port)
     rig = B.Rig(env)
@@ -221,7 +237,7 @@ def main():
     tip = press.tip_world(q)
     start = top + np.array([0.0, 0.0, A.standoff])
     goal = top - np.array([0.0, 0.0, A.through])
-    pen0, _ = rig.depth_into_cube_mm(obj_c, rig.press_geoms)
+    pen0 = signed_depth_mm(rig, obj_c, rig.press_geoms)
     print(f"[press-live] block centre {np.round(obj_c,4)}  top face z {top[2]:.4f}")
     print(f"[press-live] fingertip now {np.round(tip,4)}  ->  start {np.round(start,4)}  "
           f"->  commanded {np.round(goal,4)}  ({1000*A.through:.0f} mm below the face, on purpose)")
@@ -255,7 +271,9 @@ def main():
         err = 0.0
 
         obj_c = B.sq(rig.d.xpos)[rig.obj_body].copy()
-        pen, _who = rig.depth_into_cube_mm(obj_c, rig.press_geoms)
+        pen = signed_depth_mm(rig, obj_c, rig.press_geoms)
+        tip_now = press.tip_world(B.sq(rig.qpos()))
+        track = 1000.0 * float(np.linalg.norm(tip_now - target))
         keep, _rows, _n = rig.hand_object()
         fn = float(sum(c["force"] for c in keep)) if keep else 0.0
         if phase_down:                       # only the press itself is scored
@@ -270,6 +288,7 @@ def main():
                               ("normal_force_N", fn),
                               ("commanded_depth_mm", 1000.0 * (top[2] - target[2])),
                               ("worst_penetration_mm", worst),
+                              ("tracking_error_mm", track),
                               ("block_moved_mm", 1000.0 * float(np.linalg.norm(obj_c - top +
                                                 np.array([0, 0, float(rig.h[2])]))))):
                 env.viewer.log_array(name, np.array([val], dtype=np.float32))
@@ -278,8 +297,9 @@ def main():
 
         if step % 20 == 0:
             print(f"[press-live] {step:5d}  commanded {1000*(top[2]-target[2]):+7.2f} mm  "
-                  f"into block {pen:+7.3f} mm  worst {worst:+7.3f}  contacts {len(keep):3d}  "
-                  f"Fn {fn:9.2f} N  ik err {1000*err:6.2f} mm", flush=True)
+                  f"gap {pen:+8.2f} mm  worst {worst:+7.3f}  contacts {len(keep):3d}  "
+                  f"Fn {fn:8.2f} N  tip {np.round(tip_now,3)}  tracking err {track:6.1f} mm",
+                  flush=True)
         step += 1
         if A.once and step >= len(traj):
             break
