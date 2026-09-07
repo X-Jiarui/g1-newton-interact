@@ -391,36 +391,44 @@ def main():
     #    wall. The table is a mocap body, so it moves by writing mocap_pos; mocap persists, and the
     #    press drives the arm directly afterwards.
     if A.place_block:
-        tg = [g for g in range(m.ngeom) if "table" in B.gname(m, g)]
         mocap = [b for b in range(m.nbody) if int(m.body_mocapid[b]) >= 0
                  and "table" in B.bname(m, b)]
-        if not tg or not mocap:
-            raise SystemExit("no table geom / mocap body found")
+        if not mocap:
+            raise SystemExit("no table mocap body found")
         slot = int(m.body_mocapid[mocap[0]])
-        did = int(m.geom_dataid[tg[0]])
-        va, vn = int(m.mesh_vertadr[did]), int(m.mesh_vertnum[did])
-        TV = m.mesh_vert[va:va + vn].reshape(-1, 3)
-        t_half = float(0.5 * (TV[:, 2].max() - TV[:, 2].min()))
-        g_z = float(B.sq(rig.d.geom_xpos)[tg[0]][2])
         mp = B.sq(rig.d.mocap_pos).copy()
-        off = g_z - float(mp[slot][2])          # geom sits this far above its mocap body
+        # The table's top surface, MEASURED, not derived from the collider mesh. Reading the z
+        # extent of table_box.stl gave 105 mm against the authored half-height of 20 mm, which put
+        # the table 77 mm too low; the block was still in free fall when the descent was planned and
+        # the hand pressed 47 mm above where the block actually came to rest.
+        # After the settle the block rests ON the table, so the top is exactly one half-extent below
+        # the block's centre, and the offset to the mocap body follows.
+        obj0 = B.sq(rig.d.xpos)[rig.obj_body].copy()
+        top_now = obj0[2] - float(rig.h[2])
+        off = top_now - float(mp[slot][2])
 
         top = tip - np.array([0.0, 0.0, A.drop_below])
         centre = top - np.array([0.0, 0.0, float(rig.h[2])])
-        mp[slot] = np.array([centre[0], centre[1],
-                             centre[2] - float(rig.h[2]) - t_half - off])
-        wp.to_torch(rig.d.mocap_pos)[:] = torch.as_tensor(
-            mp, dtype=wp.to_torch(rig.d.mocap_pos).dtype,
-            device=wp.to_torch(rig.d.mocap_pos).device).reshape(wp.to_torch(rig.d.mocap_pos).shape)
+        mp[slot] = np.array([centre[0], centre[1], centre[2] - float(rig.h[2]) - off])
+        mt = wp.to_torch(rig.d.mocap_pos)
+        mt[:] = torch.as_tensor(mp, dtype=mt.dtype, device=mt.device).reshape(mt.shape)
         qq = rig.qpos()
         qq[0, rig.obj_qadr:rig.obj_qadr + 3] = torch.tensor(
-            centre + np.array([0.0, 0.0, 0.004]), dtype=qq.dtype, device=qq.device)
+            centre + np.array([0.0, 0.0, 0.002]), dtype=qq.dtype, device=qq.device)
         qq[0, rig.obj_qadr + 3:rig.obj_qadr + 7] = torch.tensor(
             [1.0, 0.0, 0.0, 0.0], dtype=qq.dtype, device=qq.device)
         rig.qvel()[0, rig.obj_vadr:rig.obj_vadr + 6] = 0.0
-        advance(hold, int(1.0 / dt))            # let it land on the table under gravity
-        print(f"[press-live] table moved: half-height {1000*t_half:.1f} mm, geom/mocap offset "
-              f"{1000*off:.1f} mm; block now {np.round(B.sq(rig.d.xpos)[rig.obj_body], 4)}")
+        # Wait until it is actually AT REST. A fixed 1 s wait was not enough with the table
+        # misplaced, and planning against a falling block is how the hand came to press at thin air.
+        for _ in range(30):
+            advance(hold, int(0.2 / dt))
+            v = B.sq(rig.qvel())[rig.obj_vadr:rig.obj_vadr + 3]
+            if float(np.linalg.norm(v)) < 1e-3:
+                break
+        obj_c = B.sq(rig.d.xpos)[rig.obj_body].copy()
+        print(f"[press-live] table top measured at z {top_now:.4f} (mocap offset "
+              f"{1000*off:.1f} mm); block placed and settled at {np.round(obj_c, 4)}, "
+              f"speed {1000*float(np.linalg.norm(B.sq(rig.qvel())[rig.obj_vadr:rig.obj_vadr+3])):.3f} mm/s")
 
     # 5. Plan the descent from where the hand and the block actually are.
     q = B.sq(rig.qpos()).copy()
