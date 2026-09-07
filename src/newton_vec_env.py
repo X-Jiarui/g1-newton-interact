@@ -301,9 +301,32 @@ class NewtonVecEnv:
       self._ref_mj_pre = mujoco.MjModel.from_xml_path(xml)
       if sdf_object_stl:
         from grab_objects import swap_collider_to_sdf
-        swap_collider_to_sdf(scene, self._ref_mj_pre, f"{object_entity}/{object_entity}",
-                             sdf_object_stl, resolution=sdf_resolution,
-                             hydroelastic=((sdf_hydroelastic or native_contacts) and hydro_object_table))
+        _obj_shape = swap_collider_to_sdf(
+            scene, self._ref_mj_pre, f"{object_entity}/{object_entity}",
+            sdf_object_stl, resolution=sdf_resolution,
+            hydroelastic=((sdf_hydroelastic or native_contacts) and hydro_object_table))
+
+        # LINK2_ISOLATE, done where it actually takes effect.
+        #
+        # The scene XML isolates every finger `link2` from the object with contype/conaffinity 2/2,
+        # and collfix above clears that on purpose. Restoring it by writing MuJoCo's masks does
+        # NOTHING here: with use_mujoco_contacts=False the broad phase is Newton's CollisionPipeline,
+        # which filters on its own shape-pair table and never reads contype. That was measured --
+        # the masks were rewritten, the arithmetic asserted, and link2 remained the deepest
+        # penetrating collider in the run at 24.9 mm. Verifying a knob's value is not verifying its
+        # effect.
+        #
+        # This uses the same mechanism collfix uses for hand-against-hand, and it has to run HERE
+        # rather than up there because the object's SDF shape does not exist until this line.
+        if os.environ.get("LINK2_ISOLATE", "").strip() not in ("", "0"):
+          _l2s = [i for i in range(len(scene.shape_body))
+                  if "link2" in str(scene.shape_label[i]) and "finger" in str(scene.shape_label[i])]
+          for _i in _l2s:
+            scene.add_shape_collision_filter_pair(_i, _obj_shape)
+          print(f"[newton-env] LINK2_ISOLATE -> {len(_l2s)} finger link2 shape(s) filtered against "
+                f"object shape {_obj_shape} in Newton's own pair table", flush=True)
+          if not _l2s:
+            raise RuntimeError("LINK2_ISOLATE matched no link2 shape label")
 
       # Hydroelastic contact is pairwise: narrow_phase.py routes a pair to the SDF pipeline only when
       # BOTH shapes carry ShapeFlags.HYDROELASTIC, and otherwise falls through to the rigid path.
@@ -952,55 +975,6 @@ class NewtonVecEnv:
     # (2*timestep, the stability floor) while the hand sits at MuJoCo's default 0.02: blended, the
     # pair runs at 0.012, and penetration goes as timeconst^2, so the contact that actually holds
     # the object is 9x softer than the one that was tuned.
-    # LINK2_ISOLATE restores what the scene XML asked for and `collfix` above deliberately undid.
-    #
-    # The XML gives every `link2` contype/conaffinity 2/2 so the proximal finger segment cannot
-    # collide with the object at all. collfix clears that -- "uniform contype on every hand geom, so
-    # what may collide is decided by the exclusion list" -- but that exclusion list covers hand
-    # against hand only, so nothing keeps link2 out of the object any more.
-    #
-    # Measured consequence: the deepest penetration of an entire run, 25.4 mm, is on
-    # `right_finger3_link2`, at step 39, during the closing phase. link2's collider is the proximal
-    # segment, which sweeps through where a 40 mm cube sits when the finger curls around it -- which
-    # is why the scene isolated it in the first place.
-    #
-    # The object carries contype 2^25 and conaffinity ~2^25. Giving link2 the same pair makes the
-    # object-link2 test fail both ways while leaving link2 colliding with the table, the floor and
-    # the rest of the hand exactly as before.
-    _l2 = os.environ.get("LINK2_ISOLATE", "").strip()
-    if _l2 not in ("", "0"):
-      import mujoco as _mjl2
-      _mml2 = self.solver.mj_model
-      _og2 = [g for g in range(_mml2.ngeom)
-              if "apple" in (_mjl2.mj_id2name(_mml2, _mjl2.mjtObj.mjOBJ_GEOM, g) or "")]
-      if not _og2:
-        raise RuntimeError("LINK2_ISOLATE found no object geom")
-      _oc2 = int(_mml2.geom_contype[_og2[0]])
-      _oa2 = int(_mml2.geom_conaffinity[_og2[0]])
-      _n2 = 0
-      for _g in range(_mml2.ngeom):
-        _gn2 = _mjl2.mj_id2name(_mml2, _mjl2.mjtObj.mjOBJ_GEOM, _g) or ""
-        if "link2" not in _gn2 or "finger" not in _gn2:
-          continue
-        _mml2.geom_contype[_g] = _oc2
-        _mml2.geom_conaffinity[_g] = _oa2
-        _n2 += 1
-      import warp as _wl2
-      _wl2.to_torch(self.solver.mjw_model.geom_contype)[:] = _wl2.to_torch(
-        _wl2.array(_mml2.geom_contype, dtype=int))
-      _wl2.to_torch(self.solver.mjw_model.geom_conaffinity)[:] = _wl2.to_torch(
-        _wl2.array(_mml2.geom_conaffinity, dtype=int))
-      _chk = [g for g in range(_mml2.ngeom)
-              if "link2" in (_mjl2.mj_id2name(_mml2, _mjl2.mjtObj.mjOBJ_GEOM, g) or "")
-              and "finger" in (_mjl2.mj_id2name(_mml2, _mjl2.mjtObj.mjOBJ_GEOM, g) or "")]
-      _still = any((int(_mml2.geom_contype[g]) & _oa2) or (_oc2 & int(_mml2.geom_conaffinity[g]))
-                   for g in _chk)
-      print(f"[newton-env] LINK2_ISOLATE -> {_n2} finger link2 geom(s) given the object's own "
-            f"contype/conaffinity ({_oc2}/{_oa2}); still collides with the object: {_still}",
-            flush=True)
-      if _still:
-        raise RuntimeError("LINK2_ISOLATE did not take: link2 still passes the mask test")
-
     _opr = os.environ.get("OBJECT_PRIORITY", "").strip()
     if _opr:
       import mujoco as _mjp
