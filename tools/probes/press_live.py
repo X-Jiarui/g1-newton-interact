@@ -227,11 +227,26 @@ def main():
             env._physics_step()
             env.state_in, env.state_out = env.state_out, env.state_in
 
-    # 1. Settle. The table only arrives under the block when mjlab's reset event runs, and the robot
-    #    needs a moment to stand. Everything holds its reset pose.
+    # 1. Settle through the FULL env.step, not the bare physics step.
+    #
+    #    The table is a mocap body and only mjlab's mdp writes its runtime pose; a fresh model
+    #    carries the authored pose, which is z = 0 -- the table sits inside the floor and the block
+    #    falls straight through it. The first version of this settled with `_physics_step` alone and
+    #    the block ended up on the ground at z = 0.02, 80 cm below where the hand was pressing, with
+    #    the run dutifully reporting "gap -500 mm, 0 contacts".
+    #
+    #    Mocap poses persist once written, so stepping the real pipeline for the settle is enough:
+    #    afterwards the press can drive the arm directly and the table stays put.
+    nact = int(env._env.action_manager.total_action_dim)
+    zero_act = torch.zeros((env.num_envs, nact), device="cuda:0")
+    for _ in range(int(A.settle_s / dt)):
+        with torch.inference_mode():
+            env.step(zero_act)
     rig.snapshot(freeze_hold=True)
     hold = rig.target_from_qpos()
-    advance(hold, int(A.settle_s / dt))
+    tb = [b for b in range(m.nbody) if int(m.body_mocapid[b]) >= 0]
+    print("[press-live] mocap bodies after settle: "
+          + ", ".join(f"{B.bname(m, b).split('_')[-1]} z={B.sq(rig.d.xpos)[b][2]:.4f}" for b in tb))
 
     # 2. Plan, from where things actually ended up.
     q = B.sq(rig.qpos()).copy()
