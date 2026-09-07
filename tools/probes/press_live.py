@@ -59,7 +59,10 @@ ap.add_argument("--hold-s", type=float, default=5.0, help="seconds held down aft
 ap.add_argument("--settle-s", type=float, default=1.5,
                 help="seconds before the press, so the block lands on the table and the robot "
                      "stands: mjlab's reset event is what puts the table under the block")
-ap.add_argument("--ik-iters", type=int, default=8, help="DLS corrections per control step")
+ap.add_argument("--reach-s", type=float, default=2.5,
+                help="seconds to travel from wherever the arm settled to the standoff point")
+ap.add_argument("--ik-iters", type=int, default=120,
+                help="DLS iterations per waypoint, warm-started from the previous one")
 ap.add_argument("--damping", type=float, default=0.05, help="damped-least-squares lambda")
 ap.add_argument("--once", action="store_true", help="stop after one press instead of looping")
 A = ap.parse_args()
@@ -127,23 +130,50 @@ class Press:
         mujoco.mj_forward(self.rig.m, self.cpu)
         return self.cpu.xpos[self.tip_body].copy()
 
-    def solve(self, q, target):
-        """Damped least squares on the arm chain only. Position task only: adding orientation made
-        the solver swing 1.26 rad to move the tip 16 mm."""
+    def solve(self, q, target, iters=None):
+        """Damped least squares on the arm chain only, run to convergence.
+
+        Position task only: adding an orientation task made the solver swing 1.26 rad to move the
+        tip 16 mm. Joint limits are respected, because an IK answer outside them is one the servo
+        will never reach and the residual would silently be blamed on the contact.
+        """
         import mujoco
+        m = self.rig.m
         q = q.copy()
-        for _ in range(A.ik_iters):
+        err = np.zeros(3)
+        for _ in range(iters or A.ik_iters):
             self.cpu.qpos[:] = q
-            mujoco.mj_forward(self.rig.m, self.cpu)
+            mujoco.mj_forward(m, self.cpu)
             err = target - self.cpu.xpos[self.tip_body]
-            if np.linalg.norm(err) < 1e-4:
+            if np.linalg.norm(err) < 1e-5:
                 break
-            jacp = np.zeros((3, self.rig.m.nv))
-            mujoco.mj_jacBody(self.rig.m, self.cpu, jacp, None, self.tip_body)
+            jacp = np.zeros((3, m.nv))
+            mujoco.mj_jacBody(m, self.cpu, jacp, None, self.tip_body)
             J = jacp[:, self.arm_v]
             dq = J.T @ np.linalg.solve(J @ J.T + (A.damping ** 2) * np.eye(3), err)
-            q[self.arm_q] += dq
+            q[self.arm_q] += np.clip(dq, -0.05, 0.05)
+            for k, j in enumerate(self.arm_j):
+                if m.jnt_limited[j]:
+                    lo, hi = m.jnt_range[j]
+                    q[self.arm_q[k]] = float(np.clip(q[self.arm_q[k]], lo, hi))
         return q[self.arm_q].copy(), float(np.linalg.norm(err))
+
+    def plan(self, q0, waypoints, iters):
+        """Solve the whole path offline, each waypoint warm-started from the last.
+
+        Re-solving from the LIVE qpos every control step does not work: the servo lags the command,
+        so the solver keeps starting from behind and the residual never closes -- the first version
+        of this sat at 104-148 mm of error for the entire run and never touched the block. Planning
+        once and playing the trajectory is also what "a planned motion" is supposed to mean.
+        """
+        q = q0.copy()
+        out, worst = [], 0.0
+        for w in waypoints:
+            arm, e = self.solve(q, w, iters)
+            q[self.arm_q] = arm
+            out.append(arm.copy())
+            worst = max(worst, e)
+        return out, worst
 
 
 def main():
@@ -188,27 +218,39 @@ def main():
     print(f"[press-live] step-0 overlap {pen0:+.3f} mm "
           f"({'CLEAR' if pen0 <= 0.0 else 'ALREADY INSIDE -- the run would be meaningless'})")
 
+    n_reach = int(A.reach_s / dt)
     n_down, n_hold = int(A.approach_s / dt), int(A.hold_s / dt)
+
+    # Plan the whole thing before moving: reach from wherever the arm settled up to the standoff
+    # point, then straight down through the block. Both phases are solved offline and warm-started.
+    reach_pts = [tip + (start - tip) * (i + 1) / n_reach for i in range(n_reach)]
+    down_pts = [start + (goal - start) * min(1.0, (i + 1) / n_down) for i in range(n_down + n_hold)]
+    traj, worst_ik = press.plan(q, reach_pts + down_pts, iters=A.ik_iters)
+    print(f"[press-live] planned {len(traj)} waypoints; worst IK residual {1000*worst_ik:.2f} mm")
+    if worst_ik > 0.01:
+        print(f"[press-live] the plan does not reach: {1000*worst_ik:.1f} mm of residual means the "
+              f"arm cannot get there, so any contact result would be about reachability, not the "
+              f"wall. Move the block or extend the arm's range.")
+
     worst, contact_steps, step = -1e9, 0, 0
     t0 = 0.0
 
     while env.viewer is None or env.viewer.is_running():
-        phase = step % (n_down + n_hold)
-        frac = min(1.0, phase / max(1, n_down))
-        target = start + (goal - start) * frac
-
-        q = B.sq(rig.qpos()).copy()
-        arm_target, err = press.solve(q, target)
+        k = step % len(traj)
+        phase_down = k >= n_reach
+        target = (reach_pts + down_pts)[k]
         cmd = hold.copy()
-        cmd[press.arm_a] = arm_target[press.arm_a_slot]
+        cmd[press.arm_a] = traj[k][press.arm_a_slot]
         advance(cmd)
+        err = 0.0
 
         obj_c = B.sq(rig.d.xpos)[rig.obj_body].copy()
         pen, _who = rig.depth_into_cube_mm(obj_c, rig.press_geoms)
         keep, _rows, _n = rig.hand_object()
         fn = float(sum(c["force"] for c in keep)) if keep else 0.0
-        worst = max(worst, pen)
-        contact_steps += 1 if keep else 0
+        if phase_down:                       # only the press itself is scored
+            worst = max(worst, pen)
+            contact_steps += 1 if keep else 0
 
         if env.viewer is not None:
             env.viewer.begin_frame(t0)
@@ -229,7 +271,7 @@ def main():
                   f"into block {pen:+7.3f} mm  worst {worst:+7.3f}  contacts {len(keep):3d}  "
                   f"Fn {fn:9.2f} N  ik err {1000*err:6.2f} mm", flush=True)
         step += 1
-        if A.once and step >= n_down + n_hold:
+        if A.once and step >= len(traj):
             break
 
     verdict = ("INVALID -- nothing ever touched, so the penetration number means nothing"
