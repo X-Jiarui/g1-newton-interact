@@ -1946,7 +1946,6 @@ class NewtonVecEnv:
     call sites and the other three kept passing None, which surfaces as
     `NoneType has no attribute rigid_contact_max` -- from a site that looked unrelated.
     """
-    self._guard_targets()
     if self.collision_pipeline is not None:
       self._sync_body_q_from_mujoco()
       self.collision_pipeline.collide(self.state_in, self.contacts)
@@ -2005,21 +2004,25 @@ class NewtonVecEnv:
     torch.maximum(self._gt_worst_t, _over.amax(), out=self._gt_worst_t)
     if self._gt_on:
       _c[:, self._gt_idx] = _sel.clamp(self._gt_lo.unsqueeze(0), self._gt_hi.unsqueeze(0))
+    self._gt_n += 1
+    if self._gt_n % 2000 == 0:
+      _w = float(self._gt_worst_t)
+      print(f"[target-guard] worst command past its saturation range over 2000 control steps: "
+            f"{_w:+.5f} rad ({np.degrees(_w):+.2f} deg); clamp "
+            f"{'ON' if self._gt_on else 'off'}", flush=True)
+      self._gt_worst_t.zero_()
 
   def step(self, action: torch.Tensor):
     # Read the target-guard maximum out here, not inside the substep loop: this method is outside
     # the captured graph, so one sync per control step is affordable where one per substep is not.
-    if getattr(self, "_gt_n", None) is not None and len(getattr(self, "_gt_idx", [])):
-      self._gt_n += 1
-      if self._gt_n % 2000 == 0:
-        _w = float(self._gt_worst_t)
-        print(f"[target-guard] worst command past its saturation range over {2000} control steps: "
-              f"{_w:+.5f} rad ({np.degrees(_w):+.2f} deg); clamp "
-              f"{'ON' if self._gt_on else 'off'}", flush=True)
-        self._gt_worst_t.zero_()
     self.extras["log"] = dict()
     self.action_manager.advance(action)
     self.action_term.process_actions(action)
+    # Guard the targets HERE, not in the substep loop. `ctrl` is written once per control step and
+    # does not change between substeps, so clamping once is equivalent -- and torch ops inside
+    # `_physics_step` sit in warp's graph-capture region, where they fail outright with
+    # `operation would make the legacy stream depend on a capturing blocking stream`.
+    self._guard_targets()
 
     for i in range(self.decimation):
       self.action_term.apply_actions()
