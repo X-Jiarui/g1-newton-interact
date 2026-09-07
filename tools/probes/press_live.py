@@ -91,6 +91,13 @@ ap.add_argument("--drop-below", type=float, default=0.16,
 ap.add_argument("--corrections", type=int, default=6,
                 help="rounds of static-error correction on the descent. The servo's droop depends "
                      "on the arm's configuration, so one feedforward cannot cover a 110 mm reach")
+ap.add_argument("--arm-gain", type=float, default=12.0,
+                help="multiply the ARM actuators' kp, kd and torque limit by this. The G1's arm "
+                     "servos as authored (wrist kp 16.8, +-5 N-m) cannot hold the arm in an "
+                     "extended palm-down posture: measured, the tip sat 130-230 mm from its own "
+                     "command and pushing the command further left the reachable set. The demo is "
+                     "about whether the CONTACT stops the hand, not about the G1's servo tuning, "
+                     "so the arm is given enough authority to go where it is told. 1 disables.")
 ap.add_argument("--max-push", type=float, default=0.05,
                 help="metres of extra command per correction round; clamped so one bad round "
                      "cannot run away")
@@ -325,6 +332,24 @@ def main():
     B.apply_setting(rig, A.settings)
     press = Press(rig)
     m = rig.m
+    if A.arm_gain != 1.0:
+        # Written to mj_model AND pushed to the compiled mjw_model, then read back off the device.
+        # Two A/B runs on this project were wasted on switches that printed a new value and
+        # simulated the old one.
+        chain_all = ARM + WAIST
+        aj = [j for j in range(m.njnt)
+              if any((B.jname(m, j)).endswith(x) for x in chain_all)]
+        acts = [a for a in range(m.nu) if rig.jnt_of_act[a] in set(aj)]
+        m.actuator_gainprm[acts, 0] *= A.arm_gain
+        m.actuator_biasprm[acts, 1] *= A.arm_gain
+        m.actuator_biasprm[acts, 2] *= np.sqrt(A.arm_gain)
+        m.actuator_forcerange[acts, 0] *= A.arm_gain
+        m.actuator_forcerange[acts, 1] *= A.arm_gain
+        for f in ("actuator_gainprm", "actuator_biasprm", "actuator_forcerange"):
+            B.push(rig.sv, f, getattr(m, f))
+        print(f"[press-live] arm authority x{A.arm_gain:g} on {len(acts)} actuator(s); device "
+              f"readback gainprm {np.atleast_1d(B.readback(rig.sv,'actuator_gainprm',acts[0]))[:1]} "
+              f"forcerange {B.readback(rig.sv,'actuator_forcerange',acts[0])}")
     dt = env.physics_dt * env.decimation
     print(f"[press-live] dt {1000*env.physics_dt:.2f} ms x decimation {env.decimation} "
           f"= {1000*dt:.1f} ms per control step; setting '{A.settings}'")
