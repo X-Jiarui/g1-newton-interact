@@ -91,6 +91,9 @@ ap.add_argument("--drop-below", type=float, default=0.16,
 ap.add_argument("--corrections", type=int, default=6,
                 help="rounds of static-error correction on the descent. The servo's droop depends "
                      "on the arm's configuration, so one feedforward cannot cover a 110 mm reach")
+ap.add_argument("--max-push", type=float, default=0.05,
+                help="metres of extra command per correction round; clamped so one bad round "
+                     "cannot run away")
 ap.add_argument("--correct-s", type=float, default=1.5, help="seconds per correction ramp")
 ap.add_argument("--dump", default=None, help="record qpos/mocap per control step for render_traj")
 ap.add_argument("--w-rot", type=float, default=0.35,
@@ -586,18 +589,25 @@ def main():
     # add it to the command -- and repeat. Because the goal is INSIDE the block, this keeps pushing
     # until the CONTACT is what balances the servo, which is exactly the position-control test:
     # commanded deeper, and the wall is the only thing that can refuse.
+    # VERTICAL only, and always re-solved from the same commanded pose with an accumulated offset.
+    # Correcting the full 3-D error instead pushed in x and y as well: the targets left the
+    # reachable set (IK residual 293 mm), the arm swung sideways, and it swept the block off the
+    # table without ever pressing on it. Each push is clamped so one bad round cannot run away.
+    push_z = 0.0
     for it in range(A.corrections):
         tip_now = press.tip_world(B.sq(rig.qpos()))
-        err = goal - tip_now
-        if np.linalg.norm(err) < 1e-4:
+        dz = float(goal[2] - tip_now[2])
+        if abs(dz) < 1e-4:
             break
-        q_now = B.sq(rig.qpos()).copy()
-        for a, sl in zip(press.arm_a, press.arm_a_slot):
-            q_now[press.arm_q[sl]] = hold[a]
-        tip_c = press.tip_world(q_now)
-        arm_c, res = press.solve(q_now, tip_c + err, A.ik_iters, axis_des=axis_des)
-        print(f"[press-live] correction {it+1}: {1000*float(np.linalg.norm(err)):.1f} mm short, "
-              f"pushing the command that much further (IK residual {1000*res:.2f} mm)", flush=True)
+        push_z += float(np.clip(dz, -A.max_push, A.max_push))
+        want = pts[-1] + np.array([0.0, 0.0, push_z])
+        arm_c, res = press.solve(q_cmd, want, A.ik_iters, axis_des=axis_des)
+        if res > 0.005:
+            print(f"[press-live] correction {it+1} abandoned: the command needed "
+                  f"({np.round(want,4)}) is {1000*res:.1f} mm outside the arm's reach", flush=True)
+            break
+        print(f"[press-live] correction {it+1}: {1000*dz:+.1f} mm short vertically, command now "
+              f"{1000*push_z:+.1f} mm below plan (IK residual {1000*res:.2f} mm)", flush=True)
         ramp_to(arm_c, A.correct_s, goal)
         for _ in range(int(A.hold_s / dt)):
             tick(hold, goal)
