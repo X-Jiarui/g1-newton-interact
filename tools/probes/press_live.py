@@ -65,11 +65,18 @@ ap.add_argument("--ik-iters", type=int, default=120,
                 help="DLS iterations per waypoint, warm-started from the previous one")
 ap.add_argument("--damping", type=float, default=0.05, help="damped-least-squares lambda")
 ap.add_argument("--once", action="store_true", help="stop after one press instead of looping")
+ap.add_argument("--no-waist", action="store_true",
+                help="plan with the arm alone. It does not reach the block from a standing rest "
+                     "pose -- kept so that fact stays reproducible")
 A = ap.parse_args()
 
 ARM = ("right_shoulder_pitch_joint", "right_shoulder_roll_joint", "right_shoulder_yaw_joint",
        "right_elbow_joint", "right_wrist_roll_joint", "right_wrist_pitch_joint",
        "right_wrist_yaw_joint")
+# The right arm ALONE cannot reach the block: the reference clip puts it 25 cm in front, and the
+# first plan left 131 mm of residual. In training the robot gets there by leaning, not by stretching
+# the arm, so the waist joins the chain. The feet stay planted either way -- the base is pinned.
+WAIST = ("waist_yaw_joint", "waist_roll_joint", "waist_pitch_joint")
 
 
 def build_env(port: int):
@@ -108,11 +115,14 @@ class Press:
         # joint name, and it joins with underscores, not slashes -- so splitting on "/" returns the
         # entire path and matches nothing, while a bare `"right_shoulder" in name` would match all
         # twenty finger joints. endswith on the joint's own name is the one test that is both.
+        chain = ARM if A.no_waist else ARM + WAIST
         self.arm_j = [j for j in range(m.njnt)
                       if any((mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_JOINT, j) or "").endswith(x)
-                             for x in ARM)]
-        if len(self.arm_j) != len(ARM):
-            raise SystemExit(f"matched {len(self.arm_j)} of {len(ARM)} arm joints")
+                             for x in chain)]
+        if len(self.arm_j) != len(chain):
+            raise SystemExit(f"matched {len(self.arm_j)} of {len(chain)} chain joints")
+        print(f"[press-live] IK chain: {len(chain)} joints "
+              f"({'arm only' if A.no_waist else 'arm + waist'})")
         self.arm_q = np.array([int(m.jnt_qposadr[j]) for j in self.arm_j])
         self.arm_v = np.array([int(m.jnt_dofadr[j]) for j in self.arm_j])
         # TWO actuators per joint here as well, not just on the fingers: mjlab adds its own servo
@@ -232,7 +242,7 @@ def main():
               f"arm cannot get there, so any contact result would be about reachability, not the "
               f"wall. Move the block or extend the arm's range.")
 
-    worst, contact_steps, step = -1e9, 0, 0
+    worst, contact_steps, step = 0.0, 0, 0
     t0 = 0.0
 
     while env.viewer is None or env.viewer.is_running():
