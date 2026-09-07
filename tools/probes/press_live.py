@@ -54,12 +54,15 @@ ap.add_argument("--standoff", type=float, default=0.08,
 ap.add_argument("--through", type=float, default=0.03,
                 help="metres BELOW the top face the fingertip is commanded to. Impossible on "
                      "purpose: correct physics simply refuses it")
-ap.add_argument("--approach-s", type=float, default=3.0, help="seconds of descent")
-ap.add_argument("--hold-s", type=float, default=5.0, help="seconds held down afterwards")
+ap.add_argument("--approach-s", type=float, default=6.0,
+                help="seconds of descent. Slow: the position servo lags badly, and a 29 cm reach "
+                     "in 2 s left 38-207 mm of tracking error so the hand never arrived")
+ap.add_argument("--hold-s", type=float, default=8.0,
+                help="seconds held at the bottom, long enough for the servo to converge")
 ap.add_argument("--settle-s", type=float, default=1.5,
                 help="seconds before the press, so the block lands on the table and the robot "
                      "stands: mjlab's reset event is what puts the table under the block")
-ap.add_argument("--reach-s", type=float, default=2.5,
+ap.add_argument("--reach-s", type=float, default=6.0,
                 help="seconds to travel from wherever the arm settled to the standoff point")
 ap.add_argument("--ik-iters", type=int, default=120,
                 help="DLS iterations per waypoint, warm-started from the previous one")
@@ -298,7 +301,8 @@ def main():
         if step % 20 == 0:
             print(f"[press-live] {step:5d}  commanded {1000*(top[2]-target[2]):+7.2f} mm  "
                   f"gap {pen:+8.2f} mm  worst {worst:+7.3f}  contacts {len(keep):3d}  "
-                  f"Fn {fn:8.2f} N  tip {np.round(tip_now,3)}  tracking err {track:6.1f} mm",
+                  f"Fn {fn:8.2f} N  tip {np.round(tip_now,3)}  block {np.round(obj_c,3)}  "
+                  f"tracking err {track:6.1f} mm",
                   flush=True)
         step += 1
         if A.once and step >= len(traj):
