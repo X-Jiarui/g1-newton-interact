@@ -101,12 +101,13 @@ class Press:
     def __init__(self, rig):
         import mujoco
         self.rig, m = rig, rig.m
-        # Arm joints matched on the LAST path segment. mjlab flattens the whole body path into every
-        # name, so `"right_shoulder" in name` also matches all twenty finger joints -- the bug that
-        # made an earlier rig aim at the wrong hand entirely.
+        # Arm joints matched on the name's TAIL. mjlab flattens the whole body path into every
+        # joint name, and it joins with underscores, not slashes -- so splitting on "/" returns the
+        # entire path and matches nothing, while a bare `"right_shoulder" in name` would match all
+        # twenty finger joints. endswith on the joint's own name is the one test that is both.
         self.arm_j = [j for j in range(m.njnt)
-                      if (mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_JOINT, j) or "")
-                      .split("/")[-1] in ARM]
+                      if any((mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_JOINT, j) or "").endswith(x)
+                             for x in ARM)]
         if len(self.arm_j) != len(ARM):
             raise SystemExit(f"matched {len(self.arm_j)} of {len(ARM)} arm joints")
         self.arm_q = np.array([int(m.jnt_qposadr[j]) for j in self.arm_j])
