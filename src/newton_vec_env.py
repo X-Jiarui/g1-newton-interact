@@ -491,7 +491,18 @@ class NewtonVecEnv:
       # action term performs during the startup hold are not overwritten from Newton's State.
         # SDF collision has its own solver parameters (sdf_iterations / sdf_initpoints) that
         # default to None; they are passed through here so they can be set for mesh colliders.
-        if native_contacts and nconmax <= 512:
+        # NCONMAX overrides the budget outright. It is worth a knob because contacts past the
+        # cap are DISCARDED SILENTLY: the census once read 512 of 512 slots and concluded the
+        # buffer was saturated, and a non-zero SHAPE_GAP pushes the count up hard -- one static
+        # frame went from 13 contacts to 188 when gap went to 15 mm. For scale: Newton's own
+        # contact-heavy examples use 1024-2048 per world, while the busiest manipulation ones use
+        # 300 (allegro) and 500 (panda_hydro), against our full humanoid plus hand plus table.
+        _ncm = os.environ.get("NCONMAX", "").strip()
+        if _ncm:
+          nconmax = int(_ncm)
+          njmax = max(njmax, 4 * nconmax)
+          print(f"[newton-env] NCONMAX -> {nconmax}, njmax -> {njmax}", flush=True)
+        elif native_contacts and nconmax <= 512:
           # mjlab's SimulationCfg budget (nconmax 256) is sized for MuJoCo's own narrow phase,
           # which emits a handful of points per pair. With use_mujoco_contacts=False every contact
           # instead comes from Newton's CollisionPipeline -- measured 1486..1542 per step for this
