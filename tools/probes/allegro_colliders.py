@@ -29,29 +29,50 @@ COLLIDE = int(newton.ShapeFlags.COLLIDE_SHAPES)
 
 
 def report(model):
-    """Collider extent against visual extent, per body, so the gap can be attributed."""
+    """Collider size against visual size, per body, measured from the MESH VERTICES.
+
+    Not from `shape_scale`: that is a scale FACTOR and reads 1.0 for every shape here, which makes
+    the comparison look identical whatever the geometry is. What decides whether a visible gap is
+    real is the extent of the hull the solver collides against the extent of the mesh on screen.
+    """
     flags = wp.to_torch(model.shape_flags).cpu().numpy()
     body = wp.to_torch(model.shape_body).cpu().numpy()
-    stype = wp.to_torch(model.shape_type).cpu().numpy()
-    scale = wp.to_torch(model.shape_scale).cpu().numpy()
+    src = model.shape_source
+
+    def extent(s):
+        m = src[s] if s < len(src) else None
+        v = getattr(m, "vertices", None)
+        if v is None:
+            return None
+        v = np.asarray(v, dtype=np.float64).reshape(-1, 3)
+        return None if not len(v) else (float(np.linalg.norm(v, axis=1).max()),
+                                        (v.max(0) - v.min(0)))
+
     rows = {}
     for s in range(len(flags)):
         kind = "collider" if flags[s] & COLLIDE else ("visual" if flags[s] & VISIBLE else "other")
-        b = int(body[s])
-        rows.setdefault(b, {}).setdefault(kind, []).append(
-            (int(stype[s]), float(np.max(np.abs(scale[s])))))
-    print(f"{'body':>6}  {'colliders':>10}  {'visuals':>9}   max |scale|: collider vs visual")
-    print("-" * 74)
+        e = extent(s)
+        if e is not None:
+            rows.setdefault(int(body[s]), {}).setdefault(kind, []).append(e)
+
+    print("%6s %22s %22s %14s" % ("body", "collider radius / bbox mm", "visual radius / bbox mm",
+                                  "collider is"))
+    print("-" * 78)
     shown = 0
     for b, d in sorted(rows.items()):
         c, v = d.get("collider", []), d.get("visual", [])
-        if not c or shown >= 16:
+        if not c or not v or shown >= 16:
             continue
-        cm = max(x[1] for x in c)
-        vm = max((x[1] for x in v), default=float("nan"))
-        print(f"{b:>6}  {len(c):>10}  {len(v):>9}   {cm:.5f}  vs  {vm:.5f}"
-              f"{'   <-- collider larger' if vm == vm and cm > vm * 1.001 else ''}")
+        cr = max(x[0] for x in c)
+        vr = max(x[0] for x in v)
+        cb = max(c, key=lambda x: x[0])[1]
+        vb = max(v, key=lambda x: x[0])[1]
+        print("%6d %10.2f  %s %10.2f  %s %13s" % (
+            b, 1000 * cr, np.round(1000 * cb, 1), 1000 * vr, np.round(1000 * vb, 1),
+            ("%+.2f mm" % (1000 * (cr - vr))) if abs(cr - vr) > 1e-6 else "same"))
         shown += 1
+    print("\nA collider radius LARGER than the visual is a hand that touches before it looks like "
+          "it does:\nthe gap you see is then the difference, not a failure to make contact.")
 
 
 class Example(EX.Example):
