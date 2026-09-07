@@ -73,7 +73,14 @@ ap.add_argument("--pose", default="palm_down", choices=("palm_down", "palm_in"),
                      "left straighter so they meet the top face first. "
                      "palm_in: palm faces the robot, index extended, the rest closed into a fist, "
                      "poking straight down.")
-ap.add_argument("--place-block", type=int, default=1,
+ap.add_argument("--move-robot", type=float, default=0.36,
+                help="metres in front of the block to stand the robot, written ONCE into the base "
+                     "free joint after the settle. From where the reference clip leaves it the "
+                     "block is 80 cm from the settled fingertip -- 675 mm of IK residual even with "
+                     "the waist in the chain -- so the arm can never track and the run measures "
+                     "reachability. Moving the ROBOT (rather than the table) leaves the table, the "
+                     "block and their contact exactly as training has them. 0 disables.")
+ap.add_argument("--place-block", type=int, default=0,
                 help="move the table and block to a comfortable reach directly under the hand. "
                      "Where the reference clip puts them is 80 cm from the settled fingertip -- "
                      "past the G1's reach even with the waist in the chain -- so the arm can never "
@@ -359,6 +366,29 @@ def main():
     for _ in range(int(A.settle_s / dt)):
         with torch.inference_mode():
             env.step(zero_act)
+    # Stand the robot next to the block. Written once, as an initial condition, not per step -- and
+    # to the BASE free joint only, so the table, the block and every contact stay as training has
+    # them. Moving the table instead was tried first and left the block in free fall: its SDF
+    # collider did not follow the mocap, and the block fell 1.3 m through where the table should be.
+    if A.move_robot > 0:
+        obj0 = B.sq(rig.d.xpos)[rig.obj_body].copy()
+        base_j = [j for j in range(m.njnt) if int(m.jnt_type[j]) == 0
+                  and "floating_base" in B.jname(m, j)][0]
+        bq = int(m.jnt_qposadr[base_j])
+        q = rig.qpos()
+        cur = B.sq(q)[bq:bq + 3].copy()
+        tgt = np.array([obj0[0] - A.move_robot, obj0[1], cur[2]])
+        q[0, bq:bq + 3] = torch.tensor(tgt, dtype=q.dtype, device=q.device)
+        rig.qvel()[0, :] = 0.0
+        for _ in range(int(1.5 / dt)):
+            if rig.base_vadr is not None:
+                rig.qvel()[0, rig.base_vadr:rig.base_vadr + 6] = 0.0
+            rig.cmd()[0, :] = torch.tensor(rig.target_from_qpos(), dtype=rig.cmd().dtype,
+                                           device=rig.cmd().device)
+            env._physics_step()
+            env.state_in, env.state_out = env.state_out, env.state_in
+        print(f"[press-live] robot moved {np.round(cur,3)} -> {np.round(tgt,3)}, "
+              f"{100*A.move_robot:.0f} cm in front of the block at {np.round(obj0,3)}")
     rig.snapshot(freeze_hold=True)
     hold = rig.target_from_qpos()
     tb = [b for b in range(m.nbody) if int(m.body_mocapid[b]) >= 0]
