@@ -1351,4 +1351,8 @@ def main():
   write_csv(rows)
 
 
-main()
+# Guarded so the module can be imported. Without this, `import ik_press_bench` RUNS the whole
+# bench: tools/probes/press_live.py reuses Rig and got "the table shift is already installed"
+# because building its own env was the second one in the process.
+if __name__ == "__main__":
+  main()
