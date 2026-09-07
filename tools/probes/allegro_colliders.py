@@ -28,7 +28,7 @@ VISIBLE = int(newton.ShapeFlags.VISIBLE)
 COLLIDE = int(newton.ShapeFlags.COLLIDE_SHAPES)
 
 
-def report(model, label_of):
+def report(model):
     """Collider extent against visual extent, per body, so the gap can be attributed."""
     flags = wp.to_torch(model.shape_flags).cpu().numpy()
     body = wp.to_torch(model.shape_body).cpu().numpy()
@@ -45,7 +45,7 @@ def report(model, label_of):
     shown = 0
     for b, d in sorted(rows.items()):
         c, v = d.get("collider", []), d.get("visual", [])
-        if not c or shown >= 12:
+        if not c or shown >= 16:
             continue
         cm = max(x[1] for x in c)
         vm = max((x[1] for x in v), default=float("nan"))
@@ -61,15 +61,16 @@ class Example(EX.Example):
         n_coll = int(((flags & COLLIDE) != 0).sum())
         n_vis = int(((flags & VISIBLE) != 0).sum())
 
-        if args.draw in ("colliders", "both"):
-            flags |= torch_where(flags & COLLIDE, VISIBLE)
-        if args.draw == "colliders":
-            # Hide anything that is only a render mesh, so nothing hides the geometry that collides.
-            flags &= ~torch_where((flags & COLLIDE) == 0, VISIBLE)
-
+        is_coll = (flags & COLLIDE) != 0
         print(f"[allegro-colliders] {n_coll} collider shape(s), {n_vis} visual shape(s); "
               f"drawing '{args.draw}'")
-        report(self.model, None)
+        report(self.model)                      # BEFORE the flags are touched, or every shape reads
+                                                # as a collider and the comparison is vacuous
+        if args.draw in ("colliders", "both"):
+            flags |= bit_where(is_coll, VISIBLE, flags)
+        if args.draw == "colliders":
+            # Hide anything that is only a render mesh, so nothing occludes what actually collides.
+            flags &= ~bit_where(~is_coll, VISIBLE, flags)
         self.viewer.set_model(self.model)      # re-register so the flag change takes effect
 
     @staticmethod
@@ -82,9 +83,15 @@ class Example(EX.Example):
         return parser
 
 
-def torch_where(mask, bit):
+def bit_where(mask_bool, bit, like):
+    """`torch.full_like(bool_tensor, 1)` fills with True, not with the bit value.
+
+    The first version built its masks from a bool tensor, so `~mask` became a logical not and
+    `flags &= ~mask` cleared every flag on those shapes instead of one bit. Drawing happened to come
+    out right only because VISIBLE == 1; the accounting did not.
+    """
     import torch
-    return torch.where(mask != 0, torch.full_like(mask, bit), torch.zeros_like(mask))
+    return torch.where(mask_bool, torch.full_like(like, bit), torch.zeros_like(like))
 
 
 if __name__ == "__main__":
