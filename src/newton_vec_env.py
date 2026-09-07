@@ -2017,6 +2017,20 @@ class NewtonVecEnv:
             self._pen_cmp[0] += float(_pos.sum()) * 1000.0
             self._pen_cmp[1] += float(_fn.clamp(min=0.0).sum())
             self._pen_cmp[2] += int(_pos.numel())
+            # Split by depth. At the measured 0.0062 mm/N, 25 mm of overlap would need ~4 kN, and
+            # the mean normal force is 67 N -- so the deep tail cannot have been pressed in. Either
+            # those contacts carry a force nobody expected, or they carry almost none and are
+            # detected-but-unsolved, which is a different defect entirely.
+            if not hasattr(self, "_pen_deep"):
+              self._pen_deep = [0.0, 0.0, 0, 0.0, 0.0, 0]      # deep: sum d, sum F, n | shallow
+            _fnp = _fn.clamp(min=0.0)
+            _dm = _pos > 0.004
+            for _sl, _o in ((_dm, 0), (~_dm, 3)):
+              _k2 = int(_sl.sum())
+              if _k2:
+                self._pen_deep[_o] += float(_pos[_sl].sum()) * 1000.0
+                self._pen_deep[_o + 1] += float(_fnp[_sl].sum())
+                self._pen_deep[_o + 2] += _k2
           except Exception:
             self._pen_cmp = None
           if self._pen_acc[5] >= 200:
@@ -2039,6 +2053,14 @@ class NewtonVecEnv:
                     f"{_cm[2]} contacts) -- the ratio is what a physics change moves; a grasp "
                     f"that merely got worse shrinks both terms and leaves it alone", flush=True)
               self._pen_cmp = [0.0, 0.0, 0]
+            _pd = getattr(self, "_pen_deep", None)
+            if _pd and (_pd[2] or _pd[5]):
+              def _fmt(o):
+                _n = _pd[o + 2]
+                return ("n=%d mean_depth=%.3fmm mean_force=%.2fN" % (
+                    _n, _pd[o] / max(1, _n), _pd[o + 1] / max(1, _n))) if _n else "n=0"
+              print("[pen-deep]   >4mm: %s | <=4mm: %s" % (_fmt(0), _fmt(3)), flush=True)
+              self._pen_deep = [0.0, 0.0, 0, 0.0, 0.0, 0]
             self._pen_split = [0.0, 0, 0.0, 0, 0.0, 0.0]
             self._pen_acc = [0.0, 0.0, 0.0, 0.0, 0.0, 0]
             self._pen_where = None
