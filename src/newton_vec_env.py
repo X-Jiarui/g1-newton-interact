@@ -1921,7 +1921,23 @@ class NewtonVecEnv:
           if not hasattr(self, "_pen_acc"):
             self._pen_acc = [0.0, 0.0, 0.0, 0.0, 0.0, 0]
           self._pen_acc[0] += float(_pos.mean()) * 1000.0
-          self._pen_acc[1] = max(self._pen_acc[1], float(_pos.max()) * 1000.0)
+          # Remember WHERE the worst one happened, not just how deep. "25 mm somewhere" cannot be
+          # acted on; "always the same fingertip, always just after the table is removed" can.
+          _mx = float(_pos.max()) * 1000.0
+          if _mx > self._pen_acc[1]:
+            _wi = int(_dep[_sel].argmax())
+            _gi = _gm[_sel][_wi]
+            _wid_w = int(_wpl.to_torch(_c.worldid).long()[_sel][_wi])
+            _age_w = int(self._env.episode_length_buf[min(_wid_w, self.num_envs - 1)])
+            if not hasattr(self, "_pen_where"):
+              import mujoco as _mjw2
+              self._pen_names = [(_mjw2.mj_id2name(self.solver.mj_model,
+                                                   _mjw2.mjtObj.mjOBJ_GEOM, _g) or f"geom{_g}")
+                                 for _g in range(self.solver.mj_model.ngeom)]
+            _a, _b = int(_gi[0]), int(_gi[1])
+            _rob_g = _a if bool(self._pen_rob[_a]) else _b
+            self._pen_where = (self._pen_names[_rob_g].split("/")[-1], _age_w)
+          self._pen_acc[1] = max(self._pen_acc[1], _mx)
           self._pen_acc[2] += float((_pos > 0.001).float().mean())
           self._pen_acc[3] += float((_pos > 0.003).float().mean())
           self._pen_acc[4] += float((_pos > 0.004).float().mean())
@@ -1971,7 +1987,9 @@ class NewtonVecEnv:
             self._pen_cmp = None
           if self._pen_acc[5] >= 200:
             _k = self._pen_acc[5]
+            _w = getattr(self, "_pen_where", None)
             print(f"[pen-stat] mean={self._pen_acc[0]/_k:.4f}mm max={self._pen_acc[1]:.4f}mm "
+                  f"worst_at={_w[0] if _w else '?'}@step{_w[1] if _w else -1} "
                   f">1mm={self._pen_acc[2]/_k:.5f} >3mm={self._pen_acc[3]/_k:.5f} "
                   f">4mm={self._pen_acc[4]/_k:.5f} n={_n}", flush=True)
             _ps = self._pen_split
@@ -1989,6 +2007,7 @@ class NewtonVecEnv:
               self._pen_cmp = [0.0, 0.0, 0]
             self._pen_split = [0.0, 0, 0.0, 0, 0.0, 0.0]
             self._pen_acc = [0.0, 0.0, 0.0, 0.0, 0.0, 0]
+            self._pen_where = None
 
     self._env.episode_length_buf += 1
     self.common_step_counter += 1
