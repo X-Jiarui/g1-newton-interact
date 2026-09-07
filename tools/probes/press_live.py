@@ -315,6 +315,23 @@ def main():
     print(f"[press-live] dt {1000*env.physics_dt:.2f} ms x decimation {env.decimation} "
           f"= {1000*dt:.1f} ms per control step; setting '{A.settings}'")
 
+    def rest(cmd_vec, body, tol_mm_s=2.0, max_s=6.0):
+        """Hold a command until the body stops moving, and report how long it took.
+
+        The position servo has a steady-state error under gravity, so the arm keeps creeping for
+        seconds after the command stops changing. Reading the fingertip before it has settled put
+        the block 7 cm to the side of where the hand actually ended up.
+        """
+        prev = B.sq(rig.d.xpos)[body].copy()
+        for i in range(int(max_s / 0.2)):
+            advance(cmd_vec, int(0.2 / dt))
+            now = B.sq(rig.d.xpos)[body].copy()
+            v = 1000.0 * float(np.linalg.norm(now - prev)) / 0.2
+            prev = now
+            if v < tol_mm_s:
+                return (i + 1) * 0.2, v
+        return max_s, v
+
     def advance(cmd_vec, n=1):
         c = rig.cmd()
         t = torch.tensor(cmd_vec, dtype=c.dtype, device=c.device)
@@ -376,8 +393,10 @@ def main():
         cmd[press.arm_a] = orient_traj[k][press.arm_a_slot]
         advance(cmd)
     hold[press.arm_a] = orient_traj[-1][press.arm_a_slot]
+    t_rest, v_rest = rest(hold, press.index_body)
     q = B.sq(rig.qpos()).copy()
     tip = press.tip_world(q)
+    print(f"[press-live] arm came to rest after {t_rest:.1f} s ({v_rest:.2f} mm/s)")
     got = press.palm_axis_world(q)
     print(f"[press-live] palm axis now {np.round(got,3)} vs wanted {np.round(axis_des,3)} "
           f"(angle {np.degrees(np.arccos(np.clip(got @ axis_des, -1, 1))):.1f} deg); "
@@ -431,6 +450,7 @@ def main():
               f"speed {1000*float(np.linalg.norm(B.sq(rig.qvel())[rig.obj_vadr:rig.obj_vadr+3])):.3f} mm/s")
 
     # 5. Plan the descent from where the hand and the block actually are.
+    rest(hold, press.index_body)
     q = B.sq(rig.qpos()).copy()
     obj_c = B.sq(rig.d.xpos)[rig.obj_body].copy()
     top = obj_c + np.array([0.0, 0.0, float(rig.h[2])])
@@ -446,12 +466,25 @@ def main():
     if pen0 > 0.0:
         raise SystemExit("step 0 is inside the block; refusing to run")
 
+    # Plan DISPLACEMENTS from the pose the arm is being COMMANDED to, not from where it actually
+    # is. The servo sits below its command under gravity; solving IK for the actual tip therefore
+    # asks the arm to climb back up to it, and the first version of this drifted 7 cm sideways and
+    # 160 mm of tracking error while the command was nominally constant. Feeding the command the
+    # same displacement we want the tip to make keeps that offset constant instead of fighting it.
+    q_cmd = q.copy()
+    for a, sl in zip(press.arm_a, press.arm_a_slot):
+        q_cmd[press.arm_q[sl]] = hold[a]
+    tip_cmd = press.tip_world(q_cmd)
+    print(f"[press-live] commanded tip {np.round(tip_cmd,4)} vs actual {np.round(tip,4)}: the "
+          f"servo sits {1000*float(np.linalg.norm(tip_cmd-tip)):.1f} mm from its own target")
+
     n_reach = int(A.reach_s / dt)
     n_down, n_hold = int(A.approach_s / dt), int(A.hold_s / dt)
-    reach_pts = [tip + (start - tip) * (i + 1) / n_reach for i in range(n_reach)]
-    down_pts = [start + (goal - start) * min(1.0, (i + 1) / n_down) for i in range(n_down + n_hold)]
+    reach_pts = [tip_cmd + (start - tip) * (i + 1) / n_reach for i in range(n_reach)]
+    down_pts = [tip_cmd + (start - tip) + (goal - start) * min(1.0, (i + 1) / n_down)
+                for i in range(n_down + n_hold)]
     pts = reach_pts + down_pts
-    traj, worst_ik = press.plan(q, pts, A.ik_iters, axis_des=axis_des)
+    traj, worst_ik = press.plan(q_cmd, pts, A.ik_iters, axis_des=axis_des)
     print(f"[press-live] planned {len(traj)} waypoints; worst IK residual {1000*worst_ik:.2f} mm")
     if worst_ik > 0.005:
         print(f"[press-live] WARNING the plan does not close: {1000*worst_ik:.1f} mm of residual "
@@ -471,7 +504,7 @@ def main():
         obj_c = B.sq(rig.d.xpos)[rig.obj_body].copy()
         pen = signed_depth_mm(rig, obj_c, rig.press_geoms)
         tip_now = press.tip_world(B.sq(rig.qpos()))
-        track = 1000.0 * float(np.linalg.norm(tip_now - target))
+        track = 1000.0 * float(np.linalg.norm(tip_now - (target - (tip_cmd - tip))))
         keep, _rows, _n = rig.hand_object()
         fn = float(sum(c["force"] for c in keep)) if keep else 0.0
         if phase_down:
