@@ -170,8 +170,8 @@ def main():
     advance(hold, int(A.settle_s / dt))
 
     # 2. Plan, from where things actually ended up.
-    q = B.sq(rig.qpos())[0].copy()
-    obj_c = B.sq(rig.d.xpos)[0, rig.obj_body].copy()
+    q = B.sq(rig.qpos()).copy()
+    obj_c = B.sq(rig.d.xpos)[rig.obj_body].copy()
     top = obj_c + np.array([0.0, 0.0, float(rig.h[2])])
     tip = press.tip_world(q)
     start = top + np.array([0.0, 0.0, A.standoff])
@@ -192,13 +192,13 @@ def main():
         frac = min(1.0, phase / max(1, n_down))
         target = start + (goal - start) * frac
 
-        q = B.sq(rig.qpos())[0].copy()
+        q = B.sq(rig.qpos()).copy()
         arm_target, err = press.solve(q, target)
         cmd = hold.copy()
         cmd[press.arm_a] = arm_target
         advance(cmd)
 
-        obj_c = B.sq(rig.d.xpos)[0, rig.obj_body].copy()
+        obj_c = B.sq(rig.d.xpos)[rig.obj_body].copy()
         pen, _who = rig.depth_into_cube_mm(obj_c, rig.press_geoms)
         keep, _rows, _n = rig.hand_object()
         fn = float(sum(c["force"] for c in keep)) if keep else 0.0
