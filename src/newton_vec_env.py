@@ -1989,27 +1989,34 @@ class NewtonVecEnv:
       self._gt_lo = torch.tensor(_lo, dtype=torch.float32, device=self.device)
       self._gt_hi = torch.tensor(_hi, dtype=torch.float32, device=self.device)
       self._gt_on = os.environ.get("CLAMP_TARGETS", "").strip() not in ("", "0")
-      self._gt_worst, self._gt_n = 0.0, 0
+      self._gt_worst_t = torch.zeros((), dtype=torch.float32, device=self.device)
+      self._gt_n = 0
       print(f"[newton-env] target guard: {len(_idx)} limited actuator(s); "
             f"clamping {'ON' if self._gt_on else 'off (reporting only)'}", flush=True)
     if not len(self._gt_idx):
       return
+    # Device-side only, and no host branching: a `float(...)` here is a device-to-host sync inside
+    # the stepping path, and it made CUDA graph capture fail outright
+    # (`cudaErrorStreamCaptureImplicit`), which costs far more throughput than this guard is worth.
+    # The running maximum lives on the GPU; `step()` reads it out on its own schedule.
     _c = wp.to_torch(self.control.mujoco.ctrl).view(self.num_envs, -1)
     _sel = _c[:, self._gt_idx]
     _over = torch.maximum(self._gt_lo.unsqueeze(0) - _sel, _sel - self._gt_hi.unsqueeze(0))
-    _mx = float(_over.max())
-    if _mx > self._gt_worst:
-      self._gt_worst = _mx
-    self._gt_n += 1
+    torch.maximum(self._gt_worst_t, _over.amax(), out=self._gt_worst_t)
     if self._gt_on:
       _c[:, self._gt_idx] = _sel.clamp(self._gt_lo.unsqueeze(0), self._gt_hi.unsqueeze(0))
-    if self._gt_n % 20000 == 0:
-      print(f"[target-guard] worst command past its saturation range: "
-            f"{self._gt_worst:+.5f} rad ({np.degrees(self._gt_worst):+.2f} deg) over "
-            f"{self._gt_n} substeps; clamp {'ON' if self._gt_on else 'off'}", flush=True)
-      self._gt_worst = 0.0
 
   def step(self, action: torch.Tensor):
+    # Read the target-guard maximum out here, not inside the substep loop: this method is outside
+    # the captured graph, so one sync per control step is affordable where one per substep is not.
+    if getattr(self, "_gt_n", None) is not None and len(getattr(self, "_gt_idx", [])):
+      self._gt_n += 1
+      if self._gt_n % 2000 == 0:
+        _w = float(self._gt_worst_t)
+        print(f"[target-guard] worst command past its saturation range over {2000} control steps: "
+              f"{_w:+.5f} rad ({np.degrees(_w):+.2f} deg); clamp "
+              f"{'ON' if self._gt_on else 'off'}", flush=True)
+        self._gt_worst_t.zero_()
     self.extras["log"] = dict()
     self.action_manager.advance(action)
     self.action_term.process_actions(action)
