@@ -319,8 +319,19 @@ class NewtonVecEnv:
         # This uses the same mechanism collfix uses for hand-against-hand, and it has to run HERE
         # rather than up there because the object's SDF shape does not exist until this line.
         if os.environ.get("LINK2_ISOLATE", "").strip() not in ("", "0"):
+          # Match the label's OWN segment, not the ancestor path. `"link2" in label` matched
+          # link2, link3 and link4 alike -- 80 shapes instead of ~20 -- and filtering all of them
+          # against the object removed the entire hand from object collision: contact went to
+          # 0.0000 and penetration to 0.0000 mm, which reads like a triumph and is a dead run.
+          import re as _re2
+          _seg = lambda i: str(scene.shape_label[i]).split("/")[-1]
           _l2s = [i for i in range(len(scene.shape_body))
-                  if "link2" in str(scene.shape_label[i]) and "finger" in str(scene.shape_label[i])]
+                  if "finger" in _seg(i) and _re2.search(r"link2(?:_|$)", _seg(i))]
+          _l2n = sorted({_seg(i) for i in _l2s})
+          print(f"[newton-env] LINK2_ISOLATE matched {len(_l2s)} shape(s) over {len(_l2n)} label(s): "
+                f"{_l2n[:6]}{' ...' if len(_l2n) > 6 else ''}", flush=True)
+          if any(_re2.search(r"link[134]", _n) for _n in _l2n):
+            raise RuntimeError(f"LINK2_ISOLATE over-matched: {_l2n[:8]}")
           for _i in _l2s:
             scene.add_shape_collision_filter_pair(_i, _obj_shape)
           print(f"[newton-env] LINK2_ISOLATE -> {len(_l2s)} finger link2 shape(s) filtered against "
