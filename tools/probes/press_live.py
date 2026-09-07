@@ -169,7 +169,8 @@ class Press:
         # and leaves the scene's `xml_motor_unused_*` one in place. Both must be commanded, or the
         # leftover one holds the joint at its own target and fights the press.
         slot = {j: i for i, j in enumerate(self.arm_j)}
-        self.arm_a = [a for a in range(m.nu) if rig.jnt_of_act[a] in slot]
+        self.arm_a = [a for a in range(m.nu) if rig.jnt_of_act[a] in slot
+                      and abs(float(m.actuator_biasprm[a, 1])) > 1e-9]
         self.arm_a_slot = np.array([slot[rig.jnt_of_act[a]] for a in self.arm_a])
         self._q_ref = B.sq(rig.qpos()).copy()
         # The INDEX finger, not whatever sorts first -- that is finger1, the thumb. The Wuji hand
@@ -332,6 +333,11 @@ def main():
     B.apply_setting(rig, A.settings)
     press = Press(rig)
     m = rig.m
+    # On the ARM, mjlab's leftover `xml_motor_unused_*` actuators are biastype="none" TORQUE motors
+    # with gainprm 1 -- not position servos like the finger ones. Writing a joint ANGLE into their
+    # ctrl therefore injects that many newton-metres of constant torque, every step, on every arm
+    # joint. They must be commanded zero, and they must not be scaled with the servo gains.
+    TORQUE_ACTS = [a for a in range(m.nu) if abs(float(m.actuator_biasprm[a, 1])) < 1e-9]
     if A.arm_gain != 1.0:
         # Written to mj_model AND pushed to the compiled mjw_model, then read back off the device.
         # Two A/B runs on this project were wasted on switches that printed a new value and
@@ -339,7 +345,8 @@ def main():
         chain_all = ARM + WAIST
         aj = [j for j in range(m.njnt)
               if any((B.jname(m, j)).endswith(x) for x in chain_all)]
-        acts = [a for a in range(m.nu) if rig.jnt_of_act[a] in set(aj)]
+        acts = [a for a in range(m.nu) if rig.jnt_of_act[a] in set(aj)
+                and abs(float(m.actuator_biasprm[a, 1])) > 1e-9]
         m.actuator_gainprm[acts, 0] *= A.arm_gain
         m.actuator_biasprm[acts, 1] *= A.arm_gain
         m.actuator_biasprm[acts, 2] *= np.sqrt(A.arm_gain)
@@ -423,6 +430,9 @@ def main():
               f"{100*A.move_robot:.0f} cm in front of the block at {np.round(obj0,3)}")
     rig.snapshot(freeze_hold=True)
     hold = rig.target_from_qpos()
+    hold[TORQUE_ACTS] = 0.0
+    print(f"[press-live] {len(TORQUE_ACTS)} torque-mode actuator(s) commanded 0 N-m instead of a "
+          f"joint angle")
     tb = [b for b in range(m.nbody) if int(m.body_mocapid[b]) >= 0]
     print("[press-live] mocap bodies after settle: "
           + ", ".join(f"{B.bname(m, b).split('_')[-1]} z={B.sq(rig.d.xpos)[b][2]:.4f}" for b in tb))
