@@ -1946,10 +1946,68 @@ class NewtonVecEnv:
     call sites and the other three kept passing None, which surfaces as
     `NoneType has no attribute rigid_contact_max` -- from a site that looked unrelated.
     """
+    self._guard_targets()
     if self.collision_pipeline is not None:
       self._sync_body_q_from_mujoco()
       self.collision_pipeline.collide(self.state_in, self.contacts)
     self.solver.step(self.state_in, self.state_out, self.control, self.contacts, self.physics_dt)
+
+  def _guard_targets(self) -> None:
+    """Report -- and optionally clamp -- joint targets commanded past their limits.
+
+    A joint driven onto its mechanical stop is held there by the LIMIT CONSTRAINT, not by its
+    actuator, and a limit constraint has no torque ceiling. That is why capping the finger torque to
+    0.62 N*m left the deep contacts at 777 N: the motor was never the thing carrying the load. At
+    trace frame 285 the joint driving the deepest-penetrating collider, `right_finger3_joint2`, sits
+    0.7 mrad past its stop.
+
+    Clamping to the bare joint range would be wrong, and mjlab says so where it builds these
+    actuators: force is `kp * (ctrl - pos)`, so a target clamped to the range produces ZERO force
+    exactly at the limit and the joint goes limp there. The clamp here is to the range plus mjlab's
+    own saturation margin, `effort_limit / stiffness` -- past that the actuator is saturated anyway,
+    so nothing is given up.
+
+    Reporting is unconditional because the clamp is only worth having if the commands actually
+    exceed: qpos sitting 0.7 mrad past a stop is the constraint's own compliance, not evidence about
+    the command.
+    """
+    if not hasattr(self, "_gt_lo"):
+      import mujoco as _mjg
+      _m = self.solver.mj_model
+      _lo, _hi, _idx = [], [], []
+      for _a in range(_m.nu):
+        _j = int(_m.actuator_trnid[_a, 0])
+        if not _m.jnt_limited[_j]:
+          continue
+        _kp = float(_m.actuator_gainprm[_a, 0])
+        _eff = float(abs(_m.actuator_forcerange[_a, 1]))
+        _d = (_eff / _kp) if _kp > 1e-9 else 0.0
+        _idx.append(_a)
+        _lo.append(float(_m.jnt_range[_j][0]) - _d)
+        _hi.append(float(_m.jnt_range[_j][1]) + _d)
+      self._gt_idx = torch.tensor(_idx, dtype=torch.long, device=self.device)
+      self._gt_lo = torch.tensor(_lo, dtype=torch.float32, device=self.device)
+      self._gt_hi = torch.tensor(_hi, dtype=torch.float32, device=self.device)
+      self._gt_on = os.environ.get("CLAMP_TARGETS", "").strip() not in ("", "0")
+      self._gt_worst, self._gt_n = 0.0, 0
+      print(f"[newton-env] target guard: {len(_idx)} limited actuator(s); "
+            f"clamping {'ON' if self._gt_on else 'off (reporting only)'}", flush=True)
+    if not len(self._gt_idx):
+      return
+    _c = wp.to_torch(self.control.mujoco.ctrl).view(self.num_envs, -1)
+    _sel = _c[:, self._gt_idx]
+    _over = torch.maximum(self._gt_lo.unsqueeze(0) - _sel, _sel - self._gt_hi.unsqueeze(0))
+    _mx = float(_over.max())
+    if _mx > self._gt_worst:
+      self._gt_worst = _mx
+    self._gt_n += 1
+    if self._gt_on:
+      _c[:, self._gt_idx] = _sel.clamp(self._gt_lo.unsqueeze(0), self._gt_hi.unsqueeze(0))
+    if self._gt_n % 20000 == 0:
+      print(f"[target-guard] worst command past its saturation range: "
+            f"{self._gt_worst:+.5f} rad ({np.degrees(self._gt_worst):+.2f} deg) over "
+            f"{self._gt_n} substeps; clamp {'ON' if self._gt_on else 'off'}", flush=True)
+      self._gt_worst = 0.0
 
   def step(self, action: torch.Tensor):
     self.extras["log"] = dict()
