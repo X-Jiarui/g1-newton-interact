@@ -952,6 +952,55 @@ class NewtonVecEnv:
     # (2*timestep, the stability floor) while the hand sits at MuJoCo's default 0.02: blended, the
     # pair runs at 0.012, and penetration goes as timeconst^2, so the contact that actually holds
     # the object is 9x softer than the one that was tuned.
+    # LINK2_ISOLATE restores what the scene XML asked for and `collfix` above deliberately undid.
+    #
+    # The XML gives every `link2` contype/conaffinity 2/2 so the proximal finger segment cannot
+    # collide with the object at all. collfix clears that -- "uniform contype on every hand geom, so
+    # what may collide is decided by the exclusion list" -- but that exclusion list covers hand
+    # against hand only, so nothing keeps link2 out of the object any more.
+    #
+    # Measured consequence: the deepest penetration of an entire run, 25.4 mm, is on
+    # `right_finger3_link2`, at step 39, during the closing phase. link2's collider is the proximal
+    # segment, which sweeps through where a 40 mm cube sits when the finger curls around it -- which
+    # is why the scene isolated it in the first place.
+    #
+    # The object carries contype 2^25 and conaffinity ~2^25. Giving link2 the same pair makes the
+    # object-link2 test fail both ways while leaving link2 colliding with the table, the floor and
+    # the rest of the hand exactly as before.
+    _l2 = os.environ.get("LINK2_ISOLATE", "").strip()
+    if _l2 not in ("", "0"):
+      import mujoco as _mjl2
+      _mml2 = self.solver.mj_model
+      _og2 = [g for g in range(_mml2.ngeom)
+              if "apple" in (_mjl2.mj_id2name(_mml2, _mjl2.mjtObj.mjOBJ_GEOM, g) or "")]
+      if not _og2:
+        raise RuntimeError("LINK2_ISOLATE found no object geom")
+      _oc2 = int(_mml2.geom_contype[_og2[0]])
+      _oa2 = int(_mml2.geom_conaffinity[_og2[0]])
+      _n2 = 0
+      for _g in range(_mml2.ngeom):
+        _gn2 = _mjl2.mj_id2name(_mml2, _mjl2.mjtObj.mjOBJ_GEOM, _g) or ""
+        if "link2" not in _gn2 or "finger" not in _gn2:
+          continue
+        _mml2.geom_contype[_g] = _oc2
+        _mml2.geom_conaffinity[_g] = _oa2
+        _n2 += 1
+      import warp as _wl2
+      _wl2.to_torch(self.solver.mjw_model.geom_contype)[:] = _wl2.to_torch(
+        _wl2.array(_mml2.geom_contype, dtype=int))
+      _wl2.to_torch(self.solver.mjw_model.geom_conaffinity)[:] = _wl2.to_torch(
+        _wl2.array(_mml2.geom_conaffinity, dtype=int))
+      _chk = [g for g in range(_mml2.ngeom)
+              if "link2" in (_mjl2.mj_id2name(_mml2, _mjl2.mjtObj.mjOBJ_GEOM, g) or "")
+              and "finger" in (_mjl2.mj_id2name(_mml2, _mjl2.mjtObj.mjOBJ_GEOM, g) or "")]
+      _still = any((int(_mml2.geom_contype[g]) & _oa2) or (_oc2 & int(_mml2.geom_conaffinity[g]))
+                   for g in _chk)
+      print(f"[newton-env] LINK2_ISOLATE -> {_n2} finger link2 geom(s) given the object's own "
+            f"contype/conaffinity ({_oc2}/{_oa2}); still collides with the object: {_still}",
+            flush=True)
+      if _still:
+        raise RuntimeError("LINK2_ISOLATE did not take: link2 still passes the mask test")
+
     _opr = os.environ.get("OBJECT_PRIORITY", "").strip()
     if _opr:
       import mujoco as _mjp
