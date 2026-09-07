@@ -148,13 +148,17 @@ class NewtonVecEnv:
     _sts = os.environ.get("SIM_TIMESTEP", "").strip()
     if _sts:
       _new_dt = float(_sts)
-      _ratio = self.physics_dt / _new_dt
-      if abs(_ratio - round(_ratio)) > 1e-6:
-        raise RuntimeError(f"SIM_TIMESTEP {_new_dt} does not divide the configured "
-                           f"{self.physics_dt}; decimation could not stay integral and the control "
-                           f"rate would change along with the contact")
+      # The invariant that matters is the CONTROL PERIOD, not the old timestep. Requiring the new dt
+      # to divide the old one refused 2 ms against a 5 ms base (5/2 = 2.5) even though the control
+      # period of 20 ms divides by 2 ms exactly, giving decimation 10 and the same 50 Hz.
+      _period = self.physics_dt * self.decimation
+      _dec = _period / _new_dt
+      if abs(_dec - round(_dec)) > 1e-6:
+        raise RuntimeError(f"SIM_TIMESTEP {_new_dt} does not divide the control period "
+                           f"{_period}; decimation could not stay integral and the control rate "
+                           f"would change along with the contact")
       _old_dt, _old_dec = self.physics_dt, self.decimation
-      self.decimation = int(round(self.decimation * _ratio))
+      self.decimation = int(round(_dec))
       self.physics_dt = _new_dt
       if hasattr(cfg.sim, "mujoco"):
         cfg.sim.mujoco.timestep = _new_dt
