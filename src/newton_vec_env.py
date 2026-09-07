@@ -172,7 +172,19 @@ class NewtonVecEnv:
     def _author_scene(sdf_object_stl):
       scene = newton.ModelBuilder()
       SolverMuJoCo.register_custom_attributes(scene)
-      scene.default_shape_cfg.gap = 0.0          # Newton's default of 0.1 needs 10cm of penetration
+      # SHAPE_GAP is the broad phase's AABB expansion: Newton documents `margin + gap` as the
+      # amount AABBs are grown by for pair filtering. At 0 a pair is only proposed once the boxes
+      # already overlap, so with a discrete step the fingertip can be clear at step N and deep
+      # inside at N+1 -- the first contact that ever exists is already an overlap, and the solver
+      # can only remove it after the fact.
+      #
+      # Every official Newton example leaves room: allegro_hand 15 mm, panda_hydro 10 mm,
+      # nut_bolt_sdf 5 mm, and both SDF examples pass that same value as build_sdf's margin. The 0.0
+      # here came with a comment reading "Newton's default of 0.1 needs 10cm of penetration", which
+      # misreads gap as a required penetration rather than an early-warning distance.
+      #
+      # Default stays 0.0 so the runs in flight are untouched; set SHAPE_GAP to test it.
+      scene.default_shape_cfg.gap = float(os.environ.get("SHAPE_GAP", "0.0"))
       if native_contacts:
         # Hydroelastic needs a contact margin: `gap` is what the SDF narrow band is built around, and
         # with gap=0 the pair never registers a contact at all -- measured, the hydroelastic counter
@@ -181,7 +193,7 @@ class NewtonVecEnv:
         # Zero for everything; swap_collider_to_sdf gives the object and the table their own 0.01.
         # See the note there: a scene-wide gap turned every knuckle pair inside the hand into a
         # contact candidate and made 74% of the per-world contacts hand-against-itself.
-        scene.default_shape_cfg.gap = 0.0
+        scene.default_shape_cfg.gap = float(os.environ.get("SHAPE_GAP", "0.0"))
       if hydro_kh is not None:
         # pressure = -kh * signed_depth, and the two sides combine in series
         # ((k_a*k_b)/(k_a+k_b)), so raising one alone leaves the softer side in control. Newton's
@@ -353,7 +365,7 @@ class NewtonVecEnv:
 
     world = newton.ModelBuilder()
     SolverMuJoCo.register_custom_attributes(world)
-    world.default_shape_cfg.gap = 0.0
+    world.default_shape_cfg.gap = float(os.environ.get("SHAPE_GAP", "0.0"))
 
     # One entry per clip. --sdf-objects wins; --sdf-object stays the single-clip spelling.
     _stls = list(sdf_object_stls) if sdf_object_stls else [sdf_object_stl]
