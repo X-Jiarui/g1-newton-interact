@@ -834,6 +834,32 @@ if os.environ.get("CONTACT_CENSUS"):
             flush=True)
     if _cf:
       _ef, _ea = _cf["efc"]
+      # CALIBRATION, on the one quantity with a known answer: a block resting on a table pushes
+      # back with exactly its own weight. If summing the pyramid rows returns that, the method is
+      # sound on this path; if it returns hundreds of newtons, every force number this run has
+      # produced is an artifact. The row-sum was only ever checked against `mj_contactForce` on CPU
+      # MuJoCo -- training runs use_mujoco_contacts=False, where Newton generates the contacts and
+      # the efc layout was never independently verified.
+      _wt = float(_m.body_mass[_oid]) * 9.81
+      _tot = {"table": 0.0, "hand": 0.0}
+      for _i in _cnp.nonzero(_live)[0]:
+        _a, _b = int(_g[_i, 0]), int(_g[_i, 1])
+        if not (_isobj[_a] or _isobj[_b]):
+          continue
+        _other = _bname[_b] if _isobj[_a] else _bname[_a]
+        _adr = _cnp.atleast_1d(_ea[_i])
+        _adr = _adr[(_adr >= 0) & (_adr < len(_ef))]
+        _f = float(_ef[_adr].sum()) if _adr.size else 0.0
+        _tot["table" if "table" in _other or "floor" in _other else "hand"] += _f
+      _qc = _cwp.to_torch(_d.qfrc_constraint)[0].detach().cpu().numpy()
+      _od = int(_m.jnt_dofadr[_oj])
+      print("[census] CALIBRATION  object weight %.3f N | table contacts sum %.3f N | "
+            "hand contacts sum %.3f N" % (_wt, _tot["table"], _tot["hand"]), flush=True)
+      print("[census]   object qfrc_constraint xyz %s  (|Fz| should equal the weight when it "
+            "rests untouched)" % _cnp.round(_qc[_od:_od + 3], 3).tolist(), flush=True)
+      _r = _tot["table"] / _wt if _wt > 1e-9 else float("nan")
+      print("[census]   table-sum / weight = %.2f  -> the row-sum is %s" % (
+          _r, "TRUSTWORTHY" if 0.5 < _r < 2.0 else "WRONG BY THAT FACTOR"), flush=True)
       print("         constraint force on each object contact:", flush=True)
       for _i in _cnp.nonzero(_live)[0]:
         _a, _b = int(_g[_i, 0]), int(_g[_i, 1])
