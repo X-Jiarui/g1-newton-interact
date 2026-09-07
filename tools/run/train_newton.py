@@ -799,6 +799,29 @@ if os.environ.get("CONTACT_CENSUS"):
     for _i in _cnp.nonzero(_live)[0]:
       _k = tuple(sorted((_bname[int(_g[_i, 0])], _bname[int(_g[_i, 1])])))
       _all[_k] = _all.get(_k, 0) + 1
+    # Who is consuming the budget? Contacts past nconmax are dropped silently, so a scene that
+    # spends its slots on collisions irrelevant to the task starves the ones that matter.
+    def _cat(n):
+      if "apple" in n:
+        return "object"
+      if "table" in n:
+        return "table"
+      if "floor" in n or "terrain" in n:
+        return "ground"
+      if "left_" in n:
+        return "left side"
+      if "right_finger" in n or "right_palm" in n or "right_wrist" in n:
+        return "right hand"
+      return "right arm/body"
+    _cats = {}
+    for _i in _cnp.nonzero(_live)[0]:
+      _k = tuple(sorted((_cat(_bname[int(_g[_i, 0])]), _cat(_bname[int(_g[_i, 1])]))))
+      _cats[_k] = _cats.get(_k, 0) + 1
+    print("         WHAT IS IN THE BUFFER, by category:", flush=True)
+    for _k, _n in sorted(_cats.items(), key=lambda kv: -kv[1]):
+      _tag = "  <-- the only ones this task is about" if "object" in _k and "right hand" in _k else ""
+      print("           %5d  %6.1f%%  %s <-> %s%s" % (_n, 100.0 * _n / _tot, _k[0], _k[1], _tag),
+            flush=True)
     print("         top pairs holding the buffer:", flush=True)
     for _k, _n in sorted(_all.items(), key=lambda kv: -kv[1])[:12]:
       print("           %5d  %s <-> %s  (%.0f%%)" % (_n, _k[0], _k[1], 100.0 * _n / _tot),
