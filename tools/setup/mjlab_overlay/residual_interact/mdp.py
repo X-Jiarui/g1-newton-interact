@@ -2678,8 +2678,19 @@ class ResidualFeatureGroupObs:
     )
 
     table: Entity = env.scene["table"]
-    table_pos = table.data.root_link_pos_w
-    table_quat = table.data.root_link_pose_w[:, 3:7]
+    # After removal the SIMULATION puts the table 100 m down, the way Omnigrasp does, so the slab
+    # cannot catch a dropped object or foul the arm. The policy must not read that number: three
+    # features here are differences against the table, and a 100 m reading is outside anything the
+    # observation normaliser has seen. `_drop_table_after_cf` stashes a pose dropped by the old
+    # 0.30 m instead -- identical to every run before the absolute removal existed, so the two
+    # remain comparable. Falls back to the live pose when removal is off.
+    _tp_obs = getattr(env, "_table_pose_obs", None)
+    if _tp_obs is not None and _tp_obs.shape[0] == env.num_envs:
+      table_pos = _tp_obs[:, :3]
+      table_quat = _tp_obs[:, 3:7]
+    else:
+      table_pos = table.data.root_link_pos_w
+      table_quat = table.data.root_link_pose_w[:, 3:7]
     table_top = table_pos[:, 2:3] + 0.5 * float(TABLE_THICKNESS)
     table_features = torch.cat(
       [

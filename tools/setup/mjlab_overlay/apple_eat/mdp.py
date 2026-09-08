@@ -909,6 +909,9 @@ def _initial_cuboid_scene_poses(
 # that does not ask for it.
 _TABLE_REMOVE_AFTER_CF = os.environ.get("TABLE_REMOVE_AFTER_CF", "").strip()
 _TABLE_REMOVE_DROP = float(os.environ.get("TABLE_REMOVE_DROP", "0.30") or 0.30)
+# What the SIMULATION moves the table by, in metres. Omnigrasp uses an absolute z = 100 m;
+# 0 falls back to a plain TABLE_REMOVE_DROP drop. The observation is unaffected either way.
+_TABLE_REMOVE_FAR = float(os.environ.get("TABLE_REMOVE_FAR", "100.0") or 0.0)
 
 
 def _table_removed_mask(env) -> torch.Tensor | None:
@@ -929,8 +932,19 @@ def _drop_table_after_cf(env, table_pose: torch.Tensor) -> torch.Tensor:
   what goes away is the support a not-quite-grasp could lean on, which is also what turns "failed
   to grasp" from an unlabelled non-event into an immediate `og_object_far` termination.
 
-  Down by a fixed amount rather than Omnigrasp's +100 m: `table_top` feeds an observation channel
-  (`_object_table_obs`), and a 100 m reading is a number no normaliser has ever seen.
+  Physics and observation are moved by DIFFERENT amounts, on purpose.
+
+  Omnigrasp sets the table's z to 100 m (`remove_table`: `self._table_states[env_ids, 2] = 100`).
+  A 30 cm drop is not the same thing: the slab is still in the world, still under the robot, and
+  still able to catch a falling object or foul the arm's path on a reach that goes low. This code
+  used to drop it only 30 cm because `table_top` feeds three observation features and 100 m is a
+  number no normaliser has ever seen -- but that traded a physics property away to protect an
+  observation, when the two can simply disagree.
+
+  So: `TABLE_REMOVE_FAR` (metres, default 100) is what the SIMULATION gets, and the observation
+  keeps seeing `TABLE_REMOVE_DROP` (0.30 m). The pose the observation should use is stashed on the
+  env here rather than re-derived there, because only this function knows the pre-removal height.
+  Set TABLE_REMOVE_FAR=0 to go back to a plain drop.
   """
   gone = _table_removed_mask(env)
   if gone is None:
@@ -940,8 +954,14 @@ def _drop_table_after_cf(env, table_pose: torch.Tensor) -> torch.Tensor:
   from mjlab.tasks.residual_interact import mdp as _rmdp
 
   _rmdp._safe_log(env, "Metric/table_removed", gone.float())
+  _g = gone.to(table_pose.dtype)
+  # What the policy sees: unchanged from every run before this, so the two are comparable.
+  _obs_pose = table_pose.clone()
+  _obs_pose[:, 2] = _obs_pose[:, 2] - _g * abs(_TABLE_REMOVE_DROP)
+  env._table_pose_obs = _obs_pose
   table_pose = table_pose.clone()
-  table_pose[:, 2] = table_pose[:, 2] - gone.to(table_pose.dtype) * abs(_TABLE_REMOVE_DROP)
+  _far = abs(_TABLE_REMOVE_FAR) if _TABLE_REMOVE_FAR else abs(_TABLE_REMOVE_DROP)
+  table_pose[:, 2] = table_pose[:, 2] - _g * _far
   return table_pose
 
 
