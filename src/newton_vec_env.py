@@ -1295,6 +1295,28 @@ class NewtonVecEnv:
         _idx = (_sbody == _bid).nonzero(as_tuple=True)[0]
         if int((_flags[_idx] & _VIS).sum()) == 0:
           _flags[_idx] |= _VIS
+      # VISER_COLLIDERS=1 draws what the solver actually collides instead of the render meshes.
+      #
+      # This is not a cosmetic preference. The hand's colliders are convex hulls (see the
+      # approximate_meshes pass above) and a hull is FATTER than the mesh drawn over it, so a
+      # fingertip that looks buried in the object may be a hull resting exactly on its surface --
+      # and a visible gap may be a hull already pressing. Judging penetration from the visual
+      # meshes therefore reports a number the physics never computed. The object is the opposite
+      # case: its collider is the real geometry and it has no render mesh at all.
+      if os.environ.get("VISER_COLLIDERS", "") == "1":
+        _COL = int(newton.ShapeFlags.COLLIDE_SHAPES)
+        _is_col = (_flags & _COL) != 0
+        # Build the bit masks with torch.where, not full_like(bool, 1): filling a BOOL tensor with
+        # 1 yields True everywhere, so `~mask` becomes a logical not and `flags &= ~mask` clears
+        # every flag on those shapes rather than the single VISIBLE bit. Drawing still looked right
+        # because VISIBLE == 1; the flags underneath were destroyed.
+        _zero = torch.zeros_like(_flags)
+        _vis_bit = torch.full_like(_flags, _VIS)
+        _flags |= torch.where(_is_col, _vis_bit, _zero)        # show every collider
+        _flags &= ~torch.where(~_is_col, _vis_bit, _zero)      # hide anything that is only visual
+        print(f"[newton-env] viser drawing COLLIDERS: {int(_is_col.sum())} collider shape(s) "
+              f"shown, {int((~_is_col).sum())} render-only shape(s) hidden -- this is the "
+              f"geometry the solver contacts, not the mesh drawn over it")
       self.viewer.set_model(self.nmodel)
       print(f"[newton-env] viser on http://localhost:{viser_port} "
             f"(rendering every {self._render_every} control steps)")

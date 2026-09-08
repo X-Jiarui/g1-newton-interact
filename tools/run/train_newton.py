@@ -117,7 +117,81 @@ ap.add_argument("--clip-env-counts", default=None,
 ap.add_argument("--sdf-objects", default=None,
                 help="comma-separated object meshes, one per --reference-pkls entry IN THE SAME "
                      "ORDER. Checked against each clip's own obj_name rather than trusted.")
+ap.add_argument("--config", default=None,
+                help="YAML training config: an `env:` block exported into os.environ and an "
+                     "`args:` block supplying defaults for the flags above. Anything typed on the "
+                     "command line WINS over the file, so a config pins a run's baseline while "
+                     "one flag still varies it. Without this the run's identity lives in a wall "
+                     "of `env VAR=... ` prefixes that no two launches ever spelled the same way.")
 A = ap.parse_args()
+
+# ---------------------------------------------------------------------------------------------
+# Config file. Loaded HERE and nowhere later: several of these variables are read at import time
+# (APPLE_EAT_PKL by the task modules, APPLE_HAND_KIND by the entity cfg), so a config applied
+# after the mjlab import below would be printed by the run and ignored by the simulation -- the
+# same silent-no-op class of bug that APPLE_HAND_EFFORT already cost us a whole A/B for.
+if A.config:
+  _cfg_path = os.path.abspath(os.path.expanduser(A.config))
+  if not os.path.exists(_cfg_path):
+    raise SystemExit(f"--config {_cfg_path} does not exist")
+  with open(_cfg_path) as _cf:
+    _cfg = _yaml.safe_load(_cf) or {}
+  if not isinstance(_cfg, dict):
+    raise SystemExit(f"--config {_cfg_path} must be a YAML mapping, got {type(_cfg).__name__}")
+  _unknown = set(_cfg) - {"name", "description", "env", "args", "notes"}
+  if _unknown:
+    raise SystemExit(f"--config {_cfg_path}: unknown top-level key(s) {sorted(_unknown)}; "
+                     "expected name/description/notes/env/args")
+
+  # env: exported only if not already set, so an explicit `VAR=x python train_newton.py` on the
+  # command line still overrides the file the same way an explicit flag does.
+  _env_blk = _cfg.get("env") or {}
+  _env_set, _env_kept = [], []
+  for _k, _v in _env_blk.items():
+    if _v is None:
+      continue
+    _sv = ("1" if _v is True else "0" if _v is False else str(_v))
+    if os.environ.get(_k) not in (None, ""):
+      _env_kept.append(f"{_k}={os.environ[_k]}")
+    else:
+      os.environ[_k] = _sv
+      _env_set.append(f"{_k}={_sv}")
+
+  # args: applied only to flags absent from argv, so the command line always wins.
+  _arg_blk = _cfg.get("args") or {}
+  _known = {a.dest for a in ap._actions}
+  _bad = set(_arg_blk) - _known
+  if _bad:
+    raise SystemExit(f"--config {_cfg_path}: unknown args key(s) {sorted(_bad)}; "
+                     f"valid keys are the flag names with dashes turned into underscores")
+  _arg_set, _arg_kept = [], []
+  for _k, _v in _arg_blk.items():
+    if f"--{_k.replace('_', '-')}" in sys.argv or f"--{_k}" in sys.argv:
+      _arg_kept.append(_k)
+      continue
+    # solver_kwargs is a JSON string downstream; let the config spell it as a real mapping.
+    if _k == "solver_kwargs" and isinstance(_v, dict):
+      _v = _json.dumps(_v)
+    # The dataset, the object mesh and the resume checkpoint live outside the repo and land on a
+    # different absolute path on every box (/workspace on vast, /home/jrxu on the H200). Expanding
+    # ${VAR} and ~ here keeps ONE config portable instead of one fork per machine; an unset
+    # variable would otherwise pass through as the literal "${SEED_CUBE}/..." and fail much later
+    # with a confusing missing-file error, so refuse it up front.
+    if isinstance(_v, str) and ("$" in _v or _v.startswith("~")):
+      _exp = os.path.expandvars(os.path.expanduser(_v))
+      if "$" in _exp:
+        raise SystemExit(f"--config {_cfg_path}: args.{_k} = {_v!r} references an environment "
+                         f"variable that is not set (expanded to {_exp!r})")
+      _v = _exp
+    setattr(A, _k, _v)
+    _arg_set.append(f"{_k}={_v}")
+  print(f"[config] {_cfg_path} :: {_cfg.get('name', '(unnamed)')}", flush=True)
+  print(f"[config]   env  : {len(_env_set)} set" +
+        (f"; {len(_env_kept)} left as already-exported ({', '.join(_env_kept)})" if _env_kept
+         else ""), flush=True)
+  print(f"[config]   args : {len(_arg_set)} set" +
+        (f"; {len(_arg_kept)} left to the command line ({', '.join(_arg_kept)})" if _arg_kept
+         else ""), flush=True)
 
 MIX_PKLS: list[str] = []
 MIX_STLS: list[str] = []

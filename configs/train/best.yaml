@@ -1,0 +1,91 @@
+# The best configuration measured so far: V4_STIFF_BOX plus the finger force limit.
+#
+# Provenance. V4_STIFF_BOX reached PhaseA/lift_success 0.7794 sustained 3.90 s at iteration 2616
+# with mean penetration 0.046 mm and 4 contacts deeper than 4 mm out of 5.44 M. It is the only one
+# of four arms that grasped at all; the other three carried SHAPE_MARGIN (see notes).
+#
+# Two settings here were NOT in that run and come from the effort-ladder rollouts of its own
+# checkpoint: FINGER_FORCE_LIMIT and NEUTRALISE_LEFTOVER. At 1.0 N*m penetration fell from
+# 0.0492 to 0.0131 mm mean and 3.57 to 1.98 mm max, with the >1 mm contact fraction down 173x,
+# and lift did not drop. They have not yet been carried through a full training run.
+#
+# Machine-local values are NOT here on purpose: CUDA_VISIBLE_DEVICES, GMR_ROOT and the data root
+# differ per box. Export those, then:
+#
+#   export SEED_CUBE=/workspace/seed_cube          # vast
+#   export SEED_CUBE=/home/jrxu/seed_cube          # H200
+#   CUDA_VISIBLE_DEVICES=0 GMR_ROOT=... python tools/run/train_newton.py \
+#       --config configs/train/best.yaml --run-name MY_RUN
+#
+# Anything typed on the command line overrides this file, so vary one flag and leave the rest.
+
+name: best
+description: >
+  Newton native contacts, 12-triangle cube collider, no broad-phase margin, stiff contact on both
+  sides, dt 2 ms, finger torque at hardware scale.
+
+env:
+  # --- task / scene -------------------------------------------------------------------------
+  APPLE_HAND_KIND: wuji
+  APPLE_OBJECT_PER_WORLD: 1
+  APPLE_SCENE_Z_OFFSET: -0.03
+  ASTRA_BASE_BACKEND: torch
+
+  # --- reset / curriculum -------------------------------------------------------------------
+  RSI_ANCHOR_CF: 1              # start the episode relative to the contact frame, not frame 0
+  RSI_CF_OFFSET_START: -20      # RSI window: [cf-20, cf-10]
+  RSI_CF_OFFSET_END: -10
+  OBJ_REF_STILL_UNTIL_CF: 1
+  OBJ_REF_WINDOW_ENABLE: 0
+  TIP_CF_MISS_ENABLE: 0
+  TABLE_REMOVE_AFTER_CF: 50     # 1.0 s at 50 Hz; shorter margins never produced a sustained lift
+  TABLE_REMOVE_DROP: 0.30
+  MIX_PMCP_EVERY: 0             # single clip
+
+  # --- contact ------------------------------------------------------------------------------
+  SIM_TIMESTEP: 0.002           # 5 ms control period / 10 substeps
+  SHAPE_GAP: 0.01
+  # SHAPE_MARGIN is deliberately ABSENT. See notes.
+  HAND_SOLREF: 0.004,1.0        # matches --object-solref so neither side's solref is averaged away
+
+  # --- actuation ----------------------------------------------------------------------------
+  # The Wuji spec in the scene XML is 0.15-0.62 N*m per finger joint; mjlab's own actuator
+  # overrides it with 30 N*m. 1.0 N*m is 33 N at a 30 mm lever against the 4.2 N needed to hold
+  # the object -- still generous, but no longer able to press through it.
+  # Set through FINGER_FORCE_LIMIT, not APPLE_HAND_EFFORT: the entity spec is cached, so the cfg
+  # route prints the new limit and simulates the old one.
+  FINGER_FORCE_LIMIT: 1.0
+  NEUTRALISE_LEFTOVER: 1        # silence the scene's own xml_motor_unused_* position servos
+
+  # --- instrumentation ----------------------------------------------------------------------
+  PEN_LOG: 1
+
+args:
+  xml: assets/scene_stapler/scene.xml
+  reference_pkl: ${SEED_CUBE}/cubesmall_lift.pkl
+  sdf_object: ${SEED_CUBE}/cubesmall_box.stl      # 12 triangles, NOT the 107776-triangle GRAB mesh
+  resume: ${SEED_CUBE}/model_500.pt
+  reward_cfg: configs/rewards/staged_cf_r24.yaml
+
+  native_contacts: true         # Newton's CollisionPipeline; MuJoCo's own narrow phase gives 4.7 mm
+  rigid_object_table: true
+  table_under_object: true
+  cuda_graph: true
+  object_solref: "0.004,1.0"
+
+  num_envs: 1024
+  iterations: 12000
+  seed: 1
+  log_root: logs/rsl_rl
+  solver_kwargs:
+    impratio: 20.0
+    cone: pyramidal
+    iterations: 100
+    ls_iterations: 50
+
+notes: >
+  SHAPE_MARGIN is absent by measurement, not oversight. At 0.01 it makes contacts fire while the
+  geometries are still up to 10 mm apart; penetration is computed as (-dist).clamp(min=0), so those
+  contacts score exactly 0.0000 mm while carrying 125 N. Three arms ran with it and reported
+  perfect penetration; their lift_success was 0.1134, 0.0017 and 0.0000 against V4's 0.7794. The
+  zero was a force field holding the hand off the object, not an absence of overlap.
