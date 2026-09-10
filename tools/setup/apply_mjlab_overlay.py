@@ -32,6 +32,8 @@ FILES = [
     # Data, not code: the eigengrasp basis the actor loads when HAND_EIGEN_K > 0. It ships
     # here so the actor can find it relative to its own file on every box.
     ("residual_interact", "wuji_eigengrasp.npz"),
+    # The trained hand-pose VAE, the other candidate prior (HAND_VAE).
+    ("residual_interact", "wuji_hand_vae.pt"),
     ("residual_interact", "staged_mdp.py"),
     ("residual_interact", "env_cfgs.py"),
     ("residual_interact", "rl.py"),

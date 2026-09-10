@@ -765,6 +765,22 @@ class ResidualInteractOnPolicyRunner(MjlabOnPolicyRunner):
     raw_hand_gain = train_cfg.pop("hand_residual_gain", None)
     self._body_residual_gain = None if raw_body_gain is None else float(raw_body_gain)
     self._hand_residual_gain = None if raw_hand_gain is None else float(raw_hand_gain)
+    # Environment overrides, because these decide how far the hand may move and that is a thing
+    # worth sweeping without editing an agent yaml per arm.
+    #
+    # The hand has NO base action -- base_hand_mode is "zero" and ASTRA covers only the 29 body
+    # dofs -- so the residual IS the entire finger command, and its gain is the whole authority the
+    # policy has over the hand. Measured mid-training: the hand residual norm is 1.08 across 40
+    # joints, about 0.17 rad each, against roughly 1.5 rad to close a finger. The clip at 0.5 rad
+    # never binds, so the ceiling is not what limits it.
+    _hg = os.environ.get("HAND_RESIDUAL_GAIN", "").strip()
+    if _hg:
+      self._hand_residual_gain = float(_hg)
+      print(f"[rl] HAND_RESIDUAL_GAIN -> {self._hand_residual_gain}", flush=True)
+    _bg = os.environ.get("BODY_RESIDUAL_GAIN", "").strip()
+    if _bg:
+      self._body_residual_gain = float(_bg)
+      print(f"[rl] BODY_RESIDUAL_GAIN -> {self._body_residual_gain}", flush=True)
     self._residual_action_clip = float(train_cfg.pop("residual_action_clip", 0.5))
     self._final_action_clip = train_cfg.pop("final_action_clip", None)
     self._residual_mask = train_cfg.pop("residual_mask", "all")

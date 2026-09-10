@@ -65,6 +65,41 @@ def _make_residual_mask(mask: str, device: torch.device | str) -> torch.Tensor:
   return out
 
 
+class _HandPriorVAE(nn.Module):
+  """Decoder-side copy of handprior_ws/scripts/prior.py, kept in sync by shape not by import.
+
+  The weights ship with the overlay; this class only has to reproduce the same forward pass.
+  Normalisation is centre-then-divide-by-ONE-scalar exactly as trained -- a per-joint scale
+  would change what the network means.
+  """
+
+  def __init__(self, dim: int = 40, latent: int = 12, hidden: int = 512, depth: int = 3):
+    super().__init__()
+    self.dim, self.latent = int(dim), int(latent)
+
+    def mlp(i: int, o: int) -> nn.Sequential:
+      layers: list[nn.Module] = []
+      d = i
+      for _ in range(depth):
+        layers += [nn.Linear(d, hidden), nn.SiLU()]
+        d = hidden
+      return nn.Sequential(*layers, nn.Linear(d, o))
+
+    self.enc = mlp(self.dim, 2 * self.latent)
+    self.dec = mlp(self.latent, self.dim)
+    self.register_buffer("mean", torch.zeros(self.dim))
+    self.register_buffer("scale", torch.tensor(1.0))
+    self.register_buffer("lim", torch.zeros(self.dim, 2))
+
+  def encode_mu(self, x: torch.Tensor) -> torch.Tensor:
+    return self.enc((x - self.mean) / self.scale).chunk(2, -1)[0]
+
+  def decode(self, z: torch.Tensor) -> torch.Tensor:
+    # clamp=False on purpose: this decodes a DISPLACEMENT pair, and joint limits are enforced
+    # downstream by the residual clip, not here.
+    return self.dec(z) * self.scale + self.mean
+
+
 def _make_residual_gain(
   residual_gain: float,
   body_residual_gain: float | None,
@@ -876,7 +911,11 @@ class ResidualInteractActorModel(nn.Module):
         output_dim=mdp.ACTION_DIM,
         enc_input_dim=enc_input_dim,
         sonic_decoder_onnx=sonic_decoder_onnx,
-        init_noise_std=0.08,
+        init_noise_std=float(os.environ.get("INIT_NOISE_STD", "0.08")),
+        # Exploration, overridable because the hand's is the interesting one: the finger
+        # residual explores at 0.094 rad (5.4 deg) while closing a finger takes about
+        # 1.5 rad, so a grasp is roughly sixteen exploration steps away in every joint at
+        # once. Whether that is why seven of eight clips never lift is testable.
       )
     elif self.base_tracker_kind == "official_onnx":
       self.base_tracker = OfficialSonicONNX53Actor(
@@ -1686,6 +1725,17 @@ class ResidualInteractActorModel(nn.Module):
     """
     self.hand_eigen_k = 0
     self.hand_eigen_scale_mult = 1.0
+    self.hand_vae = None
+    self.hand_vae_scale = 0.0
+    raw_vae = os.environ.get("HAND_VAE", "").strip()
+    raw_k_probe = os.environ.get("HAND_EIGEN_K", "").strip()
+    if raw_vae and raw_vae != "0" and raw_k_probe not in ("", "0"):
+      raise ValueError(
+        "HAND_VAE and HAND_EIGEN_K are two different hand priors; set exactly one."
+      )
+    if raw_vae and raw_vae != "0":
+      self._init_hand_vae(raw_vae)
+      return
     raw_k = os.environ.get("HAND_EIGEN_K", "").strip()
     if not raw_k:
       return
@@ -1750,6 +1800,97 @@ class ResidualInteractActorModel(nn.Module):
       f"{self.hand_eigen_scale.min():.3f}..{self.hand_eigen_scale.max():.3f} rad "
       f"(clip {self.residual_action_clip}, mult {self.hand_eigen_scale_mult}), basis {path}"
     )
+
+  def _init_hand_vae(self, spec: str) -> None:
+    """Load the trained hand-pose VAE and use its manifold as the finger residual space.
+
+    Why a tangent step and not decode(z) directly. The VAE decodes an ABSOLUTE hand pose, so
+    feeding the head's output straight in would yank the hand onto the prior's mean pose at
+    iteration 0 and destroy a resumed checkpoint. Instead the policy moves ALONG the manifold
+    from wherever the base tracker already is:
+
+        z0       = encode(base_hand)              (no grad; where we are on the manifold)
+        residual = decode(z0 + dz) - decode(z0)   (exactly 0 when dz is 0)
+
+    which is the nonlinear generalisation of the PCA arm's `dz @ basis`, and preserves the
+    zero-init no-op that makes resuming safe.
+    """
+    path = spec if spec not in ("1", "true", "yes", "on") else str(
+      Path(__file__).resolve().parent / "wuji_hand_vae.pt"
+    )
+    if not Path(path).is_file():
+      raise FileNotFoundError(f"HAND_VAE={spec!r} resolved to {path}, which does not exist")
+    ck = torch.load(path, map_location="cpu", weights_only=False)
+    cfg = dict(ck["cfg"])
+    if int(cfg.get("dim", 0)) != mdp.NUM_HAND:
+      raise ValueError(
+        f"{path} was trained for dim={cfg.get('dim')} but this robot has "
+        f"{mdp.NUM_HAND} finger dofs"
+      )
+    net = _HandPriorVAE(**cfg)
+    net.load_state_dict(ck["state"])
+    net.eval()
+    for prm in net.parameters():
+      prm.requires_grad_(False)
+    self.hand_vae = net
+    self.hand_vae_scale = float(os.environ.get("HAND_VAE_SCALE", "3.0"))
+    meta = ck.get("meta", {}) or {}
+    res = (meta.get("res") or {}).get("val") or {}
+    print(
+      f"[ResidualInteractActor] HAND_VAE {net.latent}/{mdp.NUM_HAND} finger dims -- residual "
+      f"is a tangent step on the VAE manifold, dz scale {self.hand_vae_scale} "
+      f"(clip {self.residual_action_clip}), val recon mean "
+      f"{res.get('mean', float('nan')):.3f} deg p95 {res.get('p95', float('nan')):.3f} "
+      f"max {res.get('max', float('nan')):.2f}, tag {meta.get('tag')}, weights {path}"
+    )
+
+  def _hand_vae_residual(
+    self, hand_raw: torch.Tensor, base_hand: torch.Tensor
+  ) -> torch.Tensor:
+    net = cast(_HandPriorVAE, self.hand_vae)
+    base = base_hand.detach().to(dtype=hand_raw.dtype)
+    dz = torch.tanh(hand_raw[:, : net.latent]) * self.hand_vae_scale
+    with torch.no_grad():
+      z0 = net.encode_mu(base)
+      anchor = net.decode(z0)
+    hand_residual = net.decode(z0 + dz) - anchor
+    # same rule as the PCA arm: shrink along the direction, never clamp per joint
+    peak = hand_residual.abs().amax(dim=-1, keepdim=True)
+    shrink = (self.residual_action_clip / peak.clamp_min(1e-9)).clamp(max=1.0)
+    return hand_residual * shrink
+
+  def _project_sampled_hand_to_vae(
+    self, sampled: torch.Tensor, mean: torch.Tensor
+  ) -> torch.Tensor:
+    """Keep the executed hand action on the manifold, as _project_sampled_hand_to_eigen does.
+
+    Written as a displacement through the latent so that zero noise is an exact no-op: the
+    decoder's own ~1 deg reconstruction error cancels between the two decode calls instead of
+    being injected into every step.
+    """
+    if self.hand_vae is None:
+      return sampled
+    net = cast(_HandPriorVAE, self.hand_vae)
+    base = cast(torch.Tensor, self.last_base_action).to(
+      device=sampled.device, dtype=sampled.dtype
+    )
+    if base.shape[0] != sampled.shape[0]:
+      return sampled
+    base_hand = base[:, mdp.NUM_BODY :]
+    with torch.no_grad():
+      anchor = net.decode(net.encode_mu(base_hand))
+      moved = net.decode(net.encode_mu(sampled[:, mdp.NUM_BODY :]))
+    projected = sampled.clone()
+    projected[:, mdp.NUM_BODY :] = base_hand + (moved - anchor)
+    active = self.residual_mask[mdp.NUM_BODY :].to(
+      device=sampled.device, dtype=torch.bool
+    )
+    projected[:, mdp.NUM_BODY :] = torch.where(
+      active.unsqueeze(0),
+      projected[:, mdp.NUM_BODY :],
+      mean[:, mdp.NUM_BODY :],
+    )
+    return projected
 
   def _hand_eigen_residual(self, hand_raw: torch.Tensor) -> torch.Tensor:
     """Decode the first K head outputs as eigengrasp latents into a NUM_HAND residual."""
@@ -1859,7 +2000,9 @@ class ResidualInteractActorModel(nn.Module):
         )
         final_hand = base_hand + hand_gain.unsqueeze(0) * hand_residual
       else:
-        if self.hand_eigen_k > 0:
+        if self.hand_vae is not None:
+          hand_residual = self._hand_vae_residual(hand_raw, base_hand)
+        elif self.hand_eigen_k > 0:
           hand_residual = self._hand_eigen_residual(hand_raw)
         else:
           hand_residual = torch.tanh(hand_raw) * self.residual_action_clip
@@ -2002,7 +2145,9 @@ class ResidualInteractActorModel(nn.Module):
         )
         final_hand = base_hand + hand_gain.unsqueeze(0) * hand_residual
       else:
-        if self.hand_eigen_k > 0:
+        if self.hand_vae is not None:
+          hand_residual = self._hand_vae_residual(hand_raw, base_hand)
+        elif self.hand_eigen_k > 0:
           hand_residual = self._hand_eigen_residual(hand_raw)
         else:
           hand_residual = torch.tanh(hand_raw) * self.residual_action_clip
@@ -2087,7 +2232,11 @@ class ResidualInteractActorModel(nn.Module):
         body_residual = torch.tanh(self.residual_mlp(features))
         body_residual = body_residual * self.residual_action_clip
         hand_raw = self.hand_mlp(self._hand_features(obs, base_action))
-        if self.hand_eigen_k > 0:
+        if self.hand_vae is not None:
+          hand_residual = self._hand_vae_residual(
+            hand_raw, base_action[:, mdp.NUM_BODY :]
+          )
+        elif self.hand_eigen_k > 0:
           hand_residual = self._hand_eigen_residual(hand_raw)
         else:
           hand_residual = torch.tanh(hand_raw) * self.residual_action_clip
@@ -2220,6 +2369,7 @@ class ResidualInteractActorModel(nn.Module):
         sampled[:, mdp.NUM_BODY :] = sampled_hand
       sampled = self._project_sampled_hand_to_primitive(sampled, mean)
       sampled = self._project_sampled_hand_to_eigen(sampled, mean)
+      sampled = self._project_sampled_hand_to_vae(sampled, mean)
       sampled = self._clamp_sampled_body_delta(sampled)
       sampled = self._clamp_sampled_hand_delta(sampled)
       self.last_final_action = sampled.detach()
