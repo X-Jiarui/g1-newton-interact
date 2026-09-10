@@ -3708,6 +3708,96 @@ def contact_frac_metric(env, threshold: float = LIVE_CONTACT_THRESHOLD) -> torch
   return value
 
 
+def _tip_contact_normals(env) -> tuple[torch.Tensor, torch.Tensor]:
+  """(normals (E, P, 3) unit-or-zero, found (E, P) bool) for the fingertip/object sensor."""
+  zeros = torch.zeros(env.num_envs, 0, 3, device=env.device)
+  empty = torch.zeros(env.num_envs, 0, dtype=torch.bool, device=env.device)
+  try:
+    sensor = object_pool.active_sensor(env, "hand_apple_contact")
+    data = sensor.data
+    n_p = len(sensor.primary_names)
+    normal = data.normal
+    found = data.found
+    if normal is None or found is None:
+      return zeros, empty
+    normal = normal.to(env.device).reshape(env.num_envs, -1, 3)[:, :n_p]
+    found = found.to(env.device).reshape(env.num_envs, -1)[:, :n_p].bool()
+    if normal.shape[1] != n_p or found.shape[1] != n_p:
+      return zeros, empty
+    unit = normal / normal.norm(dim=-1, keepdim=True).clamp_min(1.0e-9)
+    unit = torch.where(found.unsqueeze(-1), unit, torch.zeros_like(unit))
+    return unit, found
+  except Exception:
+    return zeros, empty
+
+
+def _grasp_closure(env) -> tuple[torch.Tensor, torch.Tensor]:
+  """(closure in [-1, 1], number of fingertip contacts).
+
+  closure = -min_{i != j, both in contact} n_i . n_j, so +1 is a pair of exactly opposed normals
+  (a pinch) and -1 is two fingers pressing the same face. Zero when fewer than two tips touch:
+  one contact can never hold anything, whatever its direction.
+  """
+  unit, found = _tip_contact_normals(env)
+  n_c = found.float().sum(dim=-1)
+  if unit.shape[1] < 2:
+    return torch.zeros(env.num_envs, device=env.device), n_c
+  cos = torch.einsum("epk,eqk->epq", unit, unit)
+  pair = found.unsqueeze(2) & found.unsqueeze(1)
+  eye = torch.eye(found.shape[1], dtype=torch.bool, device=env.device)
+  pair = pair & ~eye.unsqueeze(0)
+  cos = torch.where(pair, cos, torch.full_like(cos, float("inf")))
+  worst = cos.flatten(1).min(dim=-1).values
+  closure = torch.where(torch.isfinite(worst), -worst, torch.zeros_like(worst))
+  return closure, n_c
+
+
+def grasp_closure_metric(env) -> torch.Tensor:
+  value, _ = _grasp_closure(env)
+  _safe_log(env, "ResidualMetric/grasp_closure", value)
+  return value
+
+
+def tip_contact_count_metric(env) -> torch.Tensor:
+  _, n_c = _grasp_closure(env)
+  _safe_log(env, "ResidualMetric/tip_contact_count", n_c)
+  return n_c
+
+
+def residual_force_closure_reward(
+  env,
+  min_contacts: int = 2,
+  log_prefix: str = "force_closure",
+) -> torch.Tensor:
+  """Pay only for opposed contact normals -- the one thing that distinguishes holding from touching.
+
+  Deliberately NOT gated on the object moving: the point is to make closure worth reaching before
+  the object ever lifts, which is the gap every position-based term leaves open.
+  """
+  closure, n_c = _grasp_closure(env)
+  value = closure.clamp(0.0, 1.0) * (n_c >= float(min_contacts)).float()
+  _safe_log(env, f"ResidualReward/{log_prefix}", value)
+  return value
+
+
+def grasp_opposition_cos_metric(env) -> torch.Tensor:
+  """+1 = thumb and middle finger on the same side of the object (a poke).
+
+  -1 = opposed around it, which is what force closure needs; the retargeted human reference sits
+  at -0.871. Purely geometric -- it reads tip positions relative to the object centre and knows
+  nothing about contact -- so it is an upper bound on how grasp-like the hand is, not proof.
+  """
+  value = _grasp_opposition_cos(env, "right", (0, 2))
+  _safe_log(env, "ResidualMetric/grasp_opposition_cos", value)
+  return value
+
+
+def grasp_opposition_cos_left_metric(env) -> torch.Tensor:
+  value = _grasp_opposition_cos(env, "left", (0, 2))
+  _safe_log(env, "ResidualMetric/grasp_opposition_cos_left", value)
+  return value
+
+
 def hand_body_contact_frac_metric(env) -> torch.Tensor:
   value = _hand_body_contact(env)
   _safe_log(env, "ResidualMetric/hand_body_contact_frac", value)

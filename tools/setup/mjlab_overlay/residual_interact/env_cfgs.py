@@ -1017,6 +1017,19 @@ def _astra_body_actuator_cfgs() -> tuple[BuiltinPositionActuatorCfg, ...]:
 # observation term's params dict does not take effect (it parses, but the term keeps its own
 # default), so this is the knob that actually works. Default is unchanged so resumed runs keep
 # their input dimension; set APPLE_REF_PREVIEW_STEPS="1,5,10,20,40,80" to widen it.
+# Gate on staged_multi_tip_surface: 1.0 disables it (constant payout, the historical behaviour),
+# lower values pay only a fraction until the palm rotates around the object. The ramp is linear in
+# the thumb-vs-middle cosine from _OPPOSITION_GATE_HI (worst) to _OPPOSITION_GATE_LO (full payout).
+_OPPOSITION_GATE_FLOOR = float(os.environ.get("OPPOSITION_GATE_FLOOR", "1.0"))
+_OPPOSITION_GATE_HI = float(os.environ.get("OPPOSITION_GATE_HI", "1.0"))
+_OPPOSITION_GATE_LO = float(os.environ.get("OPPOSITION_GATE_LO", "0.0"))
+if _OPPOSITION_GATE_FLOOR < 1.0:
+  print(
+    f"[env-cfg] opposition gate ON: floor={_OPPOSITION_GATE_FLOOR} "
+    f"ramp cos {_OPPOSITION_GATE_HI} -> {_OPPOSITION_GATE_LO}",
+    flush=True,
+  )
+
 _DEFAULT_REF_PREVIEW_STEPS: tuple[int, ...] = tuple(
   int(v) for v in os.environ.get("APPLE_REF_PREVIEW_STEPS", "1,5,10").split(",") if v.strip()
 )
@@ -1311,9 +1324,9 @@ def residual_interact_env_cfg(
         "drift_margin": 0.10,
         "drift_power": 1.0,
         "gate_shaping": True,
-        "opposition_gate_floor": 1.0,
-        "opposition_gate_hi": 1.0,
-        "opposition_gate_lo": 0.0,
+        "opposition_gate_floor": _OPPOSITION_GATE_FLOOR,
+        "opposition_gate_hi": _OPPOSITION_GATE_HI,
+        "opposition_gate_lo": _OPPOSITION_GATE_LO,
         "pre_weight": 0.0,
         "post_weight": 1.0,
         "log_prefix": "staged_mts",
@@ -1413,9 +1426,9 @@ def residual_interact_env_cfg(
         "gate_shaping": True,
         # 1.0 disables the gate (previous behaviour).  Lower it to stop
         # paying for one fingertip poking from the wrong side.
-        "opposition_gate_floor": 1.0,
-        "opposition_gate_hi": 1.0,
-        "opposition_gate_lo": 0.0,
+        "opposition_gate_floor": _OPPOSITION_GATE_FLOOR,
+        "opposition_gate_hi": _OPPOSITION_GATE_HI,
+        "opposition_gate_lo": _OPPOSITION_GATE_LO,
       },
     ),
     "multi_tip_surface": RewardTermCfg(
@@ -1437,9 +1450,9 @@ def residual_interact_env_cfg(
         "gate_shaping": True,
         # 1.0 disables the gate (previous behaviour).  Lower it to stop
         # paying for one fingertip poking from the wrong side.
-        "opposition_gate_floor": 1.0,
-        "opposition_gate_hi": 1.0,
-        "opposition_gate_lo": 0.0,
+        "opposition_gate_floor": _OPPOSITION_GATE_FLOOR,
+        "opposition_gate_hi": _OPPOSITION_GATE_HI,
+        "opposition_gate_lo": _OPPOSITION_GATE_LO,
       },
     ),
     "object_drift_limit": RewardTermCfg(
@@ -1635,6 +1648,11 @@ def residual_interact_env_cfg(
         "pregrasp_top_k": 4,
       },
     ),
+    "force_closure": RewardTermCfg(
+      func=mdp.residual_force_closure_reward,
+      weight=0.0,
+      params={"min_contacts": 2, "log_prefix": "force_closure"},
+    ),
     "thumb_opposition": RewardTermCfg(
       func=mdp.residual_thumb_opposition_reward,
       weight=0.0,
@@ -1756,6 +1774,12 @@ def residual_interact_env_cfg(
       func=mdp.sequence_success_metric,
       params={"threshold": 0.12},
       reduce="last",
+    ),
+    "grasp_opposition_cos": MetricsTermCfg(func=mdp.grasp_opposition_cos_metric),
+    "grasp_closure": MetricsTermCfg(func=mdp.grasp_closure_metric),
+    "tip_contact_count": MetricsTermCfg(func=mdp.tip_contact_count_metric),
+    "grasp_opposition_cos_left": MetricsTermCfg(
+      func=mdp.grasp_opposition_cos_left_metric
     ),
     "hand_body_contact_frac": MetricsTermCfg(func=mdp.hand_body_contact_frac_metric),
     "non_tip_hand_body_contact_frac": MetricsTermCfg(
