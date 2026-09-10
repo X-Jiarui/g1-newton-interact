@@ -213,6 +213,7 @@ RESIDUAL_FEATURE_GROUPS: tuple[str, ...] = (
   "tracking_error",
   "last_residual",
   "last_final_action",
+  "reference_hand",
 )
 OBSERVATION_GROUPS: tuple[str, ...] = (
   "sonic_encoder_obs",
@@ -2125,6 +2126,7 @@ class ResidualFeatureGroupObs:
       "tracking_error": self._tracking_error,
       "last_residual": self._last_residual,
       "last_final_action": self._last_final_action,
+      "reference_hand": self._reference_hand,
     }
     value = builders[self.group](env)
     return torch.nan_to_num(value, nan=0.0, posinf=1e6, neginf=-1e6).clamp(-1e6, 1e6)
@@ -2192,6 +2194,15 @@ class ResidualFeatureGroupObs:
     if torch.count_nonzero(base).item() == 0:
       base = apple_mdp.teacher_action(env)
     return base
+
+  def _reference_hand(self, env) -> torch.Tensor:
+    """The reference clip's own hand pose at this env's current frame, in action space.
+
+    teacher_action indexes the concatenated reference with _tracking_frame, which resolves
+    each env to its own clip's band of rows. Computing this in the actor from phase would
+    reintroduce the global-row-vs-clip-local bug that once collapsed mixed training.
+    """
+    return apple_mdp.teacher_action(env)[:, NUM_BODY:ACTION_DIM]
 
   def _reference_phase(self, env) -> torch.Tensor:
     ref = _ref(env.device)

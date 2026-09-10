@@ -765,6 +765,22 @@ class ResidualInteractOnPolicyRunner(MjlabOnPolicyRunner):
     raw_hand_gain = train_cfg.pop("hand_residual_gain", None)
     self._body_residual_gain = None if raw_body_gain is None else float(raw_body_gain)
     self._hand_residual_gain = None if raw_hand_gain is None else float(raw_hand_gain)
+    # Environment overrides, because these decide how far the hand may move and that is a thing
+    # worth sweeping without editing an agent yaml per arm.
+    #
+    # The hand has NO base action -- base_hand_mode is "zero" and ASTRA covers only the 29 body
+    # dofs -- so the residual IS the entire finger command, and its gain is the whole authority the
+    # policy has over the hand. Measured mid-training: the hand residual norm is 1.08 across 40
+    # joints, about 0.17 rad each, against roughly 1.5 rad to close a finger. The clip at 0.5 rad
+    # never binds, so the ceiling is not what limits it.
+    _hg = os.environ.get("HAND_RESIDUAL_GAIN", "").strip()
+    if _hg:
+      self._hand_residual_gain = float(_hg)
+      print(f"[rl] HAND_RESIDUAL_GAIN -> {self._hand_residual_gain}", flush=True)
+    _bg = os.environ.get("BODY_RESIDUAL_GAIN", "").strip()
+    if _bg:
+      self._body_residual_gain = float(_bg)
+      print(f"[rl] BODY_RESIDUAL_GAIN -> {self._body_residual_gain}", flush=True)
     self._residual_action_clip = float(train_cfg.pop("residual_action_clip", 0.5))
     self._final_action_clip = train_cfg.pop("final_action_clip", None)
     self._residual_mask = train_cfg.pop("residual_mask", "all")
@@ -983,8 +999,17 @@ class ResidualInteractOnPolicyRunner(MjlabOnPolicyRunner):
         "--agent.base-tracker-kind must be 'checkpoint', 'official_onnx', "
         "or 'astra_onnx'."
       )
-    if self._base_hand_mode != "zero":
-      raise ValueError("--agent.base-hand-mode currently supports only 'zero'.")
+    _bhm = os.environ.get("BASE_HAND_MODE", "").strip().lower()
+    if _bhm:
+      print(
+        f"[rl] BASE_HAND_MODE -> {_bhm} (was {self._base_hand_mode!r})", flush=True
+      )
+      self._base_hand_mode = _bhm
+    if self._base_hand_mode not in {"zero", "reference"}:
+      raise ValueError(
+        "--agent.base-hand-mode supports 'zero' or 'reference', got "
+        f"{self._base_hand_mode!r}."
+      )
     if self._base_tracker_kind in {"official_onnx", "astra_onnx"}:
       self._tracker_ckpt = None
 
@@ -1057,6 +1082,10 @@ class ResidualInteractOnPolicyRunner(MjlabOnPolicyRunner):
       )
 
     actor_groups = ["sonic_obs_or_latent"]
+    if self._base_hand_mode == "reference":
+      # produced for the actor but deliberately NOT in _residual_feature_groups: adding it
+      # to the MLP input would change residual_input_dim and orphan every checkpoint.
+      actor_groups.append("reference_hand")
     if self._base_tracker_kind == "official_onnx":
       actor_groups.append("sonic_encoder_obs")
     if self._base_tracker_kind == "astra_onnx":
@@ -2812,6 +2841,26 @@ class ResidualInteractOnPolicyRunner(MjlabOnPolicyRunner):
     self._ref_edit_init_bias = str(
       loaded_dict.get("ref_edit_init_bias", self._ref_edit_init_bias)
     )
+
+    # A resumed checkpoint carries the residual config it was trained with, which is right for
+    # everything the operator did not ask about -- and wrong for everything they did.  Re-assert
+    # the environment on top, and say so, because a knob that prints at build time and is quietly
+    # reverted here is indistinguishable from a knob that works.
+    for _env, _attr in (
+      ("HAND_RESIDUAL_GAIN", "_hand_residual_gain"),
+      ("BODY_RESIDUAL_GAIN", "_body_residual_gain"),
+      ("RESIDUAL_ACTION_CLIP", "_residual_action_clip"),
+    ):
+      _raw = os.environ.get(_env, "").strip()
+      if not _raw:
+        continue
+      _was = getattr(self, _attr)
+      _now = float(_raw)
+      setattr(self, _attr, _now)
+      print(
+        f"[rl] {_env} re-applied after checkpoint restore: {_was} -> {_now}",
+        flush=True,
+      )
     self._split_hand_net = bool(loaded_dict.get("split_hand_net", self._split_hand_net))
     self._hand_primitive_mode = str(
       loaded_dict.get("hand_primitive_mode", self._hand_primitive_mode)
@@ -2910,6 +2959,17 @@ class ResidualInteractOnPolicyRunner(MjlabOnPolicyRunner):
       actor.body_residual_gain = self._body_residual_gain
     if hasattr(actor, "hand_residual_gain"):
       actor.hand_residual_gain = self._hand_residual_gain
+    _hs = os.environ.get("HAND_INIT_STD", "").strip()
+    if _hs and hasattr(actor, "_set_initial_std"):
+      _before = float(actor._action_std()[mdp.NUM_BODY :].mean())
+      actor._set_initial_std(
+        body_init_std=None, hand_init_std=float(_hs), disabled_init_std=None
+      )
+      _after = float(actor._action_std()[mdp.NUM_BODY :].mean())
+      print(
+        f"[rl] HAND_INIT_STD applied after restore: hand std {_before:.4f} -> {_after:.4f}",
+        flush=True,
+      )
     if hasattr(actor, "residual_action_clip"):
       actor.residual_action_clip = self._residual_action_clip
     if hasattr(actor, "token_residual_clip"):
