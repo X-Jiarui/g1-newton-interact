@@ -17,6 +17,7 @@ from rsl_rl.modules.distribution import GaussianDistribution
 from rsl_rl.utils import unpad_trajectories
 from tensordict import TensorDict
 
+from mjlab.tasks.apple_eat import mdp as apple_mdp
 from mjlab.tasks.residual_interact import mdp
 from mjlab.tasks.residual_interact.hand_bc import HandBCPolicy, parse_hidden_dims
 
@@ -1709,6 +1710,26 @@ class ResidualInteractActorModel(nn.Module):
       raise ValueError(
         f"{path} components has shape {comp.shape}, expected "
         f"({mdp.NUM_HAND}, {mdp.NUM_HAND})"
+      )
+    # Guard the column order. The first shipped basis was fitted on dof_pos[:, 29:], which on the
+    # 69-wide array is 13 left-finger + 7 right-ARM + 20 right-finger columns, not the 40 finger
+    # columns. Decoding is `latent @ basis`, so basis coordinate i lands on finger dof i: the right
+    # hand happened to line up (29+i == 49+(i-20)) while every left-hand coordinate was shifted by
+    # 7 and seven of them were arm directions driving finger joints. Nothing crashed and nothing
+    # looked wrong -- the run just optimised the wrong subspace. A basis must now name its columns.
+    expected = tuple(str(n) for n in apple_mdp.HAND_DOF_NAMES)
+    if "dof_names" not in data.files:
+      raise ValueError(
+        f"{path} has no 'dof_names', so its column order cannot be checked. The original "
+        "eigengrasp basis was mis-columned in exactly this way; refit with dof_names recorded "
+        "rather than trusting the order."
+      )
+    got = tuple(str(n) for n in data["dof_names"])
+    if got != expected:
+      bad = [i for i, (g, e) in enumerate(zip(got, expected)) if g != e]
+      raise ValueError(
+        f"{path} dof_names do not match this robot's hand dofs: {len(bad)} of {len(expected)} "
+        f"differ, first at index {bad[0]} ({got[bad[0]]!r} vs {expected[bad[0]]!r})"
       )
     basis = comp[:k]
     scale = self.residual_action_clip * np.abs(basis).sum(1) * self.hand_eigen_scale_mult
