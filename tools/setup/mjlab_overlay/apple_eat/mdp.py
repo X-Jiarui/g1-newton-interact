@@ -674,7 +674,10 @@ def _clip_id(env) -> torch.Tensor:
     ref = _ref(str(env.episode_length_buf.device))
     n_clips = int(ref.get("n_clips", 1))
     raw = os.environ.get("MIX_CLIP_WEIGHTS", "").strip()
-    if raw and n_clips > 1:
+    # _clip_id is called once early with a single environment, long before the real vector size
+    # is known. Weights cannot be honoured there -- eight clips do not fit in one env -- and the
+    # allocator below would spin forever trying to give back seven environments it does not have.
+    if raw and n_clips > 1 and env.num_envs >= n_clips:
       # A curriculum, in the only form this task can express one. Each environment's OBJECT mesh is
       # baked into its world at scene-build time, so an env cannot be moved to another clip mid-run
       # and no resampling scheme is available. What IS available is an uneven static split: give the
@@ -692,16 +695,27 @@ def _clip_id(env) -> torch.Tensor:
       counts = [max(int(e), 1) for e in exact]
       short = env.num_envs - sum(counts)
       order = sorted(range(n_clips), key=lambda i: exact[i] - int(exact[i]), reverse=True)
-      i = 0
-      while short != 0:
-        c = order[i % n_clips]
-        if short > 0:
-          counts[c] += 1
-          short -= 1
-        elif counts[c] > 1:
-          counts[c] -= 1
-          short += 1
-        i += 1
+      # Bounded: every pass either moves `short` toward zero or finds nothing left to take, and
+      # an unbounded version of this loop hung two runs for twenty minutes.
+      for _ in range(n_clips * 4):
+        if short == 0:
+          break
+        moved = False
+        for c in order:
+          if short == 0:
+            break
+          if short > 0:
+            counts[c] += 1
+            short -= 1
+            moved = True
+          elif counts[c] > 1:
+            counts[c] -= 1
+            short += 1
+            moved = True
+        if not moved:
+          raise ValueError(
+            f"MIX_CLIP_WEIGHTS cannot split {env.num_envs} envs over {n_clips} clips as {w}"
+          )
       value = torch.repeat_interleave(
         torch.arange(n_clips, device=env.episode_length_buf.device, dtype=torch.long),
         torch.tensor(counts, device=env.episode_length_buf.device, dtype=torch.long),
