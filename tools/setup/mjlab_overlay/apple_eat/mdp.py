@@ -673,9 +673,44 @@ def _clip_id(env) -> torch.Tensor:
   if value is None or value.shape[0] != env.num_envs:
     ref = _ref(str(env.episode_length_buf.device))
     n_clips = int(ref.get("n_clips", 1))
-    value = (
-      torch.arange(env.num_envs, device=env.episode_length_buf.device, dtype=torch.long) % n_clips
-    )
+    raw = os.environ.get("MIX_CLIP_WEIGHTS", "").strip()
+    if raw and n_clips > 1:
+      # A curriculum, in the only form this task can express one. Each environment's OBJECT mesh is
+      # baked into its world at scene-build time, so an env cannot be moved to another clip mid-run
+      # and no resampling scheme is available. What IS available is an uneven static split: give the
+      # clips that are not being learned more of the 1024 environments and the ones that are fewer.
+      # Largest-remainder allocation, so the counts sum exactly and every clip keeps at least one.
+      w = [float(x) for x in raw.replace(" ", "").split(",") if x]
+      if len(w) != n_clips:
+        raise ValueError(
+          f"MIX_CLIP_WEIGHTS needs {n_clips} comma-separated weights, got {len(w)}"
+        )
+      if min(w) <= 0.0:
+        raise ValueError(f"MIX_CLIP_WEIGHTS must all be positive, got {w}")
+      total = sum(w)
+      exact = [env.num_envs * x / total for x in w]
+      counts = [max(int(e), 1) for e in exact]
+      short = env.num_envs - sum(counts)
+      order = sorted(range(n_clips), key=lambda i: exact[i] - int(exact[i]), reverse=True)
+      i = 0
+      while short != 0:
+        c = order[i % n_clips]
+        if short > 0:
+          counts[c] += 1
+          short -= 1
+        elif counts[c] > 1:
+          counts[c] -= 1
+          short += 1
+        i += 1
+      value = torch.repeat_interleave(
+        torch.arange(n_clips, device=env.episode_length_buf.device, dtype=torch.long),
+        torch.tensor(counts, device=env.episode_length_buf.device, dtype=torch.long),
+      )
+      print(f"[apple_eat] MIX_CLIP_WEIGHTS {w} -> env counts {counts}", flush=True)
+    else:
+      value = (
+        torch.arange(env.num_envs, device=env.episode_length_buf.device, dtype=torch.long) % n_clips
+      )
     env._reference_clip_id = value
     if n_clips > 1:
       counts = [int((value == c).sum()) for c in range(n_clips)]

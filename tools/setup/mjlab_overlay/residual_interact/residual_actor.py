@@ -259,7 +259,7 @@ class OfficialSonicONNX53Actor(nn.Module):
   ) -> torch.Tensor:
     if self.hand_base_mode == "reference":
       ref = obs["reference_hand"]
-      if ref.ndim == 3:  # (T, B, D) under a recurrent unpad
+      if ref.ndim == 3:
         ref = ref.reshape(-1, ref.shape[-1])
       return ref.to(device=device, dtype=dtype)
     return torch.zeros(batch, mdp.NUM_HAND, device=device, dtype=dtype)
@@ -383,7 +383,7 @@ class ASTRAONNX29BodyActor(nn.Module):
   ) -> torch.Tensor:
     if self.hand_base_mode == "reference":
       ref = obs["reference_hand"]
-      if ref.ndim == 3:  # (T, B, D) under a recurrent unpad
+      if ref.ndim == 3:
         ref = ref.reshape(-1, ref.shape[-1])
       return ref.to(device=device, dtype=dtype)
     return torch.zeros(batch, mdp.NUM_HAND, device=device, dtype=dtype)
@@ -1117,6 +1117,12 @@ class ResidualInteractActorModel(nn.Module):
       ),
     )
     self._init_hand_eigen()
+    if self.base_hand_reference:
+      print(
+        f"[ResidualInteractActor] BASE_HAND_REF -- the hand's base action is the clip's own "
+        f"retargeted pose at each frame, not zero; the {mdp.NUM_HAND} finger outputs are now a "
+        f"correction like the body's, not the whole command"
+      )
     if self.zero_init_residual:
       self._zero_initialize_residual_mean()
     self._set_initial_std(
@@ -1642,6 +1648,9 @@ class ResidualInteractActorModel(nn.Module):
     """
     if self.hand_eigen_k <= 0:
       return sampled
+    if self.hand_prior_absolute:
+      # absolute mode already emits a pose from the prior; there is no displacement to project
+      return sampled
     base = cast(torch.Tensor, self.last_base_action).to(
       device=sampled.device, dtype=sampled.dtype
     )
@@ -1741,6 +1750,7 @@ class ResidualInteractActorModel(nn.Module):
     self.hand_eigen_scale_mult = 1.0
     self.hand_vae = None
     self.hand_vae_scale = 0.0
+    self._read_hand_prior_flags()
     raw_vae = os.environ.get("HAND_VAE", "").strip()
     raw_k_probe = os.environ.get("HAND_EIGEN_K", "").strip()
     if raw_vae and raw_vae != "0" and raw_k_probe not in ("", "0"):
@@ -1796,7 +1806,46 @@ class ResidualInteractActorModel(nn.Module):
         f"differ, first at index {bad[0]} ({got[bad[0]]!r} vs {expected[bad[0]]!r})"
       )
     basis = comp[:k]
-    scale = self.residual_action_clip * np.abs(basis).sum(1) * self.hand_eigen_scale_mult
+    rand_seed = os.environ.get("HAND_EIGEN_RANDOM", "").strip()
+    if rand_seed and rand_seed != "0":
+      # Shape control. Keeps the mean pose and the per-latent sigma scaling identical and swaps
+      # ONLY the directions for a random orthonormal frame, so a win for the real basis can be
+      # attributed to the principal directions rather than to "the hand starts half-closed at a
+      # realistic magnitude", which the mean and the scaling supply on their own.
+      rng = np.random.default_rng(0 if rand_seed in ("1", "true", "yes", "on") else int(rand_seed))
+      q, _ = np.linalg.qr(rng.standard_normal((mdp.NUM_HAND, mdp.NUM_HAND)))
+      basis = np.ascontiguousarray(q.T[:k])
+      self.hand_eigen_random = True
+    else:
+      self.hand_eigen_random = False
+    if self.hand_prior_absolute:
+      # base_hand_mode is "zero": the "residual" IS the whole finger command, so a POSE prior has
+      # to supply the corpus mean as well as the directions. PCA centres its data, so span alone
+      # is a subspace through the origin and reconstructs real poses at 4.00 deg against 2.02 for
+      # mean+span. Latent k is scaled by the data's own spread along PC k, so +-1 is +-1 sigma of
+      # real hand use, and the result is clamped to the joint limits rather than to the residual
+      # clip -- 24% of real pose joints sit outside +-clip, so clipping would defeat the point.
+      sv = np.asarray(data["singular_values"], dtype=np.float64)
+      n_frames_f = float(np.asarray(data["n_frames"]))
+      scale = (
+        np.sqrt(sv[:k] ** 2 / max(n_frames_f - 1.0, 1.0))
+        * self.hand_prior_sigma
+        * self.hand_eigen_scale_mult
+      )
+      self.register_buffer(
+        "hand_prior_mean",
+        torch.as_tensor(np.asarray(data["mean"], dtype=np.float64), dtype=torch.float32),
+        persistent=False,
+      )
+      if "jnt_range" not in data.files:
+        raise ValueError(f"{path} has no 'jnt_range'; absolute mode needs the joint limits")
+      self.register_buffer(
+        "hand_prior_lim",
+        torch.as_tensor(np.asarray(data["jnt_range"], dtype=np.float64), dtype=torch.float32),
+        persistent=False,
+      )
+    else:
+      scale = self.residual_action_clip * np.abs(basis).sum(1) * self.hand_eigen_scale_mult
     # persistent=False: these follow .to(device) but stay out of the state_dict, so turning
     # the projection on or off never makes a saved checkpoint unloadable.
     self.register_buffer(
@@ -1808,12 +1857,20 @@ class ResidualInteractActorModel(nn.Module):
     evr = float(np.asarray(data["explained_variance_ratio"])[:k].sum())
     n_frames = int(data["n_frames"]) if "n_frames" in data.files else -1
     print(
-      f"[ResidualInteractActor] HAND_EIGEN_K {k}/{mdp.NUM_HAND} finger dims -- "
+      f"[ResidualInteractActor] HAND_EIGEN_K {k}/{mdp.NUM_HAND} finger dims "
+      f"[{'ABSOLUTE pose: mean+span, clamped to joint limits, sigma ' + str(self.hand_prior_sigma) if self.hand_prior_absolute else 'displacement: span only'}]"
+      f"{' [RANDOM BASIS -- shape control, mean and scaling unchanged]' if self.hand_eigen_random else ''} -- "
       f"residual projected onto eigengrasp subspace, {evr * 100:.1f}% of the finger "
       f"variance over {n_frames} frames, latent scale "
       f"{self.hand_eigen_scale.min():.3f}..{self.hand_eigen_scale.max():.3f} rad "
       f"(clip {self.residual_action_clip}, mult {self.hand_eigen_scale_mult}), basis {path}"
     )
+
+  def _read_hand_prior_flags(self) -> None:
+    """Set by whichever init runs; kept idempotent so either entry point stands alone."""
+    self.base_hand_reference = os.environ.get("BASE_HAND_REF", "").strip() not in ("", "0")
+    self.hand_prior_absolute = os.environ.get("HAND_PRIOR_ABS", "").strip() not in ("", "0")
+    self.hand_prior_sigma = float(os.environ.get("HAND_PRIOR_SIGMA", "2.5"))
 
   def _init_hand_vae(self, spec: str) -> None:
     """Load the trained hand-pose VAE and use its manifold as the finger residual space.
@@ -1829,6 +1886,7 @@ class ResidualInteractActorModel(nn.Module):
     which is the nonlinear generalisation of the PCA arm's `dz @ basis`, and preserves the
     zero-init no-op that makes resuming safe.
     """
+    self._read_hand_prior_flags()
     path = spec if spec not in ("1", "true", "yes", "on") else str(
       Path(__file__).resolve().parent / "wuji_hand_vae.pt"
     )
@@ -1851,7 +1909,8 @@ class ResidualInteractActorModel(nn.Module):
     meta = ck.get("meta", {}) or {}
     res = (meta.get("res") or {}).get("val") or {}
     print(
-      f"[ResidualInteractActor] HAND_VAE {net.latent}/{mdp.NUM_HAND} finger dims -- residual "
+      f"[ResidualInteractActor] HAND_VAE {net.latent}/{mdp.NUM_HAND} finger dims "
+      f"[{'ABSOLUTE pose: decode(z), clamped to joint limits, sigma ' + str(self.hand_prior_sigma) if self.hand_prior_absolute else 'displacement: tangent step'}] -- residual "
       f"is a tangent step on the VAE manifold, dz scale {self.hand_vae_scale} "
       f"(clip {self.residual_action_clip}), val recon mean "
       f"{res.get('mean', float('nan')):.3f} deg p95 {res.get('p95', float('nan')):.3f} "
@@ -1862,6 +1921,14 @@ class ResidualInteractActorModel(nn.Module):
     self, hand_raw: torch.Tensor, base_hand: torch.Tensor
   ) -> torch.Tensor:
     net = cast(_HandPriorVAE, self.hand_vae)
+    if self.hand_prior_absolute:
+      # base_hand_mode is "zero", so the command is the pose. Decode it straight from the prior
+      # and clamp to the joint limits the VAE was trained with -- the tangent step below exists
+      # only to preserve a zero-init no-op, which a pose prior cannot have by construction.
+      z = torch.tanh(hand_raw[:, : net.latent]) * self.hand_prior_sigma
+      pose = net.decode(z)
+      lim = net.lim.to(device=hand_raw.device, dtype=hand_raw.dtype)
+      return torch.max(torch.min(pose, lim[:, 1]), lim[:, 0])
     base = base_hand.detach().to(dtype=hand_raw.dtype)
     dz = torch.tanh(hand_raw[:, : net.latent]) * self.hand_vae_scale
     with torch.no_grad():
@@ -1883,6 +1950,9 @@ class ResidualInteractActorModel(nn.Module):
     being injected into every step.
     """
     if self.hand_vae is None:
+      return sampled
+    if self.hand_prior_absolute:
+      # absolute mode already emits a pose from the prior; there is no displacement to project
       return sampled
     net = cast(_HandPriorVAE, self.hand_vae)
     base = cast(torch.Tensor, self.last_base_action).to(
@@ -1906,12 +1976,48 @@ class ResidualInteractActorModel(nn.Module):
     )
     return projected
 
+  def _reference_base_hand(
+    self, obs: TensorDict, base_hand: torch.Tensor
+  ) -> torch.Tensor:
+    """BASE_HAND_REF=1: give the hand the base action the body has always had.
+
+    ASTRA tracks the reference for the 29 body dofs, so the body's residual only has to
+    correct a good guess. base_hand_mode is "zero", so the hand's "residual" has been the
+    entire finger command, invented from scratch -- measured at 6.9 deg per joint against the
+    reference clip's own 22.7. That per-frame retargeted hand pose has been in the pkl the
+    whole time; using it turns the hand residual into a correction, like the body's.
+
+    A statistical prior (PCA/VAE) supplies ONE average half-closed hand. This supplies the
+    pose the human actually held at this frame of this clip -- strictly more information, plus
+    the timing an average cannot have.
+    """
+    if not self.base_hand_reference:
+      return base_hand
+    ref = obs.get("reference_hand", None)
+    if ref is None:
+      raise RuntimeError(
+        "BASE_HAND_REF=1 but the env produced no 'reference_hand' observation; the mjlab "
+        "overlay is out of date on this box."
+      )
+    if ref.ndim == 3:
+      ref = ref[:, -1]
+    ref = ref.to(device=base_hand.device, dtype=base_hand.dtype)
+    if ref.shape[-1] != mdp.NUM_HAND:
+      raise RuntimeError(
+        f"'reference_hand' is {ref.shape[-1]}-wide, expected {mdp.NUM_HAND}"
+      )
+    return ref
+
   def _hand_eigen_residual(self, hand_raw: torch.Tensor) -> torch.Tensor:
     """Decode the first K head outputs as eigengrasp latents into a NUM_HAND residual."""
     basis = self.hand_eigen_basis.to(device=hand_raw.device, dtype=hand_raw.dtype)
     scale = self.hand_eigen_scale.to(device=hand_raw.device, dtype=hand_raw.dtype)
     latent = torch.tanh(hand_raw[:, : self.hand_eigen_k]) * scale.unsqueeze(0)
     hand_residual = latent @ basis
+    if self.hand_prior_absolute:
+      lim = self.hand_prior_lim.to(device=hand_raw.device, dtype=hand_raw.dtype)
+      pose = self.hand_prior_mean.to(device=hand_raw.device, dtype=hand_raw.dtype) + hand_residual
+      return torch.max(torch.min(pose, lim[:, 1]), lim[:, 0])
     # Respect the baseline's per-joint clip by shrinking along the direction rather than
     # clamping per joint. Clamping would push the result OUT of the subspace (measured at
     # 0.72 rad off-span at saturation), destroying the property this whole change exists to
@@ -1956,6 +2062,7 @@ class ResidualInteractActorModel(nn.Module):
         else:
           bc_hand = bc_hand.to(device=zero_hand.device, dtype=zero_hand.dtype)
           base_hand = torch.where(hand_base_gate > 0.0, bc_hand, zero_hand)
+      base_hand = self._reference_base_hand(obs, base_hand)
       base_action = torch.cat([base_body.detach(), base_hand], dim=-1)
 
       features = self._residual_features(obs, base_action)
@@ -2064,6 +2171,7 @@ class ResidualInteractActorModel(nn.Module):
       else:
         bc_hand = bc_hand.to(device=zero_hand.device, dtype=zero_hand.dtype)
         base_hand = torch.where(hand_base_gate > 0.0, bc_hand, zero_hand)
+      base_hand = self._reference_base_hand(obs, base_hand)
       base_action = torch.cat([base_body.detach(), base_hand], dim=-1)
 
       features = self._residual_features(obs, base_action)
