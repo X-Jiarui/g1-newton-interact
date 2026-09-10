@@ -55,6 +55,14 @@ env:
   # Set through FINGER_FORCE_LIMIT, not APPLE_HAND_EFFORT: the entity spec is cached, so the cfg
   # route prints the new limit and simulates the old one.
   FINGER_FORCE_LIMIT: 1.0
+
+  # Finger PD, written straight into mj_model/mjw_model (gainprm[0], biasprm[1]=-kp,
+  # biasprm[2]=-kd) and read back with an assert. mjlab's default is kp 300 / kd 8 -- hip gains
+  # on a hand. 10 / 0.2 is CoorDex's published G1+Wuji setting and is exactly critically damped
+  # on our finger armature (zeta = 1.0000). Do NOT use APPLE_HAND_KP / APPLE_HAND_KD: they edit
+  # the cached entity spec, print the new number and simulate the old one -- three arms of a
+  # stiffness sweep once ran on identical gains because of it.
+  HAND_PD: "10,0.2"
   NEUTRALISE_LEFTOVER: 1        # silence the scene's own xml_motor_unused_* position servos
 
   # --- instrumentation ----------------------------------------------------------------------
