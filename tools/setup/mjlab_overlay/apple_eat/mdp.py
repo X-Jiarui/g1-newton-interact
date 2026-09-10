@@ -673,58 +673,9 @@ def _clip_id(env) -> torch.Tensor:
   if value is None or value.shape[0] != env.num_envs:
     ref = _ref(str(env.episode_length_buf.device))
     n_clips = int(ref.get("n_clips", 1))
-    raw = os.environ.get("MIX_CLIP_WEIGHTS", "").strip()
-    # _clip_id is called once early with a single environment, long before the real vector size
-    # is known. Weights cannot be honoured there -- eight clips do not fit in one env -- and the
-    # allocator below would spin forever trying to give back seven environments it does not have.
-    if raw and n_clips > 1 and env.num_envs >= n_clips:
-      # A curriculum, in the only form this task can express one. Each environment's OBJECT mesh is
-      # baked into its world at scene-build time, so an env cannot be moved to another clip mid-run
-      # and no resampling scheme is available. What IS available is an uneven static split: give the
-      # clips that are not being learned more of the 1024 environments and the ones that are fewer.
-      # Largest-remainder allocation, so the counts sum exactly and every clip keeps at least one.
-      w = [float(x) for x in raw.replace(" ", "").split(",") if x]
-      if len(w) != n_clips:
-        raise ValueError(
-          f"MIX_CLIP_WEIGHTS needs {n_clips} comma-separated weights, got {len(w)}"
-        )
-      if min(w) <= 0.0:
-        raise ValueError(f"MIX_CLIP_WEIGHTS must all be positive, got {w}")
-      total = sum(w)
-      exact = [env.num_envs * x / total for x in w]
-      counts = [max(int(e), 1) for e in exact]
-      short = env.num_envs - sum(counts)
-      order = sorted(range(n_clips), key=lambda i: exact[i] - int(exact[i]), reverse=True)
-      # Bounded: every pass either moves `short` toward zero or finds nothing left to take, and
-      # an unbounded version of this loop hung two runs for twenty minutes.
-      for _ in range(n_clips * 4):
-        if short == 0:
-          break
-        moved = False
-        for c in order:
-          if short == 0:
-            break
-          if short > 0:
-            counts[c] += 1
-            short -= 1
-            moved = True
-          elif counts[c] > 1:
-            counts[c] -= 1
-            short += 1
-            moved = True
-        if not moved:
-          raise ValueError(
-            f"MIX_CLIP_WEIGHTS cannot split {env.num_envs} envs over {n_clips} clips as {w}"
-          )
-      value = torch.repeat_interleave(
-        torch.arange(n_clips, device=env.episode_length_buf.device, dtype=torch.long),
-        torch.tensor(counts, device=env.episode_length_buf.device, dtype=torch.long),
-      )
-      print(f"[apple_eat] MIX_CLIP_WEIGHTS {w} -> env counts {counts}", flush=True)
-    else:
-      value = (
-        torch.arange(env.num_envs, device=env.episode_length_buf.device, dtype=torch.long) % n_clips
-      )
+    value = (
+      torch.arange(env.num_envs, device=env.episode_length_buf.device, dtype=torch.long) % n_clips
+    )
     env._reference_clip_id = value
     if n_clips > 1:
       counts = [int((value == c).sum()) for c in range(n_clips)]
