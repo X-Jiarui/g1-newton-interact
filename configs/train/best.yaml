@@ -56,13 +56,13 @@ env:
   # route prints the new limit and simulates the old one.
   FINGER_FORCE_LIMIT: 1.0
 
-  # Finger PD, written straight into mj_model/mjw_model (gainprm[0], biasprm[1]=-kp,
-  # biasprm[2]=-kd) and read back with an assert. mjlab's default is kp 300 / kd 8 -- hip gains
-  # on a hand. 10 / 0.2 is CoorDex's published G1+Wuji setting and is exactly critically damped
-  # on our finger armature (zeta = 1.0000). Do NOT use APPLE_HAND_KP / APPLE_HAND_KD: they edit
-  # the cached entity spec, print the new number and simulate the old one -- three arms of a
-  # stiffness sweep once ran on identical gains because of it.
-  HAND_PD: "10,0.2"
+  # Finger PD is NOT set here. HAND_PD="kp,kd" exists and works (it writes gainprm/biasprm into
+  # mj_model and mjw_model and asserts the read-back), but 10 / 0.2 was pinned here on a penetration
+  # argument alone and it takes camera's lift_success from 0.73 to exactly 0.0000 -- on eight
+  # separate runs, and PD_010 stayed at 0.0000 for 500 iterations, so it is not a re-adaptation
+  # transient. Every kp-300 run lifts; every kp-10 run does not. Default kp 300 / kd 8 stands.
+  # Do not use APPLE_HAND_KP / APPLE_HAND_KD either: they edit the cached entity spec, print the
+  # new number and simulate the old one.
   NEUTRALISE_LEFTOVER: 1        # silence the scene's own xml_motor_unused_* position servos
 
   # --- instrumentation ----------------------------------------------------------------------
