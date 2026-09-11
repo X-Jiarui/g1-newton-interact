@@ -714,6 +714,13 @@ def wrist_target_far_termination(
   because RSI draws start_frame uniformly from 0-50: at the old default of 100 this opened 31
   frames BEFORE cf for an env starting at frame 0 and 19 frames AFTER cf for one starting at 50.
   """
+  # WRIST_TARGET_FAR=0 keeps the term registered -- so the termination table is identical -- but it
+  # never fires. Needed when RSI starts episodes far from contact: this check only acts between
+  # control step 56 and cf, a window the default [cf-20, cf-10] start never reaches (0.0000 on
+  # MIX8), but which every env drawn from [0, cf-20] crosses. R27 collapsed exactly that way, with
+  # 60-100% of episodes killed during the approach. Default ON, so nothing already running changes.
+  if os.environ.get("WRIST_TARGET_FAR", "1").strip() in ("0", "off", "false"):
+    return torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
   if int(window) > 0:
     ref = _ref(env.device)
     n = int(ref["n_frames"])
