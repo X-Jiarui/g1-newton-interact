@@ -28,6 +28,12 @@ from pathlib import Path
 
 FILES = [
     ("residual_interact", "mdp.py"),
+    ("residual_interact", "residual_actor.py"),
+    # Data, not code: the eigengrasp basis the actor loads when HAND_EIGEN_K > 0. It ships
+    # here so the actor can find it relative to its own file on every box.
+    ("residual_interact", "wuji_eigengrasp.npz"),
+    # The trained hand-pose VAE, the other candidate prior (HAND_VAE).
+    ("residual_interact", "wuji_hand_vae.pt"),
     ("residual_interact", "staged_mdp.py"),
     ("residual_interact", "env_cfgs.py"),
     ("residual_interact", "rl.py"),
@@ -55,8 +61,13 @@ def main() -> int:
             print(f"MISSING in overlay: {src}")
             return 1
         if not dst.is_file():
-            print(f"MISSING on box:     {dst}")
-            return 1
+            # A file the overlay adds rather than replaces (the eigengrasp basis is the first).
+            # The tasks-dir check above already proves we are pointed at a real mjlab checkout,
+            # so creating it here is safe; there is no prior state worth backing up.
+            shutil.copy2(src, dst)
+            print(f"CREATED   {pkg}/{name}")
+            changed += 1
+            continue
         if filecmp.cmp(src, dst, shallow=False):
             print(f"same      {pkg}/{name}")
             continue

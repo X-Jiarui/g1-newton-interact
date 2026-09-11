@@ -78,6 +78,29 @@ def after_cf(env, offset: int = 0) -> torch.Tensor:
     return (cf >= 0) & (frame >= (cf + int(offset)))
 
 
+def og_object_far_after_table_termination(
+    env, distance: float = 0.12, grace_steps: int = 2
+) -> torch.Tensor:
+    """og_object_far, but held off until this clip's table has been removed (OG_FAR_AFTER_TABLE=1).
+
+    Measured per clip in the training regime: for 7 of the 8 mix8 clips every episode ended at
+    cf+20..cf+43 on og_object_far -- the reference had carried the object 12 cm from the one still
+    resting on the table -- while the table is only removed at cf+TABLE_REMOVE_AFTER_CF (cf+50).
+    None of them ever reached table removal, so the lift test could not score and their lift was
+    exactly zero across every run. With the gate the episode runs to table removal; an object that
+    is not held then falls, and the same 12 cm test ends the episode as before.
+
+    Unset or 0 is the stock term, bit-for-bit.
+    """
+    from mjlab.tasks.residual_interact import omnigrasp_faithful_mdp as _og
+
+    far = _og.og_object_far_termination(env, distance=distance, grace_steps=grace_steps)
+    if os.environ.get("OG_FAR_AFTER_TABLE", "").strip() in ("", "0"):
+        return far
+    offset = int(os.environ.get("TABLE_REMOVE_AFTER_CF", "0").strip() or 0)
+    return far & after_cf(env, offset)
+
+
 def _phase_weight(env, pre: float, post: float) -> torch.Tensor:
     pre_mask = before_cf(env)
     # PHASE_GATE_LOG -- logged here, not from a metrics term: every staged term passes through

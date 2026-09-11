@@ -393,6 +393,52 @@ class NewtonVecEnv:
         # mesh survived only as a visual. Verified by shape_source vertex counts, not by the log
         # line -- which cheerfully claimed the object kept its real geometry either way.
         _keep_real = ("_sdf",)
+
+        # HAND_HYDRO: put the HAND on the same representation as the object, via SDF rather than
+        # via convex pieces. The two routes are mutually exclusive per shape and Newton enforces
+        # it -- `approximate_meshes` raises on any shape carrying SDF/hydro state, because those
+        # methods retype away from MESH and the SDF "would be silently dropped at finalize". So a
+        # hydroelastic hand must NOT be hulled, and is excluded below.
+        #
+        # Mixing is not merely inelegant, it is violent: `flag_hydroelastic`'s own docstring
+        # records what happened when only the object was flagged and the table was left rigid --
+        # the stapler stood itself upright around step 110 with nothing touching it, was ejected by
+        # 135, and went partly non-finite in between. Refuse the mixed configuration outright.
+        _hand_hydro = os.environ.get("HAND_HYDRO", "").strip() not in ("", "0")
+        _hand_sdf_shapes: list[int] = []
+        if _hand_hydro:
+          if not (native_contacts and hydro_object_table):
+            raise RuntimeError(
+              "HAND_HYDRO needs --native-contacts and hydroelastic object/table (drop "
+              "--rigid-object-table). Hydroelastic contact is defined between two hydroelastic "
+              "surfaces; flagging one side only injects a large impulse.")
+          _hand_keys = ("finger", "thumb", "palm", "hand", "wrist")
+          _hand_sdf_shapes = [i for i in range(len(scene.shape_type))
+                              if int(scene.shape_type[i]) == int(newton.GeoType.MESH)
+                              and int(scene.shape_flags[i]) & _C
+                              and not any(k in (scene.shape_label[i] or "").lower()
+                                          for k in _keep_real)
+                              and any(k in (scene.shape_label[i] or "").lower()
+                                      for k in _hand_keys)]
+          if not _hand_sdf_shapes:
+            raise RuntimeError("HAND_HYDRO matched no hand mesh collider; nothing would change "
+                               "and the run would silently train on the old representation")
+          # Resolution matters more here than for the object: the sparse grid is allocated PER
+          # WORLD, and this is 40-odd grids per world instead of one. The official recipe (band
+          # +-0.01, margin == gap) is what fit 2048 worlds for a single object; leave room to dial
+          # it down from the outside before assuming it fits for the hand.
+          _hres = int(os.environ.get("HAND_SDF_RES", "32"))
+          _hgap = float(os.environ.get("SHAPE_GAP", "0.01") or 0.01)
+          for _i in _hand_sdf_shapes:
+            _src = scene.shape_source[_i]
+            if _src is None or not hasattr(_src, "build_sdf"):
+              raise RuntimeError(f"hand shape {_i} ({scene.shape_label[_i]}) has no mesh source to "
+                                 f"build an SDF on")
+            _src.build_sdf(max_resolution=_hres, narrow_band_range=(-0.01, 0.01), margin=_hgap)
+            scene.shape_flags[_i] |= _H
+          print(f"[newton-env] HAND_HYDRO: {len(_hand_sdf_shapes)} hand collider(s) given an SDF "
+                f"at res {_hres} and flagged hydroelastic; they are NOT convex-hulled")
+
         _to_hull = [i for i in range(len(scene.shape_type))
                     if int(scene.shape_type[i]) == int(newton.GeoType.MESH)
                     and int(scene.shape_flags[i]) & _C
@@ -406,6 +452,54 @@ class NewtonVecEnv:
                    and int(scene.shape_flags[i]) & _C and i not in _to_hull]
           print(f"[newton-env] convex-hulled {len(_done)} of {len(_to_hull)} robot mesh collider(s); "
                 f"kept as real meshes: {_kept}")
+
+        # OBJECT_VHACD: make the two sides of the grasp the SAME representation.
+        #
+        # Newton's midphase pairs one MESH TRIANGLE with one CONVEX shape -- collision_core.py
+        # calls it "mesh vs convex shape midphase", and the buffer entry is
+        # (mesh_shape, non_mesh_shape, tri_index). So the triangle-pair count is
+        # (object triangles near a hand hull) x (hand hulls overlapping), and the hand contributes
+        # NOTHING to it: the hull pass above already retyped all 65 robot colliders to CONVEX_MESH,
+        # which the kernel handles as a support map.
+        #
+        # The object is the only collider left typed MESH -- excluded by name, to keep its real
+        # geometry -- which makes it the sole source of every triangle pair we have ever
+        # overflowed. Decomposing it into convex pieces removes the mesh side of the pair
+        # entirely; the buffer is then never touched, at any object resolution.
+        #
+        # The cost is one-sided and must be measured per object, not assumed: a union of convex
+        # hulls only ever ADDS material. Surveyed at 64 hulls, volume comes out 5.6-14.9% over the
+        # original with the surface bulging 3.6-5.2 mm at worst and 0.03-0.12 mm on average --
+        # better mean than the 2000-triangle decimation, worse maximum, and erring outward, so the
+        # hand meets the object early rather than passing through it.
+        _vh = os.environ.get("OBJECT_VHACD", "").strip()
+        if _vh and _vh not in ("0", ""):
+          _hulls = int(_vh)
+          _obj_sh = [i for i in range(len(scene.shape_type))
+                     if int(scene.shape_type[i]) == int(newton.GeoType.MESH)
+                     and int(scene.shape_flags[i]) & _C
+                     and any(k in (scene.shape_label[i] or "").lower() for k in _keep_real)]
+          if not _obj_sh:
+            raise RuntimeError("OBJECT_VHACD set but no MESH collider matched the object/table "
+                               "names; nothing would be decomposed and the run would silently "
+                               "train on the old representation")
+          _before = len(scene.shape_type)
+          _dec = scene.approximate_meshes(method="vhacd", shape_indices=_obj_sh,
+                                          keep_visual_shapes=True, raise_on_failure=True,
+                                          maxConvexHulls=_hulls)
+          _still_mesh = [scene.shape_label[i].split("/")[-1]
+                         for i in range(len(scene.shape_type))
+                         if int(scene.shape_type[i]) == int(newton.GeoType.MESH)
+                         and int(scene.shape_flags[i]) & _C]
+          print(f"[newton-env] OBJECT_VHACD {_hulls}: decomposed {len(_dec)} of {len(_obj_sh)} "
+                f"object/table collider(s); shapes {_before} -> {len(scene.shape_type)}; "
+                f"colliders still typed MESH: {_still_mesh or 'none'}")
+          # The whole point is that no collider is left as a triangle soup. Say so loudly if one
+          # is: a single surviving MESH keeps the triangle-pair path alive and the run would look
+          # like the decomposition did nothing.
+          if _still_mesh:
+            print(f"[newton-env] WARNING: {len(_still_mesh)} collider(s) still typed MESH, so the "
+                  f"mesh-vs-convex midphase is still live: {_still_mesh}")
       return scene
 
     world = newton.ModelBuilder()
@@ -703,6 +797,12 @@ class NewtonVecEnv:
     # every step -- silently truncating the very contact sensors the grasp rewards gate on.
     _mm = int(getattr(getattr(cfg, "sim", None), "contact_sensor_maxmatch", 0) or 0)
     _mm = max(_mm, 256 if native_contacts else 64)
+    # Convex decomposition raises this requirement, and it is the binding cost of a high hull
+    # count -- not memory, and not the narrow phase. Each piece is its own geom, so every contact
+    # sensor has that many more geoms to match: measured on the hammer at 1024 env, 32 hulls fits
+    # inside 256 while 128 hulls asked for 311 and 256 hulls for 525. Over the budget the sensors
+    # are TRUNCATED, which is the same silent failure described above.
+    _mm = max(_mm, int(os.environ.get("CONTACT_MAXMATCH", "0") or 0))
     self.solver.mjw_model.opt.contact_sensor_maxmatch = _mm
     print(f"[newton-env] contact_sensor_maxmatch = {_mm}")
 
@@ -859,6 +959,34 @@ class NewtonVecEnv:
           f"{sorted(_got)} N*m). The entity spec is cached, so the cfg value is printed but never "
           f"simulated. Use FINGER_FORCE_LIMIT={_ahe} instead, which writes mj_model and mjw_model "
           f"directly.")
+
+    # HAND_ARMATURE: the finger joints' reflected rotor inertia, written into the model.
+    #
+    # It belongs here rather than in the XML because it is one leg of a coupled triple. A PD gain
+    # means nothing alone: what the joint actually does is set by (kp, kd, armature) together, and
+    # the damping ratio is kd / (2*sqrt(kp*I)). CoorDex -- the one published RL work on this same
+    # G1 + 20-DoF Wuji hand, in IsaacLab -- ships 10 / 0.2 / 0.001, which is exactly zeta = 1.0000.
+    # Ours was 300 / 8 / 0.01, zeta 16, and the 0.01 was not chosen at all: it is the G1 body class
+    # default that the grafted hand fell through to, 50x the vendor's own 0.0002.
+    #
+    # Writing it here also keeps a run's identity in its environment instead of in whichever
+    # revision of the XML happened to be on disk.
+    _harm = os.environ.get("HAND_ARMATURE", "").strip()
+    if _harm:
+      import mujoco as _mjh
+      _mmh = self.solver.mj_model
+      _v = float(_harm)
+      _js = [_j for _j in range(_mmh.njnt)
+             if "finger" in (_mjh.mj_id2name(_mmh, _mjh.mjtObj.mjOBJ_JOINT, _j) or "")
+             or "thumb" in (_mjh.mj_id2name(_mmh, _mjh.mjtObj.mjOBJ_JOINT, _j) or "")]
+      if not _js:
+        raise RuntimeError("HAND_ARMATURE matched no finger joint")
+      _before = sorted({round(float(_mmh.dof_armature[int(_mmh.jnt_dofadr[_j])]), 6) for _j in _js})
+      for _j in _js:
+        _mmh.dof_armature[int(_mmh.jnt_dofadr[_j])] = _v
+      _push_arm = _push("dof_armature", _mmh.dof_armature)
+      print(f"[newton-env] HAND_ARMATURE {_v} on {len(_js)} finger joint(s) (was {_before}); "
+            f"mjw shape {_push_arm}", flush=True)
 
     # NEUTRALISE_LEFTOVER silences the scene's own Wuji finger motors.
     #
@@ -1203,6 +1331,11 @@ class NewtonVecEnv:
     try:
       from mjlab.managers.metrics_manager import MetricsManager
       self.metrics_manager = MetricsManager(cfg.metrics, self._env)
+      # Control steps between metrics_manager.compute() calls; 1 = every step, the old behaviour.
+      self._metrics_every = max(1, int(os.environ.get("METRICS_EVERY", "1")))
+      if self._metrics_every > 1:
+        print(f"[newton-env] METRICS_EVERY {self._metrics_every}: metrics computed every "
+              f"{self._metrics_every} control steps (unbiased, but {self._metrics_every}x noisier)")
       print(f"[newton-env] MetricsManager: "
             f"{len(getattr(self.metrics_manager, 'active_terms', []) or [])} terms")
     except Exception as e:
@@ -1973,6 +2106,84 @@ class NewtonVecEnv:
       self.collision_pipeline.collide(self.state_in, self.contacts)
     self.solver.step(self.state_in, self.state_out, self.control, self.contacts, self.physics_dt)
 
+  def _deep_force_report(self, _c, _pos, _sel, thresh_mm: float) -> None:
+    """Attribute the force behind the deepest contact, by constraint type, in one world.
+
+    Prints, for the world holding the deepest hand/object contact:
+      * that contact's own normal force, summed across the friction-cone pyramid rows (reading a
+        single row reports 0.00 N next to a true 15.76 N, and once produced a 654 N fiction);
+      * every active constraint row in that world, grouped by mjtConstraint type, with the total
+        and the largest single row -- so "joint limit" versus "contact" is read off the model
+        rather than argued from a lever arm;
+      * for the joints of the offending finger, the actuator force against the constraint force,
+        and the joint's distance past its own stop.
+
+    Rate-limited to one report per 30 flushes: it is a diagnostic, not a metric.
+    """
+    import warp as _wp, torch as _t, numpy as _np, mujoco as _mj
+
+    self._dfp_n = getattr(self, "_dfp_n", 0) + 1
+    if self._dfp_n % 30 != 1:
+      return
+    d, m = self.solver.mjw_data, self.solver.mj_model
+    _gm = _wp.to_torch(_c.geom)[_sel]
+    _wid = _wp.to_torch(_c.worldid).long()[_sel]
+    k = int(_pos.argmax())
+    w = int(_wid[k])
+    ga, gb = int(_gm[k][0]), int(_gm[k][1])
+    nm = lambda g: _mj.mj_id2name(m, _mj.mjtObj.mjOBJ_GEOM, g) or f"geom{g}"
+
+    # This contact's normal force: sum over the pyramid rows, not efc_force[adr].
+    _adr = _wp.to_torch(_c.efc_address)
+    if _adr.dim() == 1:
+      _adr = _adr.unsqueeze(1)
+    _ef = _wp.to_torch(d.efc.force)
+    rows = _adr[_sel][k]
+    fn = float(_ef[w, rows[rows >= 0].long()].sum()) if (rows >= 0).any() else float("nan")
+
+    print(f"\n[deep-force] world {w}: {nm(ga)} <-> {nm(gb)}  depth {1000*float(_pos[k]):.3f} mm  "
+          f"normal force {fn:.1f} N   (threshold {thresh_mm} mm)", flush=True)
+
+    # Every active constraint in that world, by type.
+    et = _wp.to_torch(d.efc.type)[w].cpu().numpy()
+    ef = _wp.to_torch(d.efc.force)[w].cpu().numpy()
+    eid = _wp.to_torch(d.efc.id)[w].cpu().numpy()
+    nefc = int(_wp.to_torch(d.nefc)[w]) if hasattr(d, "nefc") else len(et)
+    et, ef, eid = et[:nefc], ef[:nefc], eid[:nefc]
+    LBL = {0: "equality", 1: "friction_dof", 2: "friction_tendon", 3: "JOINT LIMIT",
+           4: "tendon_limit", 5: "contact_frictionless", 6: "contact_pyramidal",
+           7: "contact_elliptic"}
+    print(f"[deep-force]   {nefc} active constraint rows in this world:", flush=True)
+    for t in sorted(set(int(x) for x in et)):
+      sel = et == t
+      f = _np.abs(ef[sel])
+      j = int(_np.argmax(f))
+      who = ""
+      if t == 3:                                   # a limit row's id is the JOINT id
+        jid = int(eid[sel][j])
+        who = f"  worst on joint {_mj.mj_id2name(m, _mj.mjtObj.mjOBJ_JOINT, jid) or jid}"
+      print(f"[deep-force]     type {t:<2d} {LBL.get(t, '?'):<20s} n={int(sel.sum()):<5d} "
+            f"sum|f|={f.sum():9.1f} N   max|f|={f.max():8.1f} N{who}", flush=True)
+
+    # The offending finger's own joints: motor force vs constraint force vs distance past the stop.
+    rob = nm(ga) if self._pen_rob[ga] else nm(gb)
+    stem = rob.split("/")[-1].split("_link")[0]
+    qa = _wp.to_torch(d.qfrc_actuator)[w].cpu().numpy()
+    qc = _wp.to_torch(d.qfrc_constraint)[w].cpu().numpy()
+    qp = _wp.to_torch(d.qpos)[w].cpu().numpy()
+    print(f"[deep-force]   joints of {stem}:  (past = qpos beyond its own range)", flush=True)
+    for jid in range(m.njnt):
+      jn = _mj.mj_id2name(m, _mj.mjtObj.mjOBJ_JOINT, jid) or ""
+      if stem not in jn:
+        continue
+      dofadr, qadr = int(m.jnt_dofadr[jid]), int(m.jnt_qposadr[jid])
+      lo, hi = m.jnt_range[jid]
+      q = float(qp[qadr])
+      past = max(0.0, q - hi, lo - q)
+      print(f"[deep-force]     {jn.split('/')[-1]:<28s} q={q:+.4f} range=[{lo:+.3f},{hi:+.3f}] "
+            f"past={_np.degrees(past):5.2f} deg  qfrc_actuator={qa[dofadr]:+8.3f}  "
+            f"qfrc_constraint={qc[dofadr]:+9.3f}", flush=True)
+
   def _guard_targets(self) -> None:
     """Report -- and optionally clamp -- joint targets commanded past their limits.
 
@@ -2110,6 +2321,24 @@ class NewtonVecEnv:
           self._pen_acc[3] += float((_pos > 0.003).float().mean())
           self._pen_acc[4] += float((_pos > 0.004).float().mean())
           self._pen_acc[5] += 1
+
+          # DEEP_FORCE_PROBE: where a 300 N fingertip contact actually comes from.
+          #
+          # The arithmetic said the fingers cannot produce it -- 1.0 N*m over a 30 mm lever is
+          # 33 N, and the wrist measured 98-145 N -- but arithmetic is not a source. MuJoCo already
+          # stores the answer: every constraint row carries its TYPE and the object it acts on, so
+          # the force can be attributed rather than inferred. Types follow mjtConstraint:
+          # 0 equality, 1/2 friction, 3 joint limit, 4 tendon limit, 5/6/7 contact.
+          #
+          # A joint limit is the suspect worth ruling in or out by name: it has no torque ceiling,
+          # so a command driven past the stop is held by the constraint solver at whatever force it
+          # takes, and capping actuator torque does nothing to it.
+          _dfp = float(os.environ.get("DEEP_FORCE_PROBE", "0") or 0.0)
+          if _dfp > 0 and float(_pos.max()) * 1000.0 >= _dfp:
+            try:
+              self._deep_force_report(_c, _pos, _sel, _dfp)
+            except Exception as _e:
+              print(f"[deep-force] probe failed: {type(_e).__name__}: {_e}", flush=True)
           # per-world age, broadcast to the contacts of that world
           _wid_c = _wpl.to_torch(_c.worldid).long()[_sel]
           _age = self._env.episode_length_buf[_wid_c.clamp(0, self.num_envs - 1)]
@@ -2226,7 +2455,20 @@ class NewtonVecEnv:
       # raised TypeError on every step of every run and was swallowed, so the manager never
       # produced a metric -- the Episode_Metrics/* values that reached tensorboard were
       # zero-initialised accumulators being flushed at reset.
-      self.metrics_manager.compute()
+      #
+      # METRICS_EVERY strides this. Profiled at 1024 envs on the eight-clip mix it was 86.8 ms of a
+      # 451.5 ms step -- 19.2%, and none of it physics: 126 terms recomputed every control step.
+      #
+      # Striding is unbiased for these terms, which is why it is allowed at all: compute() does
+      # `_episode_sums += value` and `_step_count += 1` together, so skipping a step drops the
+      # numerator and the denominator alike and the episode average stays an estimate of the same
+      # quantity. What it costs is NOISE, and the per-clip metrics are the signal we read this run
+      # by -- so measure the metric values at stride 1 and stride N before trusting one.
+      # `compute_substep` is untouched: it runs inside the decimation loop and its accumulator is
+      # drained by whichever compute() call comes next, over however many substeps that spans.
+      self._metrics_tick = getattr(self, "_metrics_tick", 0) + 1
+      if self._metrics_every <= 1 or self._metrics_tick % self._metrics_every == 0:
+        self.metrics_manager.compute()
 
     # Non-finite worlds do not heal. Measured on the native path, 512 envs, 300 steps: the first
     # env goes non-finite somewhere before step 101 and the count climbs 1 -> 4 -> 8 and never

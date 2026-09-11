@@ -2031,7 +2031,8 @@ def residual_interact_env_cfg(
       params={"grace_frames": 10, "threshold": 0.03, "near_threshold": 0.10},
     ),
     "og_object_far": TerminationTermCfg(
-      func=omnigrasp_faithful_mdp.og_object_far_termination,
+      # Same term; OG_FAR_AFTER_TABLE=1 holds it off until the clip's table is removed.
+      func=staged_mdp.og_object_far_after_table_termination,
       params={"distance": 0.12, "grace_steps": 2},
     ),
     "object_reference_window": TerminationTermCfg(

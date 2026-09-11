@@ -202,6 +202,7 @@ RESIDUAL_FEATURE_GROUPS: tuple[str, ...] = (
   "reference_preview",
   "object_state",
   "hand_object_geometry",
+  "reference_hand",
   "object_surface_geometry",
   "object_bps_geometry",
   "omnigrasp_object_context",
@@ -2114,6 +2115,7 @@ class ResidualFeatureGroupObs:
       "reference_preview": self._reference_preview,
       "object_state": self._object_state,
       "hand_object_geometry": self._hand_object_geometry,
+      "reference_hand": self._reference_hand,
       "object_surface_geometry": self._object_surface_geometry,
       "object_bps_geometry": self._object_bps_geometry,
       "omnigrasp_object_context": self._omnigrasp_object_context,
@@ -2373,6 +2375,21 @@ class ResidualFeatureGroupObs:
     vec = tip_pos - obj.data.root_link_pos_w.unsqueeze(1)
     dist = vec.norm(dim=-1)
     return vec, dist
+
+  def _reference_hand(self, env) -> torch.Tensor:
+    """The retargeted human hand pose for this clip at this env's current tracking frame.
+
+    It has been in the pkl all along and is already remapped to mjlab hand order (the same
+    array `hand_err` differences against `robot.data.joint_pos`). Exposing it as its own group
+    lets the actor use it as the hand's BASE ACTION, which the body has had via ASTRA from the
+    start and the hand has never had -- base_hand_mode is "zero", so the policy has been
+    inventing all 40 finger angles from nothing while the answer sat in the observation.
+
+    Kept OUT of the actor's feature list on purpose: adding a feature would change
+    residual_input_dim and make every existing checkpoint unloadable.
+    """
+    _robot, _obj, ref, frame = self._robot_object(env)
+    return ref["dof_pos"][frame, NUM_BODY:ACTION_DIM]
 
   def _hand_object_geometry(self, env) -> torch.Tensor:
     robot: Entity = env.scene["robot"]
