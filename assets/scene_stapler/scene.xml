@@ -403,12 +403,12 @@
                                   <geom type="mesh" contype="2" conaffinity="2" rgba="0.9 0.8 0.6 1" mesh="robot/left_finger1_link2" />
                                   <body name="robot/left_finger1_link3" pos="0.00026671 0.0009915 0.034666" quat="0.577852 -0.0212383 -0.0150031 0.815727">
                                     <inertial pos="-0.0011232 1.57299e-05 0.0130566" quat="0.999951 0 0.00989566 0" mass="0.0165" diaginertia="1.4604e-06 1.42e-06 4.49604e-07" />
-                                    <joint name="robot/left_finger1_joint3" pos="0 0 0" axis="0 1 0" range="-0.4642 1.5623" actuatorfrcrange="-0.1888 0.1888" frictionloss="0" />
+                                    <joint name="robot/left_finger1_joint3" pos="0 0 0" axis="0 1 0" range="-0.4642 1.5623" actuatorfrcrange="-0.1888 0.1888" frictionloss="0" armature="0.0002" />
                                     <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.6 0.8 0.9 1" mesh="robot/left_finger1_link3" />
                                     <geom type="mesh" rgba="0.6 0.8 0.9 1" mesh="robot/left_finger1_link3" />
                                     <body name="robot/left_finger1_link4" pos="0 -0.0002 0.0295">
                                       <inertial pos="-0.00163886 0.000214814 0.0113475" quat="0.705316 -0.0503617 -0.0502939 0.705311" mass="0.0206" diaginertia="2.60196e-06 2.58216e-06 7.598e-07" />
-                                      <joint name="robot/left_finger1_joint4" pos="0 0 0" axis="0 1 0" range="-0.4699 1.5568" actuatorfrcrange="-0.1468 0.1468" frictionloss="0" />
+                                      <joint name="robot/left_finger1_joint4" pos="0 0 0" axis="0 1 0" range="-0.4699 1.5568" actuatorfrcrange="-0.1468 0.1468" frictionloss="0" armature="0.0002" />
                                       <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.6 0.8 0.9 1" mesh="robot/left_finger1_link4" />
                                       <geom type="mesh" rgba="0.6 0.8 0.9 1" mesh="robot/left_finger1_link4" />
                                       <geom pos="-0.00105 0.0002 0.0313" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.6 0.8 0.9 1" mesh="robot/left_finger1_tip_link" />
@@ -425,17 +425,17 @@
                                 <geom type="mesh" contype="0" conaffinity="0" rgba="0.7 0.7 0.7 1" mesh="robot/left_finger2_link1" />
                                 <body name="robot/left_finger2_link2" pos="0.0022 0 0.00400001" quat="0.707107 0 0 0.707107">
                                   <inertial pos="4.37869e-07 0.00615752 0.020911" quat="0.70703 0.0104245 0.0104245 0.70703" mass="0.033" diaginertia="6.34e-06 6.31472e-06 8.85281e-07" />
-                                  <joint name="robot/left_finger2_joint2" pos="0 0 0" axis="0 1 0" range="-0.37 0.37" actuatorfrcrange="-0.1822 0.1822" frictionloss="0" />
+                                  <joint name="robot/left_finger2_joint2" pos="0 0 0" axis="0 1 0" range="-0.37 0.37" actuatorfrcrange="-0.1822 0.1822" frictionloss="0" armature="0.0002" />
                                   <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.9 0.8 0.6 1" mesh="robot/left_finger2_link2" />
                                   <geom type="mesh" contype="2" conaffinity="2" rgba="0.9 0.8 0.6 1" mesh="robot/left_finger2_link2" />
                                   <body name="robot/left_finger2_link3" pos="0 0.00475 0.0436177" quat="0.707202 0 0 -0.707012">
                                     <inertial pos="-0.00112187 3.27619e-05 0.0157188" quat="0.999892 0 -0.0146884 0" mass="0.0165" diaginertia="1.47088e-06 1.44e-06 4.49118e-07" />
-                                    <joint name="robot/left_finger2_joint3" pos="0 0 0" axis="0 1 0" range="-0.4777 1.5485" actuatorfrcrange="-0.2251 0.2251" frictionloss="0" />
+                                    <joint name="robot/left_finger2_joint3" pos="0 0 0" axis="0 1 0" range="-0.4777 1.5485" actuatorfrcrange="-0.2251 0.2251" frictionloss="0" armature="0.0002" />
                                     <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.6 0.8 0.9 1" mesh="robot/left_finger2_link3" />
                                     <geom type="mesh" rgba="0.6 0.8 0.9 1" mesh="robot/left_finger2_link3" />
                                     <body name="robot/left_finger2_link4" pos="0 -0.0002 0.0295">
                                       <inertial pos="-0.000802981 -1.72016e-05 0.00761201" quat="0.998028 0.01288 -0.055568 0.0261826" mass="0.01718" diaginertia="1.55462e-06 1.45763e-06 4.20116e-07" />
-                                      <joint name="robot/left_finger2_joint4" pos="0 0 0" axis="0 1 0" range="-0.4683 1.5753" actuatorfrcrange="-0.217 0.217" frictionloss="0" />
+                                      <joint name="robot/left_finger2_joint4" pos="0 0 0" axis="0 1 0" range="-0.4683 1.5753" actuatorfrcrange="-0.217 0.217" frictionloss="0" armature="0.0002" />
                                       <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.6 0.8 0.9 1" mesh="robot/left_finger2_link4" />
                                       <geom type="mesh" rgba="0.6 0.8 0.9 1" mesh="robot/left_finger2_link4" />
                                       <geom pos="-0.0010521 0.000210869 0.0267" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.6 0.8 0.9 1" mesh="robot/left_finger2_tip_link" />
@@ -452,17 +452,17 @@
                                 <geom type="mesh" contype="0" conaffinity="0" rgba="0.7 0.7 0.7 1" mesh="robot/left_finger3_link1" />
                                 <body name="robot/left_finger3_link2" pos="0.0022 0 0.00400001" quat="0.707107 0 0 0.707107">
                                   <inertial pos="4.38062e-07 0.00615753 0.020911" quat="0.70703 0.0104245 0.0104245 0.70703" mass="0.033" diaginertia="6.34e-06 6.31472e-06 8.85281e-07" />
-                                  <joint name="robot/left_finger3_joint2" pos="0 0 0" axis="0 1 0" range="-0.37 0.37" actuatorfrcrange="-0.1827 0.1827" frictionloss="0" />
+                                  <joint name="robot/left_finger3_joint2" pos="0 0 0" axis="0 1 0" range="-0.37 0.37" actuatorfrcrange="-0.1827 0.1827" frictionloss="0" armature="0.0002" />
                                   <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.9 0.8 0.6 1" mesh="robot/left_finger3_link2" />
                                   <geom type="mesh" contype="2" conaffinity="2" rgba="0.9 0.8 0.6 1" mesh="robot/left_finger3_link2" />
                                   <body name="robot/left_finger3_link3" pos="0 0.00475 0.0436177" quat="0.707202 0 0 -0.707012">
                                     <inertial pos="-0.00112187 3.27807e-05 0.0157188" quat="0.999892 0 -0.0146884 0" mass="0.0165" diaginertia="1.47088e-06 1.44e-06 4.49118e-07" />
-                                    <joint name="robot/left_finger3_joint3" pos="0 0 0" axis="0 1 0" range="-0.4739 1.5512" actuatorfrcrange="-0.2078 0.2078" frictionloss="0" />
+                                    <joint name="robot/left_finger3_joint3" pos="0 0 0" axis="0 1 0" range="-0.4739 1.5512" actuatorfrcrange="-0.2078 0.2078" frictionloss="0" armature="0.0002" />
                                     <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.6 0.8 0.9 1" mesh="robot/left_finger3_link3" />
                                     <geom type="mesh" rgba="0.6 0.8 0.9 1" mesh="robot/left_finger3_link3" />
                                     <body name="robot/left_finger3_link4" pos="0 -0.0002 0.0295">
                                       <inertial pos="-0.000801449 -1.76824e-05 0.00761202" quat="0.998029 0.0129107 -0.0554603 0.026365" mass="0.01718" diaginertia="1.55458e-06 1.45766e-06 4.20206e-07" />
-                                      <joint name="robot/left_finger3_joint4" pos="0 0 0" axis="0 1 0" range="-0.4684 1.5745" actuatorfrcrange="-0.2018 0.2018" frictionloss="0" />
+                                      <joint name="robot/left_finger3_joint4" pos="0 0 0" axis="0 1 0" range="-0.4684 1.5745" actuatorfrcrange="-0.2018 0.2018" frictionloss="0" armature="0.0002" />
                                       <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.6 0.8 0.9 1" mesh="robot/left_finger3_link4" />
                                       <geom type="mesh" rgba="0.6 0.8 0.9 1" mesh="robot/left_finger3_link4" />
                                       <geom pos="-0.0010504 0.000202672 0.0267" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.6 0.8 0.9 1" mesh="robot/left_finger3_tip_link" />
@@ -479,17 +479,17 @@
                                 <geom type="mesh" contype="0" conaffinity="0" rgba="0.7 0.7 0.7 1" mesh="robot/left_finger4_link1" />
                                 <body name="robot/left_finger4_link2" pos="0.0022 0 0.00400001" quat="0.707107 0 0 0.707107">
                                   <inertial pos="4.36896e-07 0.00615754 0.020911" quat="0.70703 0.0104245 0.0104245 0.70703" mass="0.033" diaginertia="6.34e-06 6.31472e-06 8.85281e-07" />
-                                  <joint name="robot/left_finger4_joint2" pos="0 0 0" axis="0 1 0" range="-0.37 0.37" actuatorfrcrange="-0.1832 0.1832" frictionloss="0" />
+                                  <joint name="robot/left_finger4_joint2" pos="0 0 0" axis="0 1 0" range="-0.37 0.37" actuatorfrcrange="-0.1832 0.1832" frictionloss="0" armature="0.0002" />
                                   <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.9 0.8 0.6 1" mesh="robot/left_finger4_link2" />
                                   <geom type="mesh" contype="2" conaffinity="2" rgba="0.9 0.8 0.6 1" mesh="robot/left_finger4_link2" />
                                   <body name="robot/left_finger4_link3" pos="0 0.00475 0.0436177" quat="0.707202 0 0 -0.707012">
                                     <inertial pos="-0.00112188 3.27942e-05 0.0157188" quat="0.999892 0 -0.0146884 0" mass="0.0165" diaginertia="1.47088e-06 1.44e-06 4.49118e-07" />
-                                    <joint name="robot/left_finger4_joint3" pos="0 0 0" axis="0 1 0" range="-0.4765 1.5487" actuatorfrcrange="-0.2249 0.2249" frictionloss="0" />
+                                    <joint name="robot/left_finger4_joint3" pos="0 0 0" axis="0 1 0" range="-0.4765 1.5487" actuatorfrcrange="-0.2249 0.2249" frictionloss="0" armature="0.0002" />
                                     <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.6 0.8 0.9 1" mesh="robot/left_finger4_link3" />
                                     <geom type="mesh" rgba="0.6 0.8 0.9 1" mesh="robot/left_finger4_link3" />
                                     <body name="robot/left_finger4_link4" pos="0 -0.0002 0.0295">
                                       <inertial pos="-0.000801408 -1.86048e-05 0.00761203" quat="0.998025 0.012979 -0.0554598 0.0264871" mass="0.01718" diaginertia="1.55462e-06 1.45766e-06 4.20231e-07" />
-                                      <joint name="robot/left_finger4_joint4" pos="0 0 0" axis="0 1 0" range="-0.4777 1.5634" actuatorfrcrange="-0.2044 0.2044" frictionloss="0" />
+                                      <joint name="robot/left_finger4_joint4" pos="0 0 0" axis="0 1 0" range="-0.4777 1.5634" actuatorfrcrange="-0.2044 0.2044" frictionloss="0" armature="0.0002" />
                                       <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.6 0.8 0.9 1" mesh="robot/left_finger4_link4" />
                                       <geom type="mesh" rgba="0.6 0.8 0.9 1" mesh="robot/left_finger4_link4" />
                                       <geom pos="-0.00104998 0.000202557 0.0267" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.6 0.8 0.9 1" mesh="robot/left_finger4_tip_link" />
@@ -506,17 +506,17 @@
                                 <geom type="mesh" contype="0" conaffinity="0" rgba="0.7 0.7 0.7 1" mesh="robot/left_finger5_link1" />
                                 <body name="robot/left_finger5_link2" pos="0.0022 0 0.00400001" quat="0.707107 0 0 0.707107">
                                   <inertial pos="4.36753e-07 0.00615753 0.020911" quat="0.70703 0.0104245 0.0104245 0.70703" mass="0.033" diaginertia="6.34e-06 6.31472e-06 8.85281e-07" />
-                                  <joint name="robot/left_finger5_joint2" pos="0 0 0" axis="0 1 0" range="-0.37 0.37" actuatorfrcrange="-0.1798 0.1798" frictionloss="0" />
+                                  <joint name="robot/left_finger5_joint2" pos="0 0 0" axis="0 1 0" range="-0.37 0.37" actuatorfrcrange="-0.1798 0.1798" frictionloss="0" armature="0.0002" />
                                   <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.9 0.8 0.6 1" mesh="robot/left_finger5_link2" />
                                   <geom type="mesh" contype="2" conaffinity="2" rgba="0.9 0.8 0.6 1" mesh="robot/left_finger5_link2" />
                                   <body name="robot/left_finger5_link3" pos="0 0.00475 0.0436177" quat="0.707202 0 0 -0.707012">
                                     <inertial pos="-0.00112188 3.28067e-05 0.0157188" quat="0.999892 0 -0.0146884 0" mass="0.0165" diaginertia="1.47088e-06 1.44e-06 4.49118e-07" />
-                                    <joint name="robot/left_finger5_joint3" pos="0 0 0" axis="0 1 0" range="-0.4768 1.549" actuatorfrcrange="-0.2384 0.2384" frictionloss="0" />
+                                    <joint name="robot/left_finger5_joint3" pos="0 0 0" axis="0 1 0" range="-0.4768 1.549" actuatorfrcrange="-0.2384 0.2384" frictionloss="0" armature="0.0002" />
                                     <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.6 0.8 0.9 1" mesh="robot/left_finger5_link3" />
                                     <geom type="mesh" rgba="0.6 0.8 0.9 1" mesh="robot/left_finger5_link3" />
                                     <body name="robot/left_finger5_link4" pos="0 -0.0002 0.0295">
                                       <inertial pos="-0.000801156 -1.7469e-05 0.00761203" quat="0.998031 0.0128934 -0.0554374 0.0263611" mass="0.01718" diaginertia="1.55457e-06 1.45766e-06 4.20216e-07" />
-                                      <joint name="robot/left_finger5_joint4" pos="0 0 0" axis="0 1 0" range="-0.4683 1.5735" actuatorfrcrange="-0.1866 0.1866" frictionloss="0" />
+                                      <joint name="robot/left_finger5_joint4" pos="0 0 0" axis="0 1 0" range="-0.4683 1.5735" actuatorfrcrange="-0.1866 0.1866" frictionloss="0" armature="0.0002" />
                                       <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.6 0.8 0.9 1" mesh="robot/left_finger5_link4" />
                                       <geom type="mesh" rgba="0.6 0.8 0.9 1" mesh="robot/left_finger5_link4" />
                                       <geom pos="-0.00105041 0.000201047 0.0267" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.6 0.8 0.9 1" mesh="robot/left_finger5_tip_link" />
@@ -587,12 +587,12 @@
                                   <geom type="mesh" contype="2" conaffinity="2" rgba="0.9 0.8 0.6 1" mesh="robot/right_finger1_link2" />
                                   <body name="robot/right_finger1_link3" pos="-0.000266705 0.000991502 0.0346656" quat="0.815739 0.0150036 0.0212382 0.577836">
                                     <inertial pos="-0.00112353 -1.57896e-05 0.0130562" quat="0.999951 0 0.00989566 0" mass="0.0165" diaginertia="1.4604e-06 1.42e-06 4.49604e-07" />
-                                    <joint name="robot/right_finger1_joint3" pos="0 0 0" axis="0 1 0" range="-0.4642 1.5623" actuatorfrcrange="-0.1888 0.1888" frictionloss="0" />
+                                    <joint name="robot/right_finger1_joint3" pos="0 0 0" axis="0 1 0" range="-0.4642 1.5623" actuatorfrcrange="-0.1888 0.1888" frictionloss="0" armature="0.0002" />
                                     <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.6 0.8 0.9 1" mesh="robot/right_finger1_link3" />
                                     <geom type="mesh" rgba="0.6 0.8 0.9 1" mesh="robot/right_finger1_link3" />
                                     <body name="robot/right_finger1_link4" pos="0 0.0002 0.0295">
                                       <inertial pos="-0.00163662 -0.000195004 0.0113477" quat="0.705265 -0.0511723 -0.0492473 0.705378" mass="0.0206" diaginertia="2.60181e-06 2.58203e-06 7.59817e-07" />
-                                      <joint name="robot/right_finger1_joint4" pos="0 0 0" axis="0 1 0" range="-0.4699 1.5568" actuatorfrcrange="-0.1468 0.1468" frictionloss="0" />
+                                      <joint name="robot/right_finger1_joint4" pos="0 0 0" axis="0 1 0" range="-0.4699 1.5568" actuatorfrcrange="-0.1468 0.1468" frictionloss="0" armature="0.0002" />
                                       <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.6 0.8 0.9 1" mesh="robot/right_finger1_link4" />
                                       <geom type="mesh" rgba="0.6 0.8 0.9 1" mesh="robot/right_finger1_link4" />
                                       <geom pos="-0.00105 -0.0002 0.0313" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.6 0.8 0.9 1" mesh="robot/right_finger1_tip_link" />
@@ -609,17 +609,17 @@
                                 <geom type="mesh" contype="0" conaffinity="0" rgba="0.7 0.7 0.7 1" mesh="robot/right_finger2_link1" />
                                 <body name="robot/right_finger2_link2" pos="0.0022 0 0.00400001" quat="0.707107 0 0 0.707107">
                                   <inertial pos="-4.1182e-07 0.00615772 0.0209112" quat="0.70703 0.0104245 0.0104245 0.70703" mass="0.033" diaginertia="6.34e-06 6.31472e-06 8.85281e-07" />
-                                  <joint name="robot/right_finger2_joint2" pos="0 0 0" axis="0 1 0" range="-0.37 0.37" actuatorfrcrange="-0.1822 0.1822" frictionloss="0" />
+                                  <joint name="robot/right_finger2_joint2" pos="0 0 0" axis="0 1 0" range="-0.37 0.37" actuatorfrcrange="-0.1822 0.1822" frictionloss="0" armature="0.0002" />
                                   <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.9 0.8 0.6 1" mesh="robot/right_finger2_link2" />
                                   <geom type="mesh" contype="2" conaffinity="2" rgba="0.9 0.8 0.6 1" mesh="robot/right_finger2_link2" />
                                   <body name="robot/right_finger2_link3" pos="0 0.00475028 0.0436177" quat="0.707012 0 0 -0.707202">
                                     <inertial pos="-0.00112142 4.36128e-06 0.0157628" quat="0.999892 0 -0.0146884 0" mass="0.0165" diaginertia="1.47088e-06 1.44e-06 4.49118e-07" />
-                                    <joint name="robot/right_finger2_joint3" pos="0 0 0" axis="0 1 0" range="-0.4777 1.5485" actuatorfrcrange="-0.2251 0.2251" frictionloss="0" />
+                                    <joint name="robot/right_finger2_joint3" pos="0 0 0" axis="0 1 0" range="-0.4777 1.5485" actuatorfrcrange="-0.2251 0.2251" frictionloss="0" armature="0.0002" />
                                     <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.6 0.8 0.9 1" mesh="robot/right_finger2_link3" />
                                     <geom type="mesh" rgba="0.6 0.8 0.9 1" mesh="robot/right_finger2_link3" />
                                     <body name="robot/right_finger2_link4" pos="0 -0.0002 0.0295">
                                       <inertial pos="-0.000803077 -1.67703e-05 0.00770942" quat="0.998113 0.0132268 -0.0537103 0.0266451" mass="0.01718" diaginertia="1.58809e-06 1.49171e-06 4.20573e-07" />
-                                      <joint name="robot/right_finger2_joint4" pos="0 0 0" axis="0 1 0" range="-0.4683 1.5753" actuatorfrcrange="-0.217 0.217" frictionloss="0" />
+                                      <joint name="robot/right_finger2_joint4" pos="0 0 0" axis="0 1 0" range="-0.4683 1.5753" actuatorfrcrange="-0.217 0.217" frictionloss="0" armature="0.0002" />
                                       <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.6 0.8 0.9 1" mesh="robot/right_finger2_link4" />
                                       <geom type="mesh" rgba="0.6 0.8 0.9 1" mesh="robot/right_finger2_link4" />
                                       <geom pos="-0.00105 0.0002 0.0267" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.6 0.8 0.9 1" mesh="robot/right_finger2_tip_link" />
@@ -636,17 +636,17 @@
                                 <geom type="mesh" contype="0" conaffinity="0" rgba="0.7 0.7 0.7 1" mesh="robot/right_finger3_link1" />
                                 <body name="robot/right_finger3_link2" pos="0.0022 0 0.00400001" quat="0.707107 0 0 0.707107">
                                   <inertial pos="-4.16442e-07 0.00615758 0.0209112" quat="0.70703 0.0104245 0.0104245 0.70703" mass="0.033" diaginertia="6.34e-06 6.31472e-06 8.85281e-07" />
-                                  <joint name="robot/right_finger3_joint2" pos="0 0 0" axis="0 1 0" range="-0.37 0.37" actuatorfrcrange="-0.1827 0.1827" frictionloss="0" />
+                                  <joint name="robot/right_finger3_joint2" pos="0 0 0" axis="0 1 0" range="-0.37 0.37" actuatorfrcrange="-0.1827 0.1827" frictionloss="0" armature="0.0002" />
                                   <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.9 0.8 0.6 1" mesh="robot/right_finger3_link2" />
                                   <geom type="mesh" contype="2" conaffinity="2" rgba="0.9 0.8 0.6 1" mesh="robot/right_finger3_link2" />
                                   <body name="robot/right_finger3_link3" pos="0 0.00475 0.0436177" quat="0.707012 0 0 -0.707202">
                                     <inertial pos="-0.00112142 4.33099e-06 0.0157628" quat="0.999892 0 -0.0146884 0" mass="0.0165" diaginertia="1.47088e-06 1.44e-06 4.49118e-07" />
-                                    <joint name="robot/right_finger3_joint3" pos="0 0 0" axis="0 1 0" range="-0.4739 1.5512" actuatorfrcrange="-0.2078 0.2078" frictionloss="0" />
+                                    <joint name="robot/right_finger3_joint3" pos="0 0 0" axis="0 1 0" range="-0.4739 1.5512" actuatorfrcrange="-0.2078 0.2078" frictionloss="0" armature="0.0002" />
                                     <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.6 0.8 0.9 1" mesh="robot/right_finger3_link3" />
                                     <geom type="mesh" rgba="0.6 0.8 0.9 1" mesh="robot/right_finger3_link3" />
                                     <body name="robot/right_finger3_link4" pos="0 -0.0002 0.0295">
                                       <inertial pos="-0.000801144 -1.7052e-05 0.00761196" quat="0.998033 0.0128625 -0.0554378 0.0263073" mass="0.01718" diaginertia="1.55453e-06 1.45763e-06 4.20205e-07" />
-                                      <joint name="robot/right_finger3_joint4" pos="0 0 0" axis="0 1 0" range="-0.4684 1.5745" actuatorfrcrange="-0.2018 0.2018" frictionloss="0" />
+                                      <joint name="robot/right_finger3_joint4" pos="0 0 0" axis="0 1 0" range="-0.4684 1.5745" actuatorfrcrange="-0.2018 0.2018" frictionloss="0" armature="0.0002" />
                                       <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.6 0.8 0.9 1" mesh="robot/right_finger3_link4" />
                                       <geom type="mesh" rgba="0.6 0.8 0.9 1" mesh="robot/right_finger3_link4" />
                                       <geom pos="-0.00104909 0.00020104 0.0267" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.6 0.8 0.9 1" mesh="robot/right_finger3_tip_link" />
@@ -663,17 +663,17 @@
                                 <geom type="mesh" contype="0" conaffinity="0" rgba="0.7 0.7 0.7 1" mesh="robot/right_finger4_link1" />
                                 <body name="robot/right_finger4_link2" pos="0.0022 0 0.00400001" quat="0.707107 0 0 0.707107">
                                   <inertial pos="-4.16197e-07 0.00615758 0.0209112" quat="0.70703 0.0104245 0.0104245 0.70703" mass="0.033" diaginertia="6.34e-06 6.31472e-06 8.85281e-07" />
-                                  <joint name="robot/right_finger4_joint2" pos="0 0 0" axis="0 1 0" range="-0.37 0.37" actuatorfrcrange="-0.1832 0.1832" frictionloss="0" />
+                                  <joint name="robot/right_finger4_joint2" pos="0 0 0" axis="0 1 0" range="-0.37 0.37" actuatorfrcrange="-0.1832 0.1832" frictionloss="0" armature="0.0002" />
                                   <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.9 0.8 0.6 1" mesh="robot/right_finger4_link2" />
                                   <geom type="mesh" contype="2" conaffinity="2" rgba="0.9 0.8 0.6 1" mesh="robot/right_finger4_link2" />
                                   <body name="robot/right_finger4_link3" pos="0 0.00475 0.0436177" quat="0.707012 0 0 -0.707202">
                                     <inertial pos="-0.00112141 4.34937e-06 0.0157628" quat="0.999892 0 -0.0146884 0" mass="0.0165" diaginertia="1.47088e-06 1.44e-06 4.49118e-07" />
-                                    <joint name="robot/right_finger4_joint3" pos="0 0 0" axis="0 1 0" range="-0.4765 1.5487" actuatorfrcrange="-0.2249 0.2249" frictionloss="0" />
+                                    <joint name="robot/right_finger4_joint3" pos="0 0 0" axis="0 1 0" range="-0.4765 1.5487" actuatorfrcrange="-0.2249 0.2249" frictionloss="0" armature="0.0002" />
                                     <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.6 0.8 0.9 1" mesh="robot/right_finger4_link3" />
                                     <geom type="mesh" rgba="0.6 0.8 0.9 1" mesh="robot/right_finger4_link3" />
                                     <body name="robot/right_finger4_link4" pos="0 -0.0002 0.0295">
                                       <inertial pos="-0.000801413 -2.37496e-05 0.00770949" quat="0.998083 0.0137537 -0.0536109 0.0276923" mass="0.01718" diaginertia="1.58832e-06 1.49181e-06 4.20836e-07" />
-                                      <joint name="robot/right_finger4_joint4" pos="0 0 0" axis="0 1 0" range="-0.4777 1.5634" actuatorfrcrange="-0.2044 0.2044" frictionloss="0" />
+                                      <joint name="robot/right_finger4_joint4" pos="0 0 0" axis="0 1 0" range="-0.4777 1.5634" actuatorfrcrange="-0.2044 0.2044" frictionloss="0" armature="0.0002" />
                                       <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.6 0.8 0.9 1" mesh="robot/right_finger4_link4" />
                                       <geom type="mesh" rgba="0.6 0.8 0.9 1" mesh="robot/right_finger4_link4" />
                                       <geom pos="-0.00105961 0.000190451 0.0267" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.6 0.8 0.9 1" mesh="robot/right_finger4_tip_link" />
@@ -690,17 +690,17 @@
                                 <geom type="mesh" contype="0" conaffinity="0" rgba="0.7 0.7 0.7 1" mesh="robot/right_finger5_link1" />
                                 <body name="robot/right_finger5_link2" pos="0.0022 0 0.00400001" quat="0.707107 0 0 0.707107">
                                   <inertial pos="-4.14939e-07 0.00615759 0.0209112" quat="0.70703 0.0104245 0.0104245 0.70703" mass="0.033" diaginertia="6.34e-06 6.31472e-06 8.85281e-07" />
-                                  <joint name="robot/right_finger5_joint2" pos="0 0 0" axis="0 1 0" range="-0.37 0.37" actuatorfrcrange="-0.1798 0.1798" frictionloss="0" />
+                                  <joint name="robot/right_finger5_joint2" pos="0 0 0" axis="0 1 0" range="-0.37 0.37" actuatorfrcrange="-0.1798 0.1798" frictionloss="0" armature="0.0002" />
                                   <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.9 0.8 0.6 1" mesh="robot/right_finger5_link2" />
                                   <geom type="mesh" contype="2" conaffinity="2" rgba="0.9 0.8 0.6 1" mesh="robot/right_finger5_link2" />
                                   <body name="robot/right_finger5_link3" pos="0 0.00475 0.0436177" quat="0.707012 0 0 -0.707202">
                                     <inertial pos="-0.00112141 4.37031e-06 0.0157628" quat="0.999892 0 -0.0146884 0" mass="0.0165" diaginertia="1.47088e-06 1.44e-06 4.49118e-07" />
-                                    <joint name="robot/right_finger5_joint3" pos="0 0 0" axis="0 1 0" range="-0.4768 1.549" actuatorfrcrange="-0.2384 0.2384" frictionloss="0" />
+                                    <joint name="robot/right_finger5_joint3" pos="0 0 0" axis="0 1 0" range="-0.4768 1.549" actuatorfrcrange="-0.2384 0.2384" frictionloss="0" armature="0.0002" />
                                     <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.6 0.8 0.9 1" mesh="robot/right_finger5_link3" />
                                     <geom type="mesh" rgba="0.6 0.8 0.9 1" mesh="robot/right_finger5_link3" />
                                     <body name="robot/right_finger5_link4" pos="0 -0.0002 0.0295">
                                       <inertial pos="-0.000805572 -1.62002e-05 0.0077094" quat="0.998111 0.0131911 -0.0538918 0.0263751" mass="0.01718" diaginertia="1.58815e-06 1.49167e-06 4.20431e-07" />
-                                      <joint name="robot/right_finger5_joint4" pos="0 0 0" axis="0 1 0" range="-0.4683 1.5735" actuatorfrcrange="-0.1866 0.1866" frictionloss="0" />
+                                      <joint name="robot/right_finger5_joint4" pos="0 0 0" axis="0 1 0" range="-0.4683 1.5735" actuatorfrcrange="-0.1866 0.1866" frictionloss="0" armature="0.0002" />
                                       <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.6 0.8 0.9 1" mesh="robot/right_finger5_link4" />
                                       <geom type="mesh" rgba="0.6 0.8 0.9 1" mesh="robot/right_finger5_link4" />
                                       <geom pos="-0.00104464 0.00021131 0.0267" type="mesh" contype="0" conaffinity="0" group="1" density="0" rgba="0.6 0.8 0.9 1" mesh="robot/right_finger5_tip_link" />

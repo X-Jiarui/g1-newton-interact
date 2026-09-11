@@ -474,12 +474,34 @@ if A.profile_step:
   for _ in range(_N):
     _tick("action_manager.advance", lambda: _e.action_manager.advance(_act))
     _tick("action_term.process", lambda: _e.action_term.process_actions(_act))
+    # `contacts=None` is only valid when MuJoCo owns collision. On the native path the contacts
+    # come from Newton's CollisionPipeline, and passing None here raised
+    # `NoneType has no attribute rigid_contact_max` from inside solver.step -- the fifth
+    # `solver.step` call site, and the one `_physics_step`'s docstring warns about.
+    #
+    # Splitting collide from step is the point of profiling this at all: the two answer different
+    # questions. Collision cost scales with object triangles and env count; solver cost scales with
+    # the constraint count the contacts produce. Which one dominates decides whether decimating
+    # meshes further is worth anything.
+    _pipe = getattr(_e, "collision_pipeline", None)
+
     def _phys():
       for _ in range(_e.decimation):
         _e.action_term.apply_actions()
-        _e.solver.step(_e.state_in, _e.state_out, _e.control, None, _e.physics_dt)
+        if _pipe is not None:
+          _e._sync_body_q_from_mujoco()
+          _pipe.collide(_e.state_in, _e.contacts)
+        _e.solver.step(_e.state_in, _e.state_out, _e.control,
+                       _e.contacts if _pipe is not None else None, _e.physics_dt)
         _e.state_in, _e.state_out = _e.state_out, _e.state_in
     _tick("physics (decimation loop)", _phys)
+
+    if _pipe is not None:
+      def _phys_collide():
+        for _ in range(_e.decimation):
+          _e._sync_body_q_from_mujoco()
+          _pipe.collide(_e.state_in, _e.contacts)
+      _tick("  of which collide()", _phys_collide)
     def _phys_apply():
       for _ in range(_e.decimation):
         _e.action_term.apply_actions()
