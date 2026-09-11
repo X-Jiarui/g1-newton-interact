@@ -26,9 +26,14 @@ set -u
 
 SSH_PORT=${SSH_PORT:-45219}
 SSH_HOST=${SSH_HOST:-root@211.72.13.202}
-CKPT_ROOT=${CKPT_ROOT:-/workspace/g1-newton-interact/logs/rsl_rl/g1_residual_interact}
-LOG_DIRS=${LOG_DIRS:-/workspace/logs_r32}
-DEST=${DEST:-$HOME/Documents/g1-newton-interact/ckpt_backup}
+# Every checkout on the box that trains. A second one (g1-eigen) appeared for the hand-prior work and
+# its runs -- ABS_VAE, the best MIX8 result at the time -- were never covered by a single-root sweep.
+CKPT_ROOTS=${CKPT_ROOTS:-/workspace/g1-newton-interact/logs/rsl_rl/g1_residual_interact /workspace/g1-eigen/logs/rsl_rl/g1_residual_interact}
+LOG_DIRS=${LOG_DIRS:-/workspace/logs_r32 /workspace/logs_eigen /workspace/logs_v}
+# NOT under ~/Documents. macOS privacy protection (TCC) denies a launchd-spawned bash access to
+# ~/Documents, so with the script and its log there the agent exited 78 before writing a single
+# line -- and nothing was backed up from 2026-09-05 onward while it looked scheduled and healthy.
+DEST=${DEST:-$HOME/ckpt_backup}
 # 6 h, not 24: the box clock ran ~20 h behind the Mac's at the time of writing, so a 24 h window
 # swept in four dead rounds (R26/R28/R29/R30) alongside the live one. The link is ~130 KB/s, so
 # each extra run costs ~8 minutes of a sweep that has to finish inside its own interval.
@@ -45,16 +50,16 @@ fi
 rm -rf "$LOCK"; mkdir -p "$LOCK"
 trap 'rm -rf "$LOCK"' EXIT
 stamp() { date "+%Y-%m-%d %H:%M:%S"; }
-echo "[$(stamp)] pulling from $SSH_HOST:$CKPT_ROOT -> $DEST"
+echo "[$(stamp)] pulling from $SSH_HOST:{$CKPT_ROOTS} -> $DEST"
 
 # One remote call decides the whole work list: newest model_*.pt per run, recent ones only.
 # `-mmin` rather than a parsed mtime so the filtering happens where the files are.
 list=$($SSH "$SSH_HOST" "
-  for d in $CKPT_ROOT/*/; do
+  for root in $CKPT_ROOTS; do for d in \$root/*/; do
     f=\$(ls -t \"\$d\"model_*.pt 2>/dev/null | head -1)
     [ -n \"\$f\" ] || continue
     find \"\$f\" -mmin -$((MAX_AGE_H * 60)) -print 2>/dev/null
-  done
+  done; done
 " 2>/dev/null | grep -avE "^Welcome|^Have fun|AI agents:")
 
 if [ -z "$list" ]; then
