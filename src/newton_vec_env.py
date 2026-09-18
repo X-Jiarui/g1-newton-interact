@@ -393,6 +393,77 @@ class NewtonVecEnv:
         # mesh survived only as a visual. Verified by shape_source vertex counts, not by the log
         # line -- which cheerfully claimed the object kept its real geometry either way.
         _keep_real = ("_sdf",)
+
+        # HAND_HYDRO: put the HAND on the same representation as the object, via SDF rather than
+        # via convex pieces. The two routes are mutually exclusive per shape and Newton enforces
+        # it -- `approximate_meshes` raises on any shape carrying SDF/hydro state, because those
+        # methods retype away from MESH and the SDF "would be silently dropped at finalize". So a
+        # hydroelastic hand must NOT be hulled, and is excluded below.
+        #
+        # Mixing is not merely inelegant, it is violent: `flag_hydroelastic`'s own docstring
+        # records what happened when only the object was flagged and the table was left rigid --
+        # the stapler stood itself upright around step 110 with nothing touching it, was ejected by
+        # 135, and went partly non-finite in between. Refuse the mixed configuration outright.
+        # Measurement only. HAND_NOCOLLIDE=1 clears COLLIDE_SHAPES on every hand collider: the
+        # hands still move and are still actuated, they simply take part in no contact. It exists to
+        # answer one question -- how much of the wall clock is the hands' contact -- and a policy
+        # cannot grasp in this configuration, so it must never be used for a training run.
+        if os.environ.get("HAND_NOCOLLIDE", "").strip() not in ("", "0"):
+          _CC = int(newton.ShapeFlags.COLLIDE_SHAPES)
+          _hk = ("finger", "thumb", "palm", "hand", "wrist")
+          _off = [i for i in range(len(scene.shape_flags))
+                  if int(scene.shape_flags[i]) & _CC
+                  and any(k in (scene.shape_label[i] or "").lower() for k in _hk)]
+          if not _off:
+            raise RuntimeError("HAND_NOCOLLIDE matched no hand collider; the measurement would be "
+                               "of an unchanged scene")
+          for _i in _off:
+            scene.shape_flags[_i] = int(scene.shape_flags[_i]) & ~_CC
+          print(f"[newton-env] HAND_NOCOLLIDE: {len(_off)} hand colliders taken out of contact "
+                "(MEASUREMENT ONLY -- no grasp is possible)", flush=True)
+          # The hand contact parameters describe contacts that no longer exist, and each of them
+          # guards itself by refusing to match nothing. Drop them here rather than at the command
+          # line: the config loader treats an empty value as unset and restores it from best.yaml.
+          for _k in ("HAND_SOLREF", "HAND_SOLIMP", "HAND_FRICTION", "PEN_LOG"):
+            if os.environ.pop(_k, None) is not None:
+              print(f"[newton-env] HAND_NOCOLLIDE: dropped {_k} (no hand contact to apply it to)",
+                    flush=True)
+
+        _hand_hydro = os.environ.get("HAND_HYDRO", "").strip() not in ("", "0")
+        _hand_sdf_shapes: list[int] = []
+        if _hand_hydro:
+          if not (native_contacts and hydro_object_table):
+            raise RuntimeError(
+              "HAND_HYDRO needs --native-contacts and hydroelastic object/table (drop "
+              "--rigid-object-table). Hydroelastic contact is defined between two hydroelastic "
+              "surfaces; flagging one side only injects a large impulse.")
+          _hand_keys = ("finger", "thumb", "palm", "hand", "wrist")
+          _hand_sdf_shapes = [i for i in range(len(scene.shape_type))
+                              if int(scene.shape_type[i]) == int(newton.GeoType.MESH)
+                              and int(scene.shape_flags[i]) & _C
+                              and not any(k in (scene.shape_label[i] or "").lower()
+                                          for k in _keep_real)
+                              and any(k in (scene.shape_label[i] or "").lower()
+                                      for k in _hand_keys)]
+          if not _hand_sdf_shapes:
+            raise RuntimeError("HAND_HYDRO matched no hand mesh collider; nothing would change "
+                               "and the run would silently train on the old representation")
+          # Resolution matters more here than for the object: the sparse grid is allocated PER
+          # WORLD, and this is 40-odd grids per world instead of one. The official recipe (band
+          # +-0.01, margin == gap) is what fit 2048 worlds for a single object; leave room to dial
+          # it down from the outside before assuming it fits for the hand.
+          _hres = int(os.environ.get("HAND_SDF_RES", "32"))
+          _hgap = float(os.environ.get("SHAPE_GAP", "0.01") or 0.01)
+          for _i in _hand_sdf_shapes:
+            _src = scene.shape_source[_i]
+            if _src is None or not hasattr(_src, "build_sdf"):
+              raise RuntimeError(f"hand shape {_i} ({scene.shape_label[_i]}) has no mesh source to "
+                                 f"build an SDF on")
+            _src.build_sdf(max_resolution=_hres, narrow_band_range=(-0.01, 0.01), margin=_hgap)
+            scene.shape_flags[_i] |= _H
+          print(f"[newton-env] HAND_HYDRO: {len(_hand_sdf_shapes)} hand collider(s) given an SDF "
+                f"at res {_hres} and flagged hydroelastic; they are NOT convex-hulled")
+
         _to_hull = [i for i in range(len(scene.shape_type))
                     if int(scene.shape_type[i]) == int(newton.GeoType.MESH)
                     and int(scene.shape_flags[i]) & _C
@@ -406,6 +477,54 @@ class NewtonVecEnv:
                    and int(scene.shape_flags[i]) & _C and i not in _to_hull]
           print(f"[newton-env] convex-hulled {len(_done)} of {len(_to_hull)} robot mesh collider(s); "
                 f"kept as real meshes: {_kept}")
+
+        # OBJECT_VHACD: make the two sides of the grasp the SAME representation.
+        #
+        # Newton's midphase pairs one MESH TRIANGLE with one CONVEX shape -- collision_core.py
+        # calls it "mesh vs convex shape midphase", and the buffer entry is
+        # (mesh_shape, non_mesh_shape, tri_index). So the triangle-pair count is
+        # (object triangles near a hand hull) x (hand hulls overlapping), and the hand contributes
+        # NOTHING to it: the hull pass above already retyped all 65 robot colliders to CONVEX_MESH,
+        # which the kernel handles as a support map.
+        #
+        # The object is the only collider left typed MESH -- excluded by name, to keep its real
+        # geometry -- which makes it the sole source of every triangle pair we have ever
+        # overflowed. Decomposing it into convex pieces removes the mesh side of the pair
+        # entirely; the buffer is then never touched, at any object resolution.
+        #
+        # The cost is one-sided and must be measured per object, not assumed: a union of convex
+        # hulls only ever ADDS material. Surveyed at 64 hulls, volume comes out 5.6-14.9% over the
+        # original with the surface bulging 3.6-5.2 mm at worst and 0.03-0.12 mm on average --
+        # better mean than the 2000-triangle decimation, worse maximum, and erring outward, so the
+        # hand meets the object early rather than passing through it.
+        _vh = os.environ.get("OBJECT_VHACD", "").strip()
+        if _vh and _vh not in ("0", ""):
+          _hulls = int(_vh)
+          _obj_sh = [i for i in range(len(scene.shape_type))
+                     if int(scene.shape_type[i]) == int(newton.GeoType.MESH)
+                     and int(scene.shape_flags[i]) & _C
+                     and any(k in (scene.shape_label[i] or "").lower() for k in _keep_real)]
+          if not _obj_sh:
+            raise RuntimeError("OBJECT_VHACD set but no MESH collider matched the object/table "
+                               "names; nothing would be decomposed and the run would silently "
+                               "train on the old representation")
+          _before = len(scene.shape_type)
+          _dec = scene.approximate_meshes(method="vhacd", shape_indices=_obj_sh,
+                                          keep_visual_shapes=True, raise_on_failure=True,
+                                          maxConvexHulls=_hulls)
+          _still_mesh = [scene.shape_label[i].split("/")[-1]
+                         for i in range(len(scene.shape_type))
+                         if int(scene.shape_type[i]) == int(newton.GeoType.MESH)
+                         and int(scene.shape_flags[i]) & _C]
+          print(f"[newton-env] OBJECT_VHACD {_hulls}: decomposed {len(_dec)} of {len(_obj_sh)} "
+                f"object/table collider(s); shapes {_before} -> {len(scene.shape_type)}; "
+                f"colliders still typed MESH: {_still_mesh or 'none'}")
+          # The whole point is that no collider is left as a triangle soup. Say so loudly if one
+          # is: a single surviving MESH keeps the triangle-pair path alive and the run would look
+          # like the decomposition did nothing.
+          if _still_mesh:
+            print(f"[newton-env] WARNING: {len(_still_mesh)} collider(s) still typed MESH, so the "
+                  f"mesh-vs-convex midphase is still live: {_still_mesh}")
       return scene
 
     world = newton.ModelBuilder()
@@ -703,6 +822,12 @@ class NewtonVecEnv:
     # every step -- silently truncating the very contact sensors the grasp rewards gate on.
     _mm = int(getattr(getattr(cfg, "sim", None), "contact_sensor_maxmatch", 0) or 0)
     _mm = max(_mm, 256 if native_contacts else 64)
+    # Convex decomposition raises this requirement, and it is the binding cost of a high hull
+    # count -- not memory, and not the narrow phase. Each piece is its own geom, so every contact
+    # sensor has that many more geoms to match: measured on the hammer at 1024 env, 32 hulls fits
+    # inside 256 while 128 hulls asked for 311 and 256 hulls for 525. Over the budget the sensors
+    # are TRUNCATED, which is the same silent failure described above.
+    _mm = max(_mm, int(os.environ.get("CONTACT_MAXMATCH", "0") or 0))
     self.solver.mjw_model.opt.contact_sensor_maxmatch = _mm
     print(f"[newton-env] contact_sensor_maxmatch = {_mm}")
 
@@ -859,6 +984,103 @@ class NewtonVecEnv:
           f"{sorted(_got)} N*m). The entity spec is cached, so the cfg value is printed but never "
           f"simulated. Use FINGER_FORCE_LIMIT={_ahe} instead, which writes mj_model and mjw_model "
           f"directly.")
+
+    # What the COMPILED model actually holds for the hand, printed every run.
+    #
+    # APPLE_HAND_KP / KD / EFFORT are set on one BuiltinPositionActuatorCfg, and EFFORT is already
+    # known not to survive to the model: the entity spec is cached, so a run prints its new limit
+    # and simulates the old one, which is the whole reason FINGER_FORCE_LIMIT exists. KP and KD sit
+    # in the same block, so "the cfg says 10" proves nothing about what is being integrated. Read
+    # it off mj_model instead of trusting the config, and say it out loud, because a stiffness
+    # sweep whose independent variable never moved is indistinguishable from a stiffness sweep
+    # that found no effect.
+    try:
+      import mujoco as _mjk
+      _mk = self.solver.mj_model
+      _fa = [_a for _a in range(_mk.nu)
+             if "finger" in (_mjk.mj_id2name(_mk, _mjk.mjtObj.mjOBJ_JOINT,
+                                             int(_mk.actuator_trnid[_a][0])) or "")
+             and float(_mk.actuator_gainprm[_a][0]) >= 1.0]
+      if _fa:
+        _kp = sorted({round(float(_mk.actuator_gainprm[_a][0]), 4) for _a in _fa})
+        _kd = sorted({round(float(-_mk.actuator_biasprm[_a][2]), 4) for _a in _fa})
+        _ef = sorted({round(float(_mk.actuator_forcerange[_a][1]), 4) for _a in _fa})
+        _want = os.environ.get("APPLE_HAND_KP", "")
+        _note = ""
+        if _want and all(abs(v - float(_want)) > 1e-6 for v in _kp):
+          _note = (f"  <-- APPLE_HAND_KP={_want} did NOT reach the model; the entity spec is "
+                   f"cached, so this run simulates {_kp}")
+        print(f"[newton-env] compiled hand actuators: n={len(_fa)} kp={_kp} kd={_kd} "
+              f"effort={_ef}{_note}", flush=True)
+    except Exception as _e:
+      print(f"[newton-env] could not read compiled hand gains: {type(_e).__name__}: {_e}", flush=True)
+
+    # HAND_PD: hand stiffness and damping, written into the model rather than the cfg.
+    #
+    # APPLE_HAND_KP / KD go through BuiltinPositionActuatorCfg, whose entity spec is cached, so the
+    # compiled model keeps 300 / 8 whatever the environment says -- measured, not suspected. Three
+    # stiffness arms were run and reported "no difference" while simulating the identical hand.
+    # The sibling knob APPLE_HAND_EFFORT already had a guard for exactly this and its comment
+    # already recorded a wasted A/B; that was not enough to stop it happening again, so this writes
+    # the model directly the way FINGER_FORCE_LIMIT does.
+    #
+    # For a MuJoCo position servo: torque = gainprm[0]*ctrl + biasprm[1]*qpos + biasprm[2]*qvel,
+    # so kp lives in gainprm[0] AND biasprm[1] (as -kp), and kd in biasprm[2] (as -kd). Writing
+    # gainprm alone leaves the position feedback at the old gain and produces a servo that pulls
+    # toward the wrong place with the wrong strength.
+    _hpd = os.environ.get("HAND_PD", "").strip()
+    if _hpd:
+      import mujoco as _mjp
+      _kp_s, _, _kd_s = _hpd.partition(",")
+      _kpv, _kdv = float(_kp_s), float(_kd_s)
+      _mp = self.solver.mj_model
+      _sel = [_a for _a in range(_mp.nu)
+              if "finger" in (_mjp.mj_id2name(_mp, _mjp.mjtObj.mjOBJ_JOINT,
+                                              int(_mp.actuator_trnid[_a][0])) or "")
+              and float(_mp.actuator_gainprm[_a][0]) >= 1.0]
+      if not _sel:
+        raise RuntimeError("HAND_PD matched no finger actuator")
+      _was = (sorted({round(float(_mp.actuator_gainprm[_a][0]), 3) for _a in _sel}),
+              sorted({round(float(-_mp.actuator_biasprm[_a][2]), 3) for _a in _sel}))
+      for _a in _sel:
+        _mp.actuator_gainprm[_a][0] = _kpv
+        _mp.actuator_biasprm[_a][1] = -_kpv
+        _mp.actuator_biasprm[_a][2] = -_kdv
+      _s1 = _push("actuator_gainprm", _mp.actuator_gainprm)
+      _s2 = _push("actuator_biasprm", _mp.actuator_biasprm)
+      _got = sorted({round(float(_mp.actuator_gainprm[_a][0]), 3) for _a in _sel})
+      if any(abs(v - _kpv) > 1e-6 for v in _got):
+        raise RuntimeError(f"HAND_PD wrote kp={_kpv} but the model holds {_got}")
+      print(f"[newton-env] HAND_PD kp={_kpv} kd={_kdv} on {len(_sel)} finger actuator(s) "
+            f"(was kp={_was[0]} kd={_was[1]}); mjw {_s1} {_s2}", flush=True)
+
+    # HAND_ARMATURE: the finger joints' reflected rotor inertia, written into the model.
+    #
+    # It belongs here rather than in the XML because it is one leg of a coupled triple. A PD gain
+    # means nothing alone: what the joint actually does is set by (kp, kd, armature) together, and
+    # the damping ratio is kd / (2*sqrt(kp*I)). CoorDex -- the one published RL work on this same
+    # G1 + 20-DoF Wuji hand, in IsaacLab -- ships 10 / 0.2 / 0.001, which is exactly zeta = 1.0000.
+    # Ours was 300 / 8 / 0.01, zeta 16, and the 0.01 was not chosen at all: it is the G1 body class
+    # default that the grafted hand fell through to, 50x the vendor's own 0.0002.
+    #
+    # Writing it here also keeps a run's identity in its environment instead of in whichever
+    # revision of the XML happened to be on disk.
+    _harm = os.environ.get("HAND_ARMATURE", "").strip()
+    if _harm:
+      import mujoco as _mjh
+      _mmh = self.solver.mj_model
+      _v = float(_harm)
+      _js = [_j for _j in range(_mmh.njnt)
+             if "finger" in (_mjh.mj_id2name(_mmh, _mjh.mjtObj.mjOBJ_JOINT, _j) or "")
+             or "thumb" in (_mjh.mj_id2name(_mmh, _mjh.mjtObj.mjOBJ_JOINT, _j) or "")]
+      if not _js:
+        raise RuntimeError("HAND_ARMATURE matched no finger joint")
+      _before = sorted({round(float(_mmh.dof_armature[int(_mmh.jnt_dofadr[_j])]), 6) for _j in _js})
+      for _j in _js:
+        _mmh.dof_armature[int(_mmh.jnt_dofadr[_j])] = _v
+      _push_arm = _push("dof_armature", _mmh.dof_armature)
+      print(f"[newton-env] HAND_ARMATURE {_v} on {len(_js)} finger joint(s) (was {_before}); "
+            f"mjw shape {_push_arm}", flush=True)
 
     # NEUTRALISE_LEFTOVER silences the scene's own Wuji finger motors.
     #
@@ -1076,7 +1298,15 @@ class NewtonVecEnv:
     if not _obj_g:
       raise RuntimeError("penetration monitor found no object geom")
     if not _hand_g:
-      raise RuntimeError("penetration monitor found no hand geom")
+      # Under HAND_NOCOLLIDE the hand colliders were removed on purpose, so there is nothing for
+      # this monitor to watch. Keep the mask non-empty so init proceeds; the numbers it prints are
+      # meaningless in that configuration, which is why the knob is documented as timing-only.
+      if os.environ.get("HAND_NOCOLLIDE", "").strip() not in ("", "0"):
+        _hand_g = _obj_g[:1]
+        print("[newton-env] HAND_NOCOLLIDE: penetration monitor disabled (no hand geoms exist)",
+              flush=True)
+      else:
+        raise RuntimeError("penetration monitor found no hand geom")
     _ng = int(_mmpm.ngeom)
     self._pm_is_obj = _tpm.zeros(_ng, dtype=_tpm.bool, device=device)
     self._pm_is_hand = _tpm.zeros(_ng, dtype=_tpm.bool, device=device)
@@ -1203,6 +1433,11 @@ class NewtonVecEnv:
     try:
       from mjlab.managers.metrics_manager import MetricsManager
       self.metrics_manager = MetricsManager(cfg.metrics, self._env)
+      # Control steps between metrics_manager.compute() calls; 1 = every step, the old behaviour.
+      self._metrics_every = max(1, int(os.environ.get("METRICS_EVERY", "1")))
+      if self._metrics_every > 1:
+        print(f"[newton-env] METRICS_EVERY {self._metrics_every}: metrics computed every "
+              f"{self._metrics_every} control steps (unbiased, but {self._metrics_every}x noisier)")
       print(f"[newton-env] MetricsManager: "
             f"{len(getattr(self.metrics_manager, 'active_terms', []) or [])} terms")
     except Exception as e:
@@ -1318,6 +1553,92 @@ class NewtonVecEnv:
               f"shown, {int((~_is_col).sum())} render-only shape(s) hidden -- this is the "
               f"geometry the solver contacts, not the mesh drawn over it")
       self.viewer.set_model(self.nmodel)
+      # set_model finalises every shape batch it knows about, but a scene with static world
+      # geometry (the office boxes hang off body -1) leaves at least one batch with its xforms
+      # still a Python list, and log_state then hands that list straight to update_shape_xforms:
+      #   RuntimeError: argument 'shape_xforms' expects array(ndim=1, dtype=transformf) ... got list
+      # Finalising the stragglers costs nothing when there are none.
+      try:
+        _late = [_b for _b in getattr(self.viewer, "_shape_instances", {}).values()
+                 if isinstance(getattr(_b, "xforms", None), list)]
+        for _b in _late:
+          _b.finalize()
+        if _late:
+          print(f"[newton-env] finalised {len(_late)} shape batch(es) the viewer left as lists",
+                flush=True)
+      except Exception as _e:
+        print(f"[newton-env] late shape finalise skipped: {type(_e).__name__}: {_e}", flush=True)
+
+      # A sequence picker, because eight clips rendered side by side is not a view of any of them.
+      # `set_visible_worlds` is the viewer's own per-world filter, so this hides the other seven
+      # rather than deleting them -- the simulation is untouched and switching back is instant.
+      # Worlds are laid out in contiguous blocks per clip (`clip_env_count`), so the first world of
+      # clip c is where that clip's motion actually is.
+      try:
+        _srv = getattr(self.viewer, "_server", None)
+        _mixp = [os.path.basename(x).replace(".pkl", "")
+                 for x in (os.environ.get("APPLE_EAT_PKL_MIX", "") or "").split(",") if x.strip()]
+        if _srv is not None and self.n_clips > 1 and len(_mixp) == self.n_clips:
+          _starts = [int(x) for x in np.concatenate([[0], np.cumsum(self.clip_env_count)[:-1]])]
+          _opts = [f"{i}: {n}" for i, n in enumerate(_mixp)]
+          _dd = _srv.gui.add_dropdown("sequence", _opts, initial_value=_opts[0])
+          _all = _srv.gui.add_checkbox("show all worlds", False)
+
+          def _look_at(_w):
+            # set_visible_worlds hides the other worlds but does NOT move the camera, so selecting
+            # a clip left the view parked on world 0 and every sequence looked like the cube.
+            # Worlds are spread on a grid, so the camera has to travel to the one being shown.
+            try:
+              import mujoco as _mjv, warp as _wpv
+              _mm = self.solver.mj_model
+              _bid = next((_b for _b in range(_mm.nbody)
+                           if (_mjv.mj_id2name(_mm, _mjv.mjtObj.mjOBJ_BODY, _b) or "").endswith("pelvis")), 1)
+              _p = _wpv.to_torch(self.solver.mjw_data.xpos)[_w, _bid].detach().cpu().numpy()
+              self.viewer.set_camera(_wpv.vec3(float(_p[0]) + 1.4, float(_p[1]) - 1.4,
+                                               float(_p[2]) + 0.6), -12.0, 45.0)
+            except Exception as _ce:
+              print(f"[newton-env] camera move failed: {type(_ce).__name__}: {_ce}", flush=True)
+
+          def _apply():
+            if _all.value:
+              self.viewer.set_visible_worlds(list(range(self.num_envs)))
+            else:
+              _w = _starts[int(_dd.value.split(":")[0])]
+              self.viewer.set_visible_worlds([_w])
+              _look_at(_w)
+
+          _dd.on_update(lambda _: _apply())
+          _all.on_update(lambda _: _apply())
+          _apply()
+          # What the VIEWER will actually draw, per world. Physics runs on the MuJoCo model and
+          # the viewer draws Newton's nmodel; if the per-clip object meshes reached one and not the
+          # other, every world renders the same shape while the simulation is correct. Distinct
+          # objects have distinct vertex counts, so print those rather than trusting the layout line.
+          try:
+            _lab = list(self.nmodel.shape_label)
+            _per = self.nmodel.shape_count // max(self.num_envs, 1)
+            _seen = []
+            for _w in range(min(self.num_envs, 8)):
+              for _i in range(_w * _per, (_w + 1) * _per):
+                _L = _lab[_i] or ""
+                if "_sdf" in _L and "table" not in _L:
+                  _m = self.nmodel.shape_source[_i] if _i < len(self.nmodel.shape_source) else None
+                  _v = getattr(_m, "vertices", None)
+                  _seen.append((_w, _L.split("/")[-1], 0 if _v is None else len(_v)))
+                  break
+            print("[newton-env] viser objects per world: "
+                  + ", ".join(f"w{w}={n}({v}v)" for w, n, v in _seen), flush=True)
+            if len({v for _, _, v in _seen}) == 1 and len(_seen) > 1:
+              print("[newton-env] WARNING: every world draws a mesh with the same vertex count -- "
+                    "the viewer is showing one object for all clips", flush=True)
+          except Exception as _e:
+            print(f"[newton-env] could not inspect per-world objects: {type(_e).__name__}: {_e}",
+                  flush=True)
+          print(f"[newton-env] viser sequence picker: {self.n_clips} clips, "
+                f"first world of each at {_starts}", flush=True)
+      except Exception as _e:
+        print(f"[newton-env] viser sequence picker unavailable: {type(_e).__name__}: {_e}",
+              flush=True)
       print(f"[newton-env] viser on http://localhost:{viser_port} "
             f"(rendering every {self._render_every} control steps)")
     # mjlab's event manager needs the global step count for reset-mode terms that fire on a schedule
@@ -1825,11 +2146,42 @@ class NewtonVecEnv:
       self._viewer_gl.set_world_offsets((0.0, 0.0, 0.0))
     except Exception as e:
       print(f"[newton-env] could not clear world offsets ({type(e).__name__}: {e})")
+    self._film_world = 0
     if self.num_envs > 1:
       try:
-        self._viewer_gl.set_visible_worlds([0])
+        # VIDEO_ENV picks a world directly; VIDEO_CLIP=<k> picks the first world that actually RUNS
+        # clip k, looked up from the live layout rather than assumed -- the object blocks are not in
+        # clip order, and a guessed "clip 5 = envs 40-47" filmed the cube while the rollout was
+        # measuring the camera lifting 0.59. Reordering the clip list is not a substitute either:
+        # camera lifts 0.667 as clip 5 and 0.000 as clip 0, so it has to be filmed in place.
+        _vis = max(0, min(int(os.environ.get("VIDEO_ENV", "0") or 0), self.num_envs - 1))
+        _vc = os.environ.get("VIDEO_CLIP", "").strip()
+        if _vc:
+          _cid = np.asarray(getattr(self, "clip_id_np", []))
+          _hits = np.nonzero(_cid == int(_vc))[0]
+          if len(_hits):
+            _vis = int(_hits[0])
+          print(f"[newton-env] VIDEO_CLIP={_vc}: worlds running it {_hits[:8].tolist()} "
+                f"(of {len(_hits)})", flush=True)
+        self._viewer_gl.set_visible_worlds([_vis])
+        self._film_world = _vis
+        # Newton viewer bug: batch names are "shape_<count>", renumbered from 0 by
+        # set_visible_worlds, and log_instances reuses an instancer by NAME without rebinding its
+        # mesh. Instancers built while every world was visible therefore survive the switch still
+        # bound to the first object's mesh -- filmed as the cube in place of the real object, while
+        # the physics (and the lift it measured) was the real object. Drop them so each is rebuilt
+        # around the mesh its new batch points at.
+        _stale = [n for n in list(getattr(self._viewer_gl, "objects", {}))
+                  if "/model/shapes/" in n or "/model/sdf_isomesh/" in n]
+        for _n in _stale:
+          del self._viewer_gl.objects[_n]
+        if _stale and hasattr(self._viewer_gl, "_rebuild_gl_shape_caches"):
+          self._viewer_gl._rebuild_gl_shape_caches()
+          print(f"[newton-env] rebuilt {len(_stale)} shape instancer(s) after the world switch",
+                flush=True)
+        print(f"[newton-env] filming world {_vis} of {self.num_envs}", flush=True)
       except Exception as e:
-        print(f"[newton-env] could not restrict rendering to world 0 "
+        print(f"[newton-env] could not restrict rendering to one world "
               f"({type(e).__name__}: {e}); all {self.num_envs} will be drawn")
     cam = getattr(self._viewer_gl, "camera", None)
     if cam is not None:
@@ -1848,7 +2200,9 @@ class NewtonVecEnv:
       # coordinates that frame the robot at one env count point at bare floor at another -- checked
       # with one env, the framing was right; the four-env video it was used for showed the robot as
       # a speck on the horizon.
-      origin = self._env.scene.env_origins[0].detach().cpu().numpy()
+      # Anchor on the world being filmed, not world 0 -- otherwise VIDEO_CLIP moves the picture
+      # to another world while the camera keeps pointing at the first one's floor.
+      origin = self._env.scene.env_origins[getattr(self, "_film_world", 0)].detach().cpu().numpy()
       eye = [eye[i] + float(origin[i]) for i in range(3)]
       target = [target[i] + float(origin[i]) for i in range(3)]
       self._cam_eye, self._cam_target = eye, target
@@ -1922,6 +2276,33 @@ class NewtonVecEnv:
     # its first frame; either one silently discards a placement made at setup. That is why a
     # one-env check looked right -- the refit lands near the robot when the scene is small -- while
     # the four-env video it stood in for rendered the robot as a speck on the horizon.
+    # VIDEO_FOLLOW=1: keep the filmed robot in frame. The camera is placed once, in world
+    # coordinates, which is fine for a clip that stands still -- but banana_eat_1 walks, and an
+    # 8-second rollout (ROLLOUT_NO_TERM) carried the robot straight out of shot, leaving five
+    # seconds of empty floor. Re-aim at the filmed world's pelvis each frame instead.
+    if os.environ.get("VIDEO_FOLLOW") and self._cam_eye is not None:
+      try:
+        import mujoco as _fmj, warp as _fwp
+        if getattr(self, "_follow_bid", None) is None:
+          _fm = self.solver.mj_model
+          self._follow_bid = next(
+              (_b for _b in range(_fm.nbody)
+               if (_fmj.mj_id2name(_fm, _fmj.mjtObj.mjOBJ_BODY, _b) or "").endswith("pelvis")), 1)
+          # The offset the fixed camera was framed with, kept as a rigid rig around the pelvis.
+          _p0 = _fwp.to_torch(self.solver.mjw_data.xpos)[
+              getattr(self, "_film_world", 0), self._follow_bid].detach().cpu().numpy()
+          self._follow_eye_off = [float(self._cam_eye[i]) - float(_p0[i]) for i in range(3)]
+          self._follow_tgt_off = [float(self._cam_target[i]) - float(_p0[i]) for i in range(3)]
+          print(f"[newton-env] VIDEO_FOLLOW: tracking pelvis body {self._follow_bid} "
+                f"of world {getattr(self, '_film_world', 0)}", flush=True)
+        _p = _fwp.to_torch(self.solver.mjw_data.xpos)[
+            getattr(self, "_film_world", 0), self._follow_bid].detach().cpu().numpy()
+        self._cam_eye = [float(_p[i]) + self._follow_eye_off[i] for i in range(3)]
+        self._cam_target = [float(_p[i]) + self._follow_tgt_off[i] for i in range(3)]
+      except Exception as _fe:
+        if not getattr(self, "_follow_warned", False):
+          print(f"[newton-env] VIDEO_FOLLOW failed ({type(_fe).__name__}: {_fe})", flush=True)
+          self._follow_warned = True
     self._apply_camera()
 
     t = len(self._video_frames) * self.step_dt
@@ -1972,6 +2353,84 @@ class NewtonVecEnv:
       self._sync_body_q_from_mujoco()
       self.collision_pipeline.collide(self.state_in, self.contacts)
     self.solver.step(self.state_in, self.state_out, self.control, self.contacts, self.physics_dt)
+
+  def _deep_force_report(self, _c, _pos, _sel, thresh_mm: float) -> None:
+    """Attribute the force behind the deepest contact, by constraint type, in one world.
+
+    Prints, for the world holding the deepest hand/object contact:
+      * that contact's own normal force, summed across the friction-cone pyramid rows (reading a
+        single row reports 0.00 N next to a true 15.76 N, and once produced a 654 N fiction);
+      * every active constraint row in that world, grouped by mjtConstraint type, with the total
+        and the largest single row -- so "joint limit" versus "contact" is read off the model
+        rather than argued from a lever arm;
+      * for the joints of the offending finger, the actuator force against the constraint force,
+        and the joint's distance past its own stop.
+
+    Rate-limited to one report per 30 flushes: it is a diagnostic, not a metric.
+    """
+    import warp as _wp, torch as _t, numpy as _np, mujoco as _mj
+
+    self._dfp_n = getattr(self, "_dfp_n", 0) + 1
+    if self._dfp_n % 30 != 1:
+      return
+    d, m = self.solver.mjw_data, self.solver.mj_model
+    _gm = _wp.to_torch(_c.geom)[_sel]
+    _wid = _wp.to_torch(_c.worldid).long()[_sel]
+    k = int(_pos.argmax())
+    w = int(_wid[k])
+    ga, gb = int(_gm[k][0]), int(_gm[k][1])
+    nm = lambda g: _mj.mj_id2name(m, _mj.mjtObj.mjOBJ_GEOM, g) or f"geom{g}"
+
+    # This contact's normal force: sum over the pyramid rows, not efc_force[adr].
+    _adr = _wp.to_torch(_c.efc_address)
+    if _adr.dim() == 1:
+      _adr = _adr.unsqueeze(1)
+    _ef = _wp.to_torch(d.efc.force)
+    rows = _adr[_sel][k]
+    fn = float(_ef[w, rows[rows >= 0].long()].sum()) if (rows >= 0).any() else float("nan")
+
+    print(f"\n[deep-force] world {w}: {nm(ga)} <-> {nm(gb)}  depth {1000*float(_pos[k]):.3f} mm  "
+          f"normal force {fn:.1f} N   (threshold {thresh_mm} mm)", flush=True)
+
+    # Every active constraint in that world, by type.
+    et = _wp.to_torch(d.efc.type)[w].cpu().numpy()
+    ef = _wp.to_torch(d.efc.force)[w].cpu().numpy()
+    eid = _wp.to_torch(d.efc.id)[w].cpu().numpy()
+    nefc = int(_wp.to_torch(d.nefc)[w]) if hasattr(d, "nefc") else len(et)
+    et, ef, eid = et[:nefc], ef[:nefc], eid[:nefc]
+    LBL = {0: "equality", 1: "friction_dof", 2: "friction_tendon", 3: "JOINT LIMIT",
+           4: "tendon_limit", 5: "contact_frictionless", 6: "contact_pyramidal",
+           7: "contact_elliptic"}
+    print(f"[deep-force]   {nefc} active constraint rows in this world:", flush=True)
+    for t in sorted(set(int(x) for x in et)):
+      sel = et == t
+      f = _np.abs(ef[sel])
+      j = int(_np.argmax(f))
+      who = ""
+      if t == 3:                                   # a limit row's id is the JOINT id
+        jid = int(eid[sel][j])
+        who = f"  worst on joint {_mj.mj_id2name(m, _mj.mjtObj.mjOBJ_JOINT, jid) or jid}"
+      print(f"[deep-force]     type {t:<2d} {LBL.get(t, '?'):<20s} n={int(sel.sum()):<5d} "
+            f"sum|f|={f.sum():9.1f} N   max|f|={f.max():8.1f} N{who}", flush=True)
+
+    # The offending finger's own joints: motor force vs constraint force vs distance past the stop.
+    rob = nm(ga) if self._pen_rob[ga] else nm(gb)
+    stem = rob.split("/")[-1].split("_link")[0]
+    qa = _wp.to_torch(d.qfrc_actuator)[w].cpu().numpy()
+    qc = _wp.to_torch(d.qfrc_constraint)[w].cpu().numpy()
+    qp = _wp.to_torch(d.qpos)[w].cpu().numpy()
+    print(f"[deep-force]   joints of {stem}:  (past = qpos beyond its own range)", flush=True)
+    for jid in range(m.njnt):
+      jn = _mj.mj_id2name(m, _mj.mjtObj.mjOBJ_JOINT, jid) or ""
+      if stem not in jn:
+        continue
+      dofadr, qadr = int(m.jnt_dofadr[jid]), int(m.jnt_qposadr[jid])
+      lo, hi = m.jnt_range[jid]
+      q = float(qp[qadr])
+      past = max(0.0, q - hi, lo - q)
+      print(f"[deep-force]     {jn.split('/')[-1]:<28s} q={q:+.4f} range=[{lo:+.3f},{hi:+.3f}] "
+            f"past={_np.degrees(past):5.2f} deg  qfrc_actuator={qa[dofadr]:+8.3f}  "
+            f"qfrc_constraint={qc[dofadr]:+9.3f}", flush=True)
 
   def _guard_targets(self) -> None:
     """Report -- and optionally clamp -- joint targets commanded past their limits.
@@ -2110,6 +2569,24 @@ class NewtonVecEnv:
           self._pen_acc[3] += float((_pos > 0.003).float().mean())
           self._pen_acc[4] += float((_pos > 0.004).float().mean())
           self._pen_acc[5] += 1
+
+          # DEEP_FORCE_PROBE: where a 300 N fingertip contact actually comes from.
+          #
+          # The arithmetic said the fingers cannot produce it -- 1.0 N*m over a 30 mm lever is
+          # 33 N, and the wrist measured 98-145 N -- but arithmetic is not a source. MuJoCo already
+          # stores the answer: every constraint row carries its TYPE and the object it acts on, so
+          # the force can be attributed rather than inferred. Types follow mjtConstraint:
+          # 0 equality, 1/2 friction, 3 joint limit, 4 tendon limit, 5/6/7 contact.
+          #
+          # A joint limit is the suspect worth ruling in or out by name: it has no torque ceiling,
+          # so a command driven past the stop is held by the constraint solver at whatever force it
+          # takes, and capping actuator torque does nothing to it.
+          _dfp = float(os.environ.get("DEEP_FORCE_PROBE", "0") or 0.0)
+          if _dfp > 0 and float(_pos.max()) * 1000.0 >= _dfp:
+            try:
+              self._deep_force_report(_c, _pos, _sel, _dfp)
+            except Exception as _e:
+              print(f"[deep-force] probe failed: {type(_e).__name__}: {_e}", flush=True)
           # per-world age, broadcast to the contacts of that world
           _wid_c = _wpl.to_torch(_c.worldid).long()[_sel]
           _age = self._env.episode_length_buf[_wid_c.clamp(0, self.num_envs - 1)]
@@ -2226,7 +2703,20 @@ class NewtonVecEnv:
       # raised TypeError on every step of every run and was swallowed, so the manager never
       # produced a metric -- the Episode_Metrics/* values that reached tensorboard were
       # zero-initialised accumulators being flushed at reset.
-      self.metrics_manager.compute()
+      #
+      # METRICS_EVERY strides this. Profiled at 1024 envs on the eight-clip mix it was 86.8 ms of a
+      # 451.5 ms step -- 19.2%, and none of it physics: 126 terms recomputed every control step.
+      #
+      # Striding is unbiased for these terms, which is why it is allowed at all: compute() does
+      # `_episode_sums += value` and `_step_count += 1` together, so skipping a step drops the
+      # numerator and the denominator alike and the episode average stays an estimate of the same
+      # quantity. What it costs is NOISE, and the per-clip metrics are the signal we read this run
+      # by -- so measure the metric values at stride 1 and stride N before trusting one.
+      # `compute_substep` is untouched: it runs inside the decimation loop and its accumulator is
+      # drained by whichever compute() call comes next, over however many substeps that spans.
+      self._metrics_tick = getattr(self, "_metrics_tick", 0) + 1
+      if self._metrics_every <= 1 or self._metrics_tick % self._metrics_every == 0:
+        self.metrics_manager.compute()
 
     # Non-finite worlds do not heal. Measured on the native path, 512 envs, 300 steps: the first
     # env goes non-finite somewhere before step 101 and the count climbs 1 -> 4 -> 8 and never

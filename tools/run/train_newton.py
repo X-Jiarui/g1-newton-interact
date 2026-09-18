@@ -474,12 +474,34 @@ if A.profile_step:
   for _ in range(_N):
     _tick("action_manager.advance", lambda: _e.action_manager.advance(_act))
     _tick("action_term.process", lambda: _e.action_term.process_actions(_act))
+    # `contacts=None` is only valid when MuJoCo owns collision. On the native path the contacts
+    # come from Newton's CollisionPipeline, and passing None here raised
+    # `NoneType has no attribute rigid_contact_max` from inside solver.step -- the fifth
+    # `solver.step` call site, and the one `_physics_step`'s docstring warns about.
+    #
+    # Splitting collide from step is the point of profiling this at all: the two answer different
+    # questions. Collision cost scales with object triangles and env count; solver cost scales with
+    # the constraint count the contacts produce. Which one dominates decides whether decimating
+    # meshes further is worth anything.
+    _pipe = getattr(_e, "collision_pipeline", None)
+
     def _phys():
       for _ in range(_e.decimation):
         _e.action_term.apply_actions()
-        _e.solver.step(_e.state_in, _e.state_out, _e.control, None, _e.physics_dt)
+        if _pipe is not None:
+          _e._sync_body_q_from_mujoco()
+          _pipe.collide(_e.state_in, _e.contacts)
+        _e.solver.step(_e.state_in, _e.state_out, _e.control,
+                       _e.contacts if _pipe is not None else None, _e.physics_dt)
         _e.state_in, _e.state_out = _e.state_out, _e.state_in
     _tick("physics (decimation loop)", _phys)
+
+    if _pipe is not None:
+      def _phys_collide():
+        for _ in range(_e.decimation):
+          _e._sync_body_q_from_mujoco()
+          _pipe.collide(_e.state_in, _e.contacts)
+      _tick("  of which collide()", _phys_collide)
     def _phys_apply():
       for _ in range(_e.decimation):
         _e.action_term.apply_actions()
@@ -968,6 +990,30 @@ if A.rollout_steps:
     print("[rollout] start frame left to the trained RSI window", flush=True)
   else:
     env._env._force_reference_start_frame = int(_rsf) if _rsf else 0
+  # ROLLOUT_NO_TERM: for a VIDEO, not a measurement. og_object_far fires ~1 s after the grasp
+  # because the reference keeps moving while the policy holds still, so every successful clip is
+  # cut exactly when it starts working. Disabling the non-timeout terminations changes no physics
+  # -- only whether the episode is reset -- so the video shows the full carry. Never set this for
+  # a run whose numbers are being compared to training.
+  if os.environ.get("ROLLOUT_NO_TERM"):
+    import torch as _nt_t
+    class _NeverFires:
+      # Some termination terms are ManagerTermBase INSTANCES (NoProgressTermination), and the
+      # manager calls .reset() on them -- a bare lambda has no .reset and kills the rollout.
+      # Proxy every other attribute through to the original and only override the call.
+      def __init__(self, inner): self._inner = inner
+      def __getattr__(self, k): return getattr(self._inner, k)
+      def __call__(self, env, *a, **k):
+        return _nt_t.zeros(env.num_envs, dtype=_nt_t.bool, device=env.device)
+    _ntm = env.termination_manager
+    _kept = []
+    for _ni, _nn in enumerate(_ntm._term_names):
+      if _nn == "time_out":
+        continue
+      _ntm._term_cfgs[_ni].func = _NeverFires(_ntm._term_cfgs[_ni].func)
+      _kept.append(_nn)
+    print(f"[rollout] ROLLOUT_NO_TERM: disabled {len(_kept)} terminations "
+          f"({', '.join(_kept)}); only time_out remains", flush=True)
   env.reset()
   _obs = env.get_observations()
   print(f"[rollout] {A.rollout_steps} deterministic steps from reference frame 0")
@@ -1003,6 +1049,18 @@ if A.rollout_steps:
     print(f"[gfp] object body {_gobj_b} mass {_gmass:.4f} kg weight {_gw:.3f} N -> {_gpath}",
           flush=True)
 
+  # ROLLOUT_PER_WORLD_LIFT: which WORLD to film. VIDEO_CLIP can only take the first world running
+  # clip k, so on a clip whose lift_success is 0.06 the filmed world almost never succeeds and the
+  # video libels a policy that does work. Track each world's object height above its own start and
+  # print the ranking, so a second pass can film a world that actually lifted (VIDEO_ENV=<w>).
+  # Rendering consumes no RNG, so the same --seed reproduces the same trajectory in that pass.
+  _pwl = os.environ.get("ROLLOUT_PER_WORLD_LIFT")
+  _pw_obj = _pw_z0 = _pw_max = None
+  if _pwl:
+    from mjlab.tasks.apple_eat import object_pool as _pw_op
+    _pw_obj = _pw_op.active(env._env)
+    _pw_z0 = _pw_obj.data.root_link_pos_w[:, 2].clone()
+    _pw_max = _rt.zeros_like(_pw_z0)
   _acc, _nacc, _dones = {}, 0, 0
   for _k in range(int(A.rollout_steps)):
     with _rt.inference_mode():
@@ -1014,6 +1072,8 @@ if A.rollout_steps:
       print(f"[rollout] action step={_k} shape={tuple(_a.shape)} "
             f"absmean={_a.abs().mean().item():.5f} absmax={_a.abs().max().item():.5f} "
             f"nonzero={(_a.abs() > 1e-8).float().mean().item():.3f}", flush=True)
+    if _pw_max is not None:
+      _pw_max = _rt.maximum(_pw_max, _pw_obj.data.root_link_pos_w[:, 2] - _pw_z0)
     _lg = (env.extras.get("log") or {})
     for _kk, _vv in _lg.items():
       try:
@@ -1077,6 +1137,14 @@ if A.rollout_steps:
   if _gf is not None:
     _gf.close()
     print(f"[gfp] wrote {_gpath}", flush=True)
+  if _pw_max is not None:
+    _pw_cid = env.clip_id.detach().cpu().numpy()
+    _pw_v = _pw_max.detach().cpu().numpy()
+    for _c in sorted(set(int(x) for x in _pw_cid)):
+      _ws = [w for w in range(len(_pw_cid)) if int(_pw_cid[w]) == _c]
+      _ws.sort(key=lambda w: -float(_pw_v[w]))
+      print("[perworld] clip%d " % _c + "  ".join(
+          "w%d=%.3f" % (w, float(_pw_v[w])) for w in _ws), flush=True)
   print("[rollout] done")
   raise SystemExit(0)
 
