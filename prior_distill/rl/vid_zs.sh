@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Film one arm of the zspace A/B on one clip, 4x5090 box.  vid_zs.sh <arm> <clip k> <gpu> [steps]
-#   arm: ACT | Z | Z210 | ZP | ZP390 | NOREF220 | OURLR290 | OURLR330   (checkpoints /workspace/h200/<CK>.pt)
+#   arm: ACT | Z | Z210 | ZP | ZP<n> | OURLR<n> | NOREF<n>   (checkpoints /workspace/h200/ZS_<ARM>_<n>.pt)
 # Same recipe as the H200's vid_h200.sh (rollout-video-recipe): the run's own config, the 8 clips in
 # training order, 64 envs, ROLLOUT_START_FRAME=rsi, ROLLOUT_NO_TERM=1, VIDEO_CLIP=k, camera follows.
 # ZN arms (OURLR/NOREF) trained with ZSPACE_SAMPLE_Z=1 (policy Gaussian over z); NOREF used the
@@ -14,11 +14,14 @@ AG=/workspace/h200/agent_handoff
 case $arm in
   ACT) X="";;
   Z|Z210) X="$ZS ZSPACE_ANCHOR=encoder";;
-  ZP|ZP390) X="$ZS ZSPACE_ANCHOR=prior";;
-  OURLR290|OURLR330) X="$ZS ZSPACE_ANCHOR=prior ZSPACE_SAMPLE_Z=1";;
-  NOREF220) X="$ZS ZSPACE_ANCHOR=prior ZSPACE_SAMPLE_Z=1"; AG=/workspace/h200/agent_noref;;
+  ZP|ZP[0-9]*) X="$ZS ZSPACE_ANCHOR=prior";;
+  OURLR[0-9]*) X="$ZS ZSPACE_ANCHOR=prior ZSPACE_SAMPLE_Z=1";;
+  NOREF[0-9]*) X="$ZS ZSPACE_ANCHOR=prior ZSPACE_SAMPLE_Z=1"; AG=/workspace/h200/agent_noref;;
   *) echo "bad arm"; exit 2;;
 esac
+# generic names: ZP910 -> ZS_ZP_910, OURLR700 -> ZS_OURLR_700, NOREF590 -> ZS_NOREF_590
+if [ -z "${CK[$arm]}" ] && [[ $arm =~ ^(ZP|OURLR|NOREF)([0-9]+)$ ]]; then CK[$arm]=ZS_${BASH_REMATCH[1]}_${BASH_REMATCH[2]}; fi
+[ -f /workspace/h200/${CK[$arm]}.pt ] || { echo "no checkpoint /workspace/h200/${CK[$arm]}.pt"; exit 3; }
 C=/home/jrxu/mix8/clips; M=/home/jrxu/mix8/meshes
 P="$C/s1/cubesmall_inspect_1.pkl,$C/s1/phone_call_1.pkl,$C/s1/gamecontroller_play_1.pkl,$C/s1/binoculars_see_1.pkl,$C/s1/hammer_use_3.pkl,$C/s1/camera_takepicture_2.pkl,$C/s10/banana_eat_1.pkl,$C/s1/flashlight_on_2.pkl"
 ST="$M/cubesmall.stl,$M/phone.stl,$M/gamecontroller.stl,$M/binoculars.stl,$M/hammer.stl,$M/camera.stl,$M/banana.stl,$M/flashlight.stl"

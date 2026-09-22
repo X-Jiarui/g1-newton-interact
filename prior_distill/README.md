@@ -86,6 +86,9 @@ means from the training logs on the Moonlight H200 (gpu1), 2026-09-21/22.
 | 590 | ZS_ZP | 769 (in a collapse) | 0.677 | 0.996 | 0.125 | 0.083 | 0.294 | 0.00 |
 | 590 | ZS_ZP_ZN_OURLR | 1317 | 0.984 | 0.998 | 0.119 | 0.079 | 0.362 | 0.00 |
 | 590 | **ZS_ZP_ZN_NOREF** | **1416** | **0.993** | 1.000 | 0.116 | 0.079 | 0.375 | 0.00 |
+| final | ZS_ZP @910 | 1240 | 0.944 | 1.000 | 0.122 | 0.085 | 0.375 | 0.00 |
+| final | ZS_ZP_ZN_OURLR @705 | 1409 | 0.994 | 1.000 | 0.115 | 0.077 | 0.372 | 0.00 |
+| final | **ZS_ZP_ZN_NOREF @594** | **1425** | 0.992 | 1.000 | 0.116 | 0.079 | 0.375 | 0.00 |
 
 **Best reward reached**
 
@@ -132,10 +135,10 @@ Nothing large is in git. Persistent copies (Lustre, shared across the Ropedia no
 |---|---|
 | distilled student (line 2, arm B, iteration 4000) | `student_B4000.pt` (md5 `cb8bacea…`), also `/workspace/zspace_body_grab_B/student_004000.pt` on the 4x5090 box |
 | re-basing constants for the 1324-clip mix (see `ZSPACE_REF_DEFAULT` below) | `ref_default_1324.npz` |
-| NOREF checkpoints | `ckpts/ZS_ZP_ZN_NOREF_590.pt` (latest at archive time), `ckpts/ZS_NOREF_220.pt` (the filmed one) |
-| OURLR / ZP checkpoints | `ckpts/ZS_ZP_ZN_OURLR_700.pt`, `ckpts/ZS_OURLR_290.pt`, `ckpts/ZS_OURLR_330.pt`, `ckpts/ZS_ZP_900.pt` |
+| NOREF checkpoints | `ckpts/ZS_ZP_ZN_NOREF_590.pt` (final), `ckpts/ZS_NOREF_220.pt` (the filmed one) |
+| OURLR / ZP checkpoints | `ckpts/ZS_ZP_ZN_OURLR_700.pt` (final), `ckpts/ZS_OURLR_290.pt`, `ckpts/ZS_OURLR_330.pt`, `ckpts/ZS_ZP_910.pt` (final), `ckpts/ZS_ZP_900.pt` |
 | the three agent configs | `agents/agent_{handoff,pulse,noref}.yaml` (same files as `rl/agents/` here) |
-| live runs (still training at archive time) | gpu1 `~/zs/h200/g1-newton-interact/logs/rsl_rl/g1_residual_interact/ZS_*`; the runner keeps only the last 5 checkpoints |
+| final checkpoints (runs stopped 2026-09-22: ZS_ZP @910, OURLR @705, NOREF @594) | `ckpts/ZS_ZP_910.pt`, `ckpts/ZS_ZP_ZN_OURLR_700.pt`, `ckpts/ZS_ZP_ZN_NOREF_590.pt`; run dirs on gpu1 `~/zs/h200/g1-newton-interact/logs/rsl_rl/g1_residual_interact/ZS_*` (last 5 checkpoints each) |
 | body clips for the distillation | 4x5090 box `/workspace/grab_body_clips/` (`clips.txt`, `meshes/cubesmall.stl`); rebuild with `distill/make_body_clips.py` |
 | rollout videos | 4x5090 box `/workspace/vidshot/ZS_*_{phone,camera}.mp4` + per-step `.csv` timelines |
 
