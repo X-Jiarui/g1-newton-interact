@@ -1,0 +1,342 @@
+--- /private/tmp/claude-501/-Users-jerryxu-Documents/268574d7-6fef-4f37-9bd3-2e8b4b763aac/scratchpad/gpu3code/residual_actor.py	2026-09-20 16:44:37
++++ /private/tmp/claude-501/-Users-jerryxu-Documents/268574d7-6fef-4f37-9bd3-2e8b4b763aac/scratchpad/gpu1code/residual_actor.py	2026-09-21 22:28:05
+@@ -100,6 +100,37 @@
+     return self.dec(z) * self.scale + self.mean
+ 
+ 
++# --- zspace: run the astra_hidden_residual arm through a distilled latent action space -----------
++# ZSPACE_STUDENT=<student_*.pt from tools/run/distill_zspace.py --mode body> swaps the 512-D ASTRA
++# hidden-token residual for a latent_dim-D residual on the student's z; the body action is then
++# D(s, z0 + delta) through the frozen decoder instead of ASTRA's head on (hidden + delta).
++# ZSPACE_ANCHOR: 'encoder' (z0 = mu_q(s, g): the init reproduces the distilled tracker, the exact
++# analogue of the hidden-token residual whose init is ASTRA) or 'prior' (z0 = mu_p(s): PULSE's
++# downstream setting, the init is the goal-less prior). ZSPACE_TOKEN_CLIP replaces token_clip
++# (0.1 is in hidden-token units; z has unit-order scale).
++_ZSPACE_STUDENT = os.environ.get("ZSPACE_STUDENT", "").strip()
++_ZSPACE_ANCHOR = os.environ.get("ZSPACE_ANCHOR", "encoder").strip().lower()
++_ZSPACE_TOKEN_CLIP = float(os.environ.get("ZSPACE_TOKEN_CLIP", "1.0"))
++# ZSPACE_SAMPLE_Z=1: PULSE/Omnigrasp's downstream setting. The policy's Gaussian is over the
++# latent_dim-D z residual (fixed std ZSPACE_Z_STD, PULSE: exp(-1) = 0.37, not learned), the sampled
++# z is decoded deterministically through the frozen decoder, and PPO's ratio is computed in z.
++# The runner then sees a latent_dim-D action space; the env wrapper decodes (train_newton.py).
++_ZSPACE_SAMPLE_Z = os.environ.get("ZSPACE_SAMPLE_Z", "").strip() == "1"
++_ZSPACE_Z_STD = float(os.environ.get("ZSPACE_Z_STD", "0.3679"))
++_ZSPACE_LEARN_Z_STD = os.environ.get("ZSPACE_LEARN_Z_STD", "").strip() == "1"
++
++
++def _zspace_group_tensor(obs: TensorDict, spec: str) -> torch.Tensor:
++  """'name' or 'name[a:b]' -> (B, d) slice of that observation group."""
++  name, sl = spec, slice(None)
++  if "[" in spec:
++    name, rng = spec[:-1].split("[")
++    a, b = rng.split(":")
++    sl = slice(int(a) if a else None, int(b) if b else None)
++  t = cast(torch.Tensor, obs[name])
++  return t.reshape(t.shape[0], -1)[:, sl]
++
++
+ def _make_residual_gain(
+   residual_gain: float,
+   body_residual_gain: float | None,
+@@ -695,11 +726,12 @@
+     hand_primitive_init_logit_bias: float = -2.0,
+   ) -> None:
+     super().__init__()
+-    if output_dim != mdp.ACTION_DIM:
++    if output_dim != mdp.ACTION_DIM and not _ZSPACE_SAMPLE_Z:
+       raise ValueError(
+         "ResidualInteractActorModel expects "
+         f"output_dim={mdp.ACTION_DIM}, got {output_dim}."
+       )
++    self._zspace_requested_output_dim = int(output_dim)
+     self.base_tracker_kind = str(base_tracker_kind).strip().lower()
+     if self.base_tracker_kind not in {"checkpoint", "official_onnx", "astra_onnx"}:
+       raise ValueError(
+@@ -960,6 +992,13 @@
+       self.fixed_hand_action_frame = frame
+       fixed_hand = _reference_hand_action(ref_for_frame, frame)
+       fixed_hand = fixed_hand.detach().to(device=obs_device, dtype=torch.float32)
++      if os.environ.get("FIXED_HAND_ZERO", "").strip() == "1":
++        # Hand held at the ZERO action (the PD default pose) rather than the reference pose at
++        # `frame`: the zspace student was distilled with the hand executed at exactly zero, and
++        # proprio_history carries the executed hand action, so any other constant saturates its
++        # input normaliser. Applied to every arm of a comparison so it is not a variable.
++        fixed_hand = torch.zeros_like(fixed_hand)
++        print("[ResidualInteractActor] FIXED_HAND_ZERO=1: fixed hand action is all-zero")
+     else:
+       fixed_hand = torch.empty(0, device=obs_device, dtype=torch.float32)
+     self.register_buffer("fixed_hand_action", fixed_hand)
+@@ -1042,6 +1081,43 @@
+       if self.split_hand_net:
+         self.hand_obs_normalizer = nn.Identity()
+ 
++    self.zspace = None
++    self.astra_token_dim = ASTRAONNX29BodyActor.hidden_dim
++    if _ZSPACE_STUDENT:
++      if self.residual_arch != "astra_hidden_residual":
++        raise ValueError("ZSPACE_STUDENT applies to residual_arch=astra_hidden_residual only")
++      from mjlab.tasks.residual_interact import zspace as _zspace_mod
++      _student, _ = _zspace_mod.load_student(_ZSPACE_STUDENT, "cpu")
++      for _p in _student.parameters():
++        _p.requires_grad_(False)
++      self.zspace = _student.eval()
++      self.astra_token_dim = int(_student.cfg.latent_dim)
++      self.token_residual_clip = float(_ZSPACE_TOKEN_CLIP)
++      self.zspace_self_groups = tuple(_student.cfg.self_groups)
++      self.zspace_ref_default = None
++      _rd = os.environ.get("ZSPACE_REF_DEFAULT", "").strip()
++      if _rd:
++        import numpy as _np
++        _z = _np.load(_rd)
++        self.zspace_ref_default = (
++          torch.tensor(_z["default_body"], dtype=torch.float32),
++          torch.tensor(_z["default_hand"], dtype=torch.float32),
++        )
++        print(f"[ResidualInteractActor] ZSPACE_REF_DEFAULT={_rd}: proprio joint columns re-based to the student's clip-set default")
++      _mask_env = os.environ.get("ZSPACE_MASK_HAND_INPUT", "").strip()
++      self.zspace_mask_hand_input = (
++        _mask_env == "1" if _mask_env else int(_student.cfg.action_dim) == mdp.NUM_BODY
++      )
++      if self.zspace_mask_hand_input and tuple(_student.cfg.self_groups) != ("proprio_history",):
++        raise ValueError("ZSPACE hand-input masking assumes s == proprio_history (4x144 + 1 + 69)")
++      self.zspace_task_groups = tuple(_student.cfg.task_groups)
++      if _ZSPACE_ANCHOR not in {"encoder", "prior"}:
++        raise ValueError(f"ZSPACE_ANCHOR must be encoder or prior, got {_ZSPACE_ANCHOR!r}")
++      print(
++        f"[ResidualInteractActor] ZSPACE: student={_ZSPACE_STUDENT} latent={self.astra_token_dim} "
++        f"anchor={_ZSPACE_ANCHOR} token_clip={self.token_residual_clip} "
++        f"s={self.zspace_self_groups} g={self.zspace_task_groups} mask_hand_input={self.zspace_mask_hand_input}"
++      )
+     residual_output_dim = mdp.ACTION_DIM
+     if self.residual_arch == "latent_token_residual":
+       residual_output_dim = OfficialSonicONNX53Actor.token_dim + mdp.NUM_HAND
+@@ -1050,11 +1126,11 @@
+       elif self.hand_primitive_enabled:
+         residual_output_dim = OfficialSonicONNX53Actor.token_dim + 2
+     elif self.residual_arch == "astra_hidden_residual":
+-      residual_output_dim = ASTRAONNX29BodyActor.hidden_dim + mdp.NUM_HAND
++      residual_output_dim = self.astra_token_dim + mdp.NUM_HAND
+       if self.fixed_hand_action_enabled:
+-        residual_output_dim = ASTRAONNX29BodyActor.hidden_dim
++        residual_output_dim = self.astra_token_dim
+       elif self.hand_primitive_enabled:
+-        residual_output_dim = ASTRAONNX29BodyActor.hidden_dim + 2
++        residual_output_dim = self.astra_token_dim + 2
+     elif self.residual_arch == "astra_ref_edit":
+       ref_edit_dim = int(self.astra_ref_edit_indices.numel())
+       residual_output_dim = ref_edit_dim + mdp.NUM_HAND
+@@ -1067,7 +1143,7 @@
+         OfficialSonicONNX53Actor.token_dim
+         if self.residual_arch == "latent_token_residual"
+         else (
+-          ASTRAONNX29BodyActor.hidden_dim
++          self.astra_token_dim
+           if self.residual_arch == "astra_hidden_residual"
+           else (
+             int(self.astra_ref_edit_indices.numel())
+@@ -1103,7 +1179,18 @@
+         "ResidualInteractActorModel only supports GaussianDistribution, "
+         f"got {class_name}."
+       )
+-    self.distribution = GaussianDistribution(mdp.ACTION_DIM, **dist_cfg)
++    self.zspace_sample_z = bool(_ZSPACE_SAMPLE_Z and self.zspace is not None)
++    if self.zspace_sample_z:
++      self.distribution = GaussianDistribution(
++        self.astra_token_dim, init_std=_ZSPACE_Z_STD, std_range=(1e-3, 3.0),
++        std_type="scalar", learn_std=_ZSPACE_LEARN_Z_STD,
++      )
++      if self._zspace_requested_output_dim != self.astra_token_dim:
++        raise ValueError(f"ZSPACE_SAMPLE_Z: env action width {self._zspace_requested_output_dim} != latent {self.astra_token_dim}")
++      print(f"[ResidualInteractActor] ZSPACE_SAMPLE_Z: policy Gaussian over z ({self.astra_token_dim}-D), "
++            f"std={_ZSPACE_Z_STD} learn_std={_ZSPACE_LEARN_Z_STD}; env actions are decoded by the wrapper")
++    else:
++      self.distribution = GaussianDistribution(mdp.ACTION_DIM, **dist_cfg)
+     self.register_buffer(
+       "residual_mask", _make_residual_mask(residual_mask, device="cpu")
+     )
+@@ -1146,7 +1233,7 @@
+     self.last_hand_primitive_close = torch.zeros(1, 2)
+     self.last_hand_primitive_delta = torch.zeros(1, mdp.NUM_HAND)
+     if self.residual_arch == "astra_hidden_residual":
+-      token_delta_dim = ASTRAONNX29BodyActor.hidden_dim
++      token_delta_dim = self.astra_token_dim
+     elif self.residual_arch == "astra_ref_edit":
+       token_delta_dim = int(self.astra_ref_edit_indices.numel())
+     else:
+@@ -1249,7 +1336,7 @@
+         "astra_ref_edit",
+       }:
+         if self.residual_arch == "astra_hidden_residual":
+-          start = ASTRAONNX29BodyActor.hidden_dim
++          start = self.astra_token_dim
+         elif self.residual_arch == "astra_ref_edit":
+           start = int(self.astra_ref_edit_indices.numel())
+         else:
+@@ -1332,6 +1419,8 @@
+     hand_init_std: float | None,
+     disabled_init_std: float | None,
+   ) -> None:
++    if getattr(self, "zspace_sample_z", False):
++      return  # the Gaussian is over z; the body/hand/disabled std split does not apply
+     if body_init_std is None and hand_init_std is None and disabled_init_std is None:
+       return
+     if self.distribution.std_type == "scalar":
+@@ -1473,6 +1562,62 @@
+       chunks.append(value)
+     return chunks
+ 
++  def _zspace_anchor(self, obs: TensorDict) -> tuple[torch.Tensor, torch.Tensor]:
++    """Normalised s and the latent the residual is added to (encoder mean or prior mean)."""
++    zs = cast(nn.Module, self.zspace)
++    s_raw = torch.cat([_zspace_group_tensor(obs, g) for g in self.zspace_self_groups], dim=-1).float()
++    g_raw = torch.cat([_zspace_group_tensor(obs, g) for g in self.zspace_task_groups], dim=-1).float()
++    dev = s_raw.device
++    if next(zs.parameters()).device != dev:
++      zs.to(dev)
++    if self.zspace_ref_default is not None:
++      # proprio_history's joint columns are `q - ref["default_body"]`, and that default is the MEAN
++      # POSE OF THE CLIP SET the env was built with -- a dataset constant. The student learned the
++      # 1324-clip mix's constant; this env's 8-clip constant differs by up to ~0.5 rad on the arm
++      # joints, so every joint column arrives shifted. Convert to the student's convention:
++      #   q - d_train = (q - d_here) + (d_here - d_train).
++      d_train_b, d_train_h = self.zspace_ref_default
++      ref_here = mdp.apple_mdp._ref(str(dev))
++      db = (ref_here["default_body"].to(dev) - d_train_b.to(dev)).float()
++      dh = (ref_here["default_hand"].to(dev) - d_train_h.to(dev)).float()
++      s_raw = s_raw.clone()
++      for h in range(4):
++        o = h * 144
++        s_raw[:, o:o + 29] += db
++        s_raw[:, o + 58:o + 98] += dh
++    with torch.no_grad():
++      s_n, g_n = zs.normalize(s_raw, g_raw)
++      if self.zspace_mask_hand_input:
++        # A body-only student saw the hand parked at its default pose for every sample, so its
++        # input normaliser has ~zero variance on the 40 hand-joint columns of each history slot;
++        # a hand held by a different PD (kp 10 here vs 300 there) lands 3-5 sigma out and clamps.
++        # Feed the training-time value (normalised 0) on those columns: the body tracker never
++        # used the hand state, and this is the only place the two envs' hands differ.
++        for h in range(4):
++          o = h * 144
++          s_n[:, o + 58:o + 138] = 0.0
++      if os.environ.get("ZSPACE_DEBUG", "").strip() == "1":
++        self._zspace_dbg_n = getattr(self, "_zspace_dbg_n", 0) + 1
++        if self._zspace_dbg_n % 50 == 1:
++          # proprio_history = 4 x [body_jp 29, body_jv 29, hand_jp 40, hand_jv 40, root_vel 3, grav 3]
++          #                   + root_z 1 + last_final_action 69 (body 29, hand 40)
++          blocks = []
++          for h in range(4):
++            o = h * 144
++            blocks += [(f"h{h}_body_jp", o, o + 29), (f"h{h}_body_jv", o + 29, o + 58),
++                       (f"h{h}_hand_jp", o + 58, o + 98), (f"h{h}_hand_jv", o + 98, o + 138),
++                       (f"h{h}_rootv", o + 138, o + 141), (f"h{h}_grav", o + 141, o + 144)]
++          blocks += [("root_z", 576, 577), ("last_a_body", 577, 606), ("last_a_hand", 606, 646)]
++          sat = (s_n.abs() >= 4.99).float()
++          msg = " ".join(f"{n}:sat={sat[:, a:b].mean():.2f},|x|={s_n[:, a:b].abs().mean():.2f}"
++                         for n, a, b in blocks if b <= s_n.shape[1])
++          print(f"[zspace-dbg] s_n dims={s_n.shape[1]} {msg} || g_n sat={(g_n.abs() >= 4.99).float().mean():.2f} |g|={g_n.abs().mean():.2f}", flush=True)
++      if _ZSPACE_ANCHOR == "prior":
++        z0, _ = zs.prior(s_n)
++      else:
++        z0, _ = zs.encode(s_n, g_n)
++    return s_n.detach(), z0.detach()
++
+   def _residual_features(
+     self, obs: TensorDict, base_action: torch.Tensor
+   ) -> torch.Tensor:
+@@ -2149,6 +2294,19 @@
+       if not isinstance(self.base_tracker, ASTRAONNX29BodyActor):
+         raise RuntimeError("ASTRA residual architectures require ASTRAONNX29BodyActor.")
+       hidden, base_body = self.base_tracker.hidden_and_body_action(obs)
++      if self.zspace is not None:
++        zs_s_n, zs_z0 = self._zspace_anchor(obs)
++        self._zs_cache = (zs_s_n, zs_z0)
++        astra_body = base_body
++        with torch.no_grad():
++          base_body = self.zspace.decode(zs_s_n, zs_z0).detach().to(dtype=base_body.dtype)
++        if os.environ.get("ZSPACE_DEBUG", "").strip() == "1":
++          self._zspace_dbg_a = getattr(self, "_zspace_dbg_a", 0) + 1
++          if self._zspace_dbg_a % 50 == 1:
++            _d = (base_body - astra_body).float()
++            print(f"[zspace-dbg] student-vs-ASTRA body action on identical obs: rmse {_d.norm(dim=-1).mean():.3f} "
++                  f"|astra| {astra_body.float().norm(dim=-1).mean():.3f} |student| {base_body.float().norm(dim=-1).mean():.3f} "
++                  f"worst-dim {int(_d.abs().mean(0).argmax())}={_d.abs().mean(0).max():.3f}", flush=True)
+       zero_hand = self.base_tracker.hand_base(
+         obs, base_body.shape[0], base_body.device, base_body.dtype
+       )
+@@ -2177,7 +2335,7 @@
+       features = self._residual_features(obs, base_action)
+       raw = self.residual_mlp(features)
+       token_dim = (
+-        ASTRAONNX29BodyActor.hidden_dim
++        self.astra_token_dim
+         if self.residual_arch == "astra_hidden_residual"
+         else int(self.astra_ref_edit_indices.numel())
+       )
+@@ -2208,7 +2366,12 @@
+         token_residual,
+         global_residual_gate,
+       )
+-      if self.residual_arch == "astra_hidden_residual":
++      if self.zspace is not None:
++        candidate_body = self.zspace.decode(zs_s_n, zs_z0 + token_residual.to(zs_z0.dtype))
++        candidate_body = candidate_body.to(dtype=base_body.dtype)
++        # keep astra_obs[5] (last ASTRA action) meaning what it means on the hidden-token arm
++        self.base_tracker.sync_last_astra_action_from_mjlab(candidate_body.detach())
++      elif self.residual_arch == "astra_hidden_residual":
+         candidate_body = self.base_tracker.decode_hidden_to_mjlab_body_action(
+           hidden + token_residual
+         )
+@@ -2448,7 +2611,35 @@
+     self.last_previous_token_residual = self.last_token_residual.detach()
+     self.last_token_residual = token_residual.detach()
+     self.last_decoder_body_delta = decoder_body_delta.detach()
++    if getattr(self, "zspace_sample_z", False):
++      # the policy output is the z residual; the decoded 69-D mean is kept for the metrics bridge
++      self._zs_final_mean = final.detach()
++      return token_residual
+     return final
++
++  def decode_z(self, delta: torch.Tensor) -> torch.Tensor:
++    """ZSPACE_SAMPLE_Z: executed 69-D action for a (sampled) z residual, from the last forward's anchor.
++
++    Publishes the same last_* state the 69-D sampling path does, so the env's observation groups
++    (last_final_action, proprio_history, astra_obs[5]) and the metrics see the executed action.
++    """
++    zs_s_n, zs_z0 = self._zs_cache
++    zs = cast(nn.Module, self.zspace)
++    with torch.no_grad():
++      body = zs.decode(zs_s_n, zs_z0 + delta.to(zs_z0.dtype)).to(dtype=self.last_base_action.dtype)
++      if self.final_action_clip is not None:
++        body = torch.clamp(body, -self.final_action_clip, self.final_action_clip)
++      hand = self.last_base_action[:, mdp.NUM_BODY:]
++      executed = torch.cat([body, hand], dim=-1)
++      mean_body = self._zs_final_mean[:, : mdp.NUM_BODY]
++      self.last_final_action = executed
++      self.last_residual_action = (executed - self.last_base_action)
++      self.last_decoder_body_delta = body - self.last_base_action[:, : mdp.NUM_BODY]
++      self.last_body_sample_delta_pre_clip = body - mean_body
++      self.last_body_sample_delta_post_clip = body - mean_body
++      self.last_body_sample_clip_frac = torch.zeros(body.shape[0], device=body.device)
++      self.base_tracker.sync_last_astra_action_from_mjlab(body)
++    return executed
+ 
+   def forward(
+     self,
+@@ -2465,6 +2656,16 @@
+       else obs,
+     )
+     mean = self._compute_mean(obs_td)
++    if getattr(self, "zspace_sample_z", False):
++      self.last_action_mean = self._zs_final_mean
++      self._sanitize_distribution_std_()
++      self.distribution.update(mean)
++      if stochastic_output:
++        delta = self.distribution.sample()
++        self.decode_z(delta)
++        return delta
++      self.decode_z(mean)
++      return self.distribution.deterministic_output(mean)
+     self.last_action_mean = mean.detach()
+     self._sanitize_distribution_std_()
+     if stochastic_output:

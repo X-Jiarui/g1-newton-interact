@@ -1,0 +1,202 @@
+seed: 42
+num_steps_per_env: 128
+max_iterations: 100000
+obs_groups:
+  actor: !!python/tuple
+  - sonic_obs_or_latent
+  - proprio_history
+  - tracker_action
+  - reference_phase
+  - reference_preview
+  - object_state
+  - hand_object_geometry
+  - contact_features
+  - placement_goal
+  - tracking_error
+  - last_residual
+  - last_final_action
+  critic: !!python/tuple
+  - sonic_obs_or_latent
+  - proprio_history
+  - tracker_action
+  - reference_phase
+  - reference_preview
+  - object_state
+  - hand_object_geometry
+  - contact_features
+  - placement_goal
+  - tracking_error
+  - last_residual
+  - last_final_action
+save_interval: 10
+experiment_name: g1_residual_interact
+run_name: OF_00_apple_eat_1_SPHERE
+logger: tensorboard
+wandb_project: mjlab
+wandb_tags: !!python/tuple []
+resume: false
+load_run: .*
+load_checkpoint: model_.*.pt
+clip_actions: 5.0
+upload_model: false
+class_name: OnPolicyRunner
+actor:
+  hidden_dims: !!python/tuple
+  - 512
+  - 256
+  - 128
+  activation: elu
+  obs_normalization: true
+  cnn_cfg: null
+  distribution_cfg:
+    class_name: GaussianDistribution
+    init_std: 0.08
+    std_type: scalar
+  rnn_type: null
+  rnn_hidden_dim: 256
+  rnn_num_layers: 1
+  class_name: mjlab.tasks.residual_interact.residual_actor:ResidualInteractActorModel
+critic:
+  hidden_dims: !!python/tuple
+  - 512
+  - 256
+  - 128
+  activation: elu
+  obs_normalization: true
+  cnn_cfg: null
+  distribution_cfg: null
+  rnn_type: null
+  rnn_hidden_dim: 256
+  rnn_num_layers: 1
+  class_name: MLPModel
+algorithm:
+  num_learning_epochs: 5
+  num_mini_batches: 4
+  learning_rate: 2.0e-05
+  schedule: fixed
+  gamma: 0.995
+  lam: 0.95
+  entropy_coef: 0.0
+  desired_kl: 0.02
+  max_grad_norm: 1.0
+  value_loss_coef: 1.0
+  use_clipped_value_loss: true
+  clip_param: 0.2
+  normalize_advantage_per_mini_batch: false
+  optimizer: adam
+  share_cnn_encoders: false
+  class_name: PPO
+base_tracker_kind: astra_onnx
+tracker_ckpt: /opt/mjlab_assets/GR00T-WholeBodyControl/logs/g1_online_dagger_action/apple_eat_full_motion_dagger_cuboid07_no_objterm_128env_gpu1/model_ep00500.pt
+init_from: ema
+sonic_encoder_onnx: /home/jrxu/onnx/model_encoder.onnx
+sonic_decoder_onnx: /home/jrxu/onnx/model_decoder.onnx
+astra_onnx_path: /home/jrxu/onnx/pns_wo_priv216.onnx
+base_hand_mode: zero
+residual_gain: 1.0
+body_residual_gain: null
+hand_residual_gain: null
+residual_action_clip: 0.5
+final_action_clip: null
+residual_mask: all
+residual_feature_groups: !!python/tuple
+- proprio_history
+- tracker_action
+- reference_phase
+- reference_preview
+- object_state
+- hand_object_geometry
+- object_future
+- contact_features
+- tracking_error
+- last_residual
+- last_final_action
+critic_feature_groups: !!python/tuple []
+ref_preview_steps: !!python/tuple
+- 1
+- 5
+- 10
+residual_feature_dropout: 0.0
+residual_arch: astra_hidden_residual
+ref_edit_clip: 0.12
+ref_edit_groups: arms
+ref_edit_init_bias: ''
+split_hand_net: false
+frame_hidden_dims: !!python/tuple
+- 128
+- 128
+token_residual_clip: 0.1
+token_residual_gain: 1.0
+body_init_std: null
+hand_init_std: 0.0001
+disabled_init_std: null
+zero_init_residual: true
+residual_l2_weight: 0.01
+residual_smooth_weight: 0.005
+token_l2_weight: 0.0
+token_smooth_weight: 0.0
+training_scheme: none
+stage_body_iterations: 500
+stage_hand_iterations: 1000
+stage_body_tracking_weight: 1.0
+stage_hand_action_weight: 1.0
+stage_hand_raw_tip_weight: 0.5
+stage_hand_raw_radial_weight: 0.2
+stage_joint_tracking_weight: 1.0
+stage_joint_hand_action_weight: 0.5
+stage_joint_raw_tip_weight: 0.5
+stage_joint_raw_radial_weight: 0.2
+stage_stability_weight: 0.5
+hand_bc_weight: 0.0
+hand_bc_start_iteration: 0
+hand_bc_end_iteration: null
+hand_bc_checkpoint: ''
+hand_bc_feature_groups: !!python/tuple []
+freeze_hand_bc: true
+hand_bc_action_clip: 5.0
+hand_bc_base_start_frame: 0
+hand_residual_start_frame: null
+residual_start_frame: 0
+residual_ramp_frames: 0
+residual_lowpass_alpha: 1.0
+body_sample_delta_clip: null
+hand_sample_delta_clip: null
+fixed_hand_action_frame: 0
+hand_primitive_mode: none
+hand_primitive_close_frame: 70
+hand_primitive_open_frame: -1
+hand_primitive_hard_threshold: 0.5
+hand_primitive_init_logit_bias: -2.0
+ppo_body_only: false
+freeze_tracker: true
+load_residual_config: true
+load_artifact_history: true
+artifact_report_iters: !!python/tuple
+- 0
+- 100
+- 300
+- 600
+- 1000
+- 1500
+- 2000
+- 3000
+eval_steps: 300
+eval_reference_start_frame: 0
+write_eval_artifacts: true
+wandb_metric_mode: compact
+horizon_curriculum: false
+horizon_start_ref_frames: 50
+horizon_final_ref_frames: null
+horizon_increment_ref_frames: 50
+horizon_success_threshold: 0.03
+horizon_success_patience: 5
+horizon_metric: Metric/body_link_dist_mean
+horizon_startup_steps: 36
+horizon_min_iterations_per_stage: 0
+tracking_region_curriculum: false
+tracking_region_initial: all
+tracking_region_after: all
+tracking_region_metric: Metric/lower_body_xyz_err_mse
+tracking_region_success_threshold: 0.001
+tracking_region_success_patience: 5
+tracking_region_min_horizon_ref_frames: 0

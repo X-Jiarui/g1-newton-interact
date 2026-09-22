@@ -1,0 +1,91 @@
+--- /private/tmp/claude-501/-Users-jerryxu-Documents/268574d7-6fef-4f37-9bd3-2e8b4b763aac/scratchpad/h200tree/g1-newton-interact/tools/run/train_newton.py	2026-09-17 11:44:01
++++ /private/tmp/claude-501/-Users-jerryxu-Documents/268574d7-6fef-4f37-9bd3-2e8b4b763aac/scratchpad/train_newton_box_patched.py	2026-09-21 22:32:04
+@@ -547,10 +547,30 @@
+       f"max_episode_length={env.max_episode_length}")
+ 
+ wrapped = RslRlVecEnvWrapper(env)
++if os.environ.get("ZSPACE_SAMPLE_Z", "").strip() == "1":
++  # PULSE-style latent-space policy: PPO acts in z (latent_dim-D); this wrapper decodes each z
++  # residual to the 69-D joint action through the actor's frozen decoder before stepping the env.
++  # num_actions must be set BEFORE the runner is built (rsl_rl sizes actor/storage from it).
++  from mjlab.tasks.residual_interact import zspace as _zs
++  _student_ckpt = os.environ["ZSPACE_STUDENT"]
++  _zs_model, _ = _zs.load_student(_student_ckpt, "cpu")
++  wrapped.num_actions = int(_zs_model.cfg.latent_dim)
++  wrapped._modify_action_space()
++  wrapped._zspace_decode = None
++  _wrapped_step = wrapped.step
++  def _zspace_step(z):
++    if wrapped._zspace_decode is None:
++      raise RuntimeError("ZSPACE_SAMPLE_Z: wrapper has no decoder yet (runner not built)")
++    return _wrapped_step(wrapped._zspace_decode(z))
++  wrapped.step = _zspace_step
++  print(f"[zspace] ZSPACE_SAMPLE_Z: env action space is z ({wrapped.num_actions}-D); decode in the wrapper", flush=True)
++  del _zs_model
+ log_dir = Path(A.log_root) / "g1_residual_interact" / A.run_name
+ log_dir.mkdir(parents=True, exist_ok=True)
+ runner_cls = load_runner_cls(TASK) or MjlabOnPolicyRunner
+ runner = runner_cls(wrapped, asdict(agent_cfg), log_dir=str(log_dir), device="cuda:0")
++if os.environ.get("ZSPACE_SAMPLE_Z", "").strip() == "1":
++  wrapped._zspace_decode = runner.alg.actor.decode_z
+ if A.resume:
+   runner.load(A.resume)
+   print(f"warm-started from {A.resume}")
+@@ -979,6 +999,18 @@
+   # Without this wrapper a working checkpoint silently produces a policy that does nothing --
+   # the residual action statistics live outside the actor and have to be reattached.
+   _pol = _wrap_stats(TASK, runner, _pol)
++  if os.environ.get("ROLLOUT_STOCHASTIC", "").strip() == "1":
++    # Sample actions exactly as training does (actor.forward(stochastic_output=True)) instead of the
++    # mean: tells whether a training-time metric was earned by the sampled policy only.
++    _actor_s = runner.alg.actor
++    _actor_s.eval()
++    def _pol_stoch(obs):
++      with _rt.no_grad():
++        a = _actor_s(obs, stochastic_output=True)
++      runner._set_residual_action_stats(_actor_s, a)
++      return a
++    _pol = _pol_stoch
++    print("[rollout] ROLLOUT_STOCHASTIC=1: sampling actions from the policy distribution", flush=True)
+   # Judge every checkpoint from the same place: the reference start. The RSI window would
+   # otherwise drop each rollout at a random frame and the clips would not be comparable.
+   #
+@@ -1065,6 +1097,29 @@
+   for _k in range(int(A.rollout_steps)):
+     with _rt.inference_mode():
+       _act = _pol(_obs)
++    # ROLLOUT_TIMELINE=<csv>: per-step means across worlds of the tracking/approach state, from the
++    # observation the policy acted on. Answers "when in the episode does the policy come off the
++    # reference" -- the summary metrics average from step 0 (36 held steps included) and cannot.
++    _tl = os.environ.get("ROLLOUT_TIMELINE", "").strip()
++    if _tl:
++      _te = _obs["tracking_error"].reshape(_obs["tracking_error"].shape[0], -1).float()
++      _hg = _obs["hand_object_geometry"].reshape(_obs["hand_object_geometry"].shape[0], -1).float()
++      _rz = env._env.scene["robot"].data.root_link_pose_w[:, 2].float()
++      if _k == 0:
++        _tlf = open(_tl, "w"); _tlf.write("step,root_err_m,q_err_rad,tip_obj_min_m,tip_under_5cm,root_z_m,fallen_frac,tok_norm,dec_delta_norm,gate,ref_frame\n")
++      _ac = runner.alg.actor
++      _tok = getattr(_ac, "last_token_residual", None); _dd = getattr(_ac, "last_decoder_body_delta", None); _gt = getattr(_ac, "last_hand_control_gate", None)
++      _tokn = float(_tok.float().norm(dim=-1).mean()) if isinstance(_tok, _rt.Tensor) and _tok.shape[0] == _te.shape[0] else float("nan")
++      _ddn = float(_dd.float().norm(dim=-1).mean()) if isinstance(_dd, _rt.Tensor) and _dd.shape[0] == _te.shape[0] else float("nan")
++      _gtm = float(_gt.float().mean()) if isinstance(_gt, _rt.Tensor) else float("nan")
++      _rf = float(_obs["reference_phase"].reshape(_obs["reference_phase"].shape[0], -1)[:, 0].float().mean()) if "reference_phase" in _obs.keys() else float("nan")
++      _tlf.write(f"{_k},{_te[:, :3].norm(dim=-1).mean():.4f},{_te[:, 9:9 + 29].abs().mean():.4f},"
++                 f"{_hg[:, 40].mean():.4f},{(_hg[:, 40] < 0.05).float().mean():.3f},{_rz.mean():.3f},{(_rz < 0.5).float().mean():.3f},"
++                 f"{_tokn:.4f},{_ddn:.4f},{_gtm:.3f},{_rf:.3f}\n")
++      if _k == int(A.rollout_steps) - 1:
++        _tlf.close()
++    if os.environ.get("ZSPACE_SAMPLE_Z", "").strip() == "1" and _act.shape[-1] != env.action_manager.total_action_dim:
++      _act = runner.alg.actor.decode_z(_act)  # rollout steps the raw env, not the decoding wrapper
+     _obs, _rw, _tm, _to, _ex = env.step(_act)
+     _dones += int((_tm | _to).sum())
+     if _k in (0, 1, 5, 50, 200):
+@@ -1340,6 +1395,8 @@
+               f"{float(_op_w[_i][2]):.4f} | {float(_rp[_i][2]):.4f} | "
+               f"{float(_d[_i])*1000:8.1f}{_flag}   elb={int(_e.episode_length_buf[_i])}")
+       print()
++    if os.environ.get("ZSPACE_SAMPLE_Z", "").strip() == "1" and _act.shape[-1] != env.action_manager.total_action_dim:
++      _act = runner.alg.actor.decode_z(_act)
+     env.step(_act)
+   raise SystemExit(0)
+ runner.learn(num_learning_iterations=A.iterations, init_at_random_ep_len=True)

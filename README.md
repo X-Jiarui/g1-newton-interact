@@ -538,3 +538,4 @@ Each cost real time here. [docs/03-defects.md](docs/03-defects.md) and
 | `configs/retarget/grasp_ik.yaml` | every retargeting parameter, its sweep, and what was rejected |
 | `tools/setup/patch_mjlab.py` | ships the env->clip map fix into the unversioned mjlab checkout |
 | `docs/` | goal, parity, baseline, defects, architecture, reproduction, native migration, grasp retargeting |
+| `prior_distill/` | the latent-prior line: distil ASTRA into a 48-d VAE (PULSE-X), RL through the latent, and the no-reference policy `ZS_ZP_ZN_NOREF` — see [prior_distill/README.md](prior_distill/README.md) |

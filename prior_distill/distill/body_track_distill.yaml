@@ -1,0 +1,53 @@
+# zspace line 2: distil the frozen ASTRA tracker (body only, no object) on GRAB body clips.
+#
+# The env recipe is the office-walk tracking run's (docs: office_track_fast on the H200): the
+# object is parked 15 m to the side by the clip itself (prior_distill/distill/make_body_clips.py), cf is
+# the last frame so the table is never removed, RSI is uniform over the whole clip, and only
+# fell_over / fell_over_early / time_out are left alive (--keep-terminations in distill_zspace.py).
+#
+#   python prior_distill/distill/distill_zspace.py --config prior_distill/distill/body_track_distill.yaml \
+#       --mode body --reference-list <clips>/clips.txt --sdf-object-all <clips>/meshes/cubesmall.stl \
+#       --num-envs <multiple of the clip count> --out-dir <dir>
+
+name: body_track_distill
+description: >
+  G1 + Wuji, frozen ASTRA tracking GRAB body motion; object parked out of reach, no hand control
+  (hand executed at zero), student = zspace VAE over the 29 body actions.
+
+env:
+  APPLE_HAND_KIND: wuji
+  APPLE_OBJECT_PER_WORLD: 1
+  APPLE_SCENE_Z_OFFSET: -0.03
+  ASTRA_BASE_BACKEND: torch
+
+  # --- reset: uniform over the clip, full 12 s episode ahead of every start ---------------------
+  RSI_ANCHOR_CF: 1
+  RSI_CF_OFFSET_START: -100000
+  RSI_CF_OFFSET_END: -600
+  OBJ_REF_STILL_UNTIL_CF: 1
+  OBJ_REF_WINDOW_ENABLE: 0
+  TIP_CF_MISS_ENABLE: 0
+  WRIST_TARGET_FAR: 0
+  TABLE_REMOVE_AFTER_CF: 50
+  MIX_PMCP_EVERY: 0
+
+  # --- physics: task default rate, no hand-object contact to be stiff about ----------------------
+  SIM_TIMESTEP: 0.005
+  HAND_NOCOLLIDE: 1
+  SHAPE_GAP: 0.01
+  HAND_SOLREF: 0.004,1.0
+  FINGER_FORCE_LIMIT: 1.0
+  NEUTRALISE_LEFTOVER: 1
+
+args:
+  xml: assets/scene_stapler/scene.xml
+  native_contacts: true
+  rigid_object_table: true
+  cuda_graph: true
+  object_solref: "0.004,1.0"
+  seed: 1
+  solver_kwargs:
+    impratio: 20.0
+    cone: pyramidal
+    iterations: 10
+    ls_iterations: 20

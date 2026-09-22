@@ -1,0 +1,1402 @@
+"""Train the residual policy with Newton doing the physics.
+
+Reuses mjlab's PPO runner and its entire MDP -- observations, action term, rewards, terminations,
+events -- against `NewtonVecEnv`. Only the simulator changes.
+
+Validated before this script was written: all 20 observation groups agree with mjlab from the same
+state, the ctrl vectors are identical for identical actions, and the reward matches mjlab exactly
+while the two states agree (both 0 through the startup hold) and diverges only when the physics does.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json as _json
+import os
+import sys
+from dataclasses import asdict
+from pathlib import Path
+
+import numpy as np
+import torch
+import yaml as _yaml
+
+ap = argparse.ArgumentParser()
+ap.add_argument("--num-envs", type=int, default=256)
+ap.add_argument("--profile-step", type=int, default=0,
+                help="time each part of one control step over N steps and exit; says whether the cost is in warp kernels or in the torch-side managers")
+ap.add_argument("--state-digest", type=int, default=0,
+                help="step N times with zero residual and print checksums of qpos, qvel and reward; run twice with and without --cuda-graph to prove the graph changes no number")
+ap.add_argument("--effortless-action", action="store_true",
+                help="drop the PD torque law from the action term; it is discarded on this backend and costs a host sync per substep")
+ap.add_argument("--object-solref", default="0.004,1.0",
+                help="solref for the object collider. Default 0.004,1.0: measured, the shared default of 0.02 lets the stapler settle 1.88mm into the table (and 11.6mm in transient) against mjlab's analytic sphere at 0.37mm; 0.004 gives 0.04mm for the stapler and 0.28mm for the mug. Pass an empty string to keep the scene default.")
+ap.add_argument("--solver-kwargs", default=None,
+                help="JSON merged into the SolverMuJoCo kwargs, e.g. "
+                     "'{\"impratio\": 1.0, \"cone\": \"pyramidal\"}'. The native path defaults "
+                     "to cone=elliptic with impratio=1000, copied from Newton's hydroelastic "
+                     "example; that ratio makes the tangential (friction) constraints three "
+                     "orders softer than the normal ones, which is a candidate explanation for "
+                     "'the hand touches the object but the object does not move'.")
+ap.add_argument("--rigid-object-table", action="store_true",
+                help="With --native-contacts, collide the object and table rigidly instead of "
+                     "through the hydroelastic SDF. Measured at 1024 env: object/table contacts "
+                     "30-37 -> 4, per-world total 48-79 -> 19-25, 15142 -> 20011 env-steps/s "
+                     "(the MuJoCo-contact path is 22095), resting penetration 0.001 -> 0.110 mm. "
+                     "The object keeps its real STL collider either way, which is what the "
+                     "hand-object grasp actually collides against.")
+ap.add_argument("--table-sdf-resolution", type=int, default=None,
+                help="Separate SDF resolution for the table. Free to lower: at 8 the resting "
+                     "penetration is still -0.002 mm. It does not reduce the contact count, "
+                     "which follows the object's resolution.")
+ap.add_argument("--native-contacts", action="store_true",
+                help="use Newton's SDF hydroelastic collision pipeline instead of "
+                     "MuJoCo's own collision (SolverMuJoCo still integrates)")
+ap.add_argument("--table-under-object", action="store_true",
+                help="move the mocap table so the object's true collider rests where the reference places it, instead of letting the object settle away from it")
+ap.add_argument("--newton-video", default=None,
+                help="record an mp4 with Newton's own renderer, which draws the "
+                     "model the physics holds -- real object mesh, real table")
+ap.add_argument("--video-size", default="960x720")
+ap.add_argument("--video-steps", type=int, default=500)
+ap.add_argument("--video-cam", default=None,
+                help="camera as \"ex,ey,ez,tx,ty,tz\"; default frames the hands and the object from 0.9m")
+ap.add_argument("--dump-qpos", default=None,
+                help="npz of env-0 qpos and mocap per control step, for rendering "
+                     "a video of the run with tools/run/render_traj.py")
+ap.add_argument("--dump-steps", type=int, default=600,
+                help="how many control steps --dump-qpos records")
+ap.add_argument("--cuda-graph", action="store_true",
+                help="replay the physics substep from a captured CUDA graph")
+ap.add_argument("--sensor-probe", type=int, default=0,
+                help="step N times with zero residual and report which sensordata slots ever "
+                     "read nonzero, then exit; verifies contact sensors are live")
+ap.add_argument("--iterations", type=int, default=2000)
+ap.add_argument("--xml", default=os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "assets/mjlab_scene/scene.xml"))
+ap.add_argument("--agent-cfg-from", default=os.path.expanduser(
+  "~/sweep_ckpts_r2/OF_00_apple_eat_1_SPHERE/model_7310.pt"),
+  help="checkpoint whose params/agent.yaml supplies the agent config (tracker, residual gains)")
+ap.add_argument("--reward-cfg", default=None,
+  help="yaml whose `rewards:` block supplies the reward weights, instead of the "
+       "checkpoint's params/env.yaml. Same block format: two spaces name, four spaces weight")
+ap.add_argument("--resume", default=None, help="checkpoint to warm-start from")
+ap.add_argument("--rollout-free-run", action="store_true",
+                help="record the policy without early termination: clears the termination terms and "
+                     "lifts the episode time limit, and sizes the rollout from the clip's own length "
+                     "instead of a fixed step count. A reset mid-grasp makes the video show a "
+                     "sequence of restarts rather than one attempt at the task.")
+ap.add_argument("--rollout-pad", type=float, default=1.2,
+                help="with --rollout-free-run, run this multiple of the clip length so the policy "
+                     "is still being watched after the reference ends")
+ap.add_argument("--rollout-steps", type=int, default=0,
+                help="instead of training, roll the loaded checkpoint out for this many steps and "
+                     "exit. Reuses the env and runner built above, so the contact recipe, object "
+                     "mesh, table and reference are the ones the run was TRAINED with -- a "
+                     "separate eval script re-deriving those flags is how earlier rollouts came "
+                     "to be judged in a scene the policy never saw. Pair with --dump-qpos.")
+ap.add_argument("--run-name", default="NEWTON_NATIVE")
+ap.add_argument("--log-root", default=os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "logs/rsl_rl"))
+ap.add_argument("--seed", type=int, default=42)
+ap.add_argument("--sdf-object", default=None,
+                help="STL whose SDF replaces the scene's sphere collider, e.g. the GRAB mesh for "
+                     "this clip's object. Without it the object stays mjlab's 4cm analytic sphere.")
+ap.add_argument("--sdf-resolution", type=int, default=128)
+ap.add_argument("--viser-port", type=int, default=None,
+                help="serve a live view of training on this port (tunnel and open in a browser)")
+ap.add_argument("--render-every", type=int, default=4,
+                help="control steps between rendered frames; rendering every step costs throughput")
+ap.add_argument("--reference-pkl", default=None,
+                help="sets APPLE_EAT_PKL before the task modules read it")
+ap.add_argument("--reference-pkls", default=None,
+                help="comma-separated clips for mixed training; sets APPLE_EAT_PKL_MIX. Each env "
+                     "trains on exactly one of them, so the batch carries several tasks at once.")
+ap.add_argument("--clip-env-counts", default=None,
+                help="comma-separated env count per clip, in --reference-pkls order. Must sum to "
+                     "--num-envs. This is how a PMCP segment starts from the previous segment's "
+                     "allocation; without it the split is equal.")
+ap.add_argument("--sdf-objects", default=None,
+                help="comma-separated object meshes, one per --reference-pkls entry IN THE SAME "
+                     "ORDER. Checked against each clip's own obj_name rather than trusted.")
+ap.add_argument("--config", default=None,
+                help="YAML training config: an `env:` block exported into os.environ and an "
+                     "`args:` block supplying defaults for the flags above. Anything typed on the "
+                     "command line WINS over the file, so a config pins a run's baseline while "
+                     "one flag still varies it. Without this the run's identity lives in a wall "
+                     "of `env VAR=... ` prefixes that no two launches ever spelled the same way.")
+A = ap.parse_args()
+
+# ---------------------------------------------------------------------------------------------
+# Config file. Loaded HERE and nowhere later: several of these variables are read at import time
+# (APPLE_EAT_PKL by the task modules, APPLE_HAND_KIND by the entity cfg), so a config applied
+# after the mjlab import below would be printed by the run and ignored by the simulation -- the
+# same silent-no-op class of bug that APPLE_HAND_EFFORT already cost us a whole A/B for.
+if A.config:
+  _cfg_path = os.path.abspath(os.path.expanduser(A.config))
+  if not os.path.exists(_cfg_path):
+    raise SystemExit(f"--config {_cfg_path} does not exist")
+  with open(_cfg_path) as _cf:
+    _cfg = _yaml.safe_load(_cf) or {}
+  if not isinstance(_cfg, dict):
+    raise SystemExit(f"--config {_cfg_path} must be a YAML mapping, got {type(_cfg).__name__}")
+  _unknown = set(_cfg) - {"name", "description", "env", "args", "notes"}
+  if _unknown:
+    raise SystemExit(f"--config {_cfg_path}: unknown top-level key(s) {sorted(_unknown)}; "
+                     "expected name/description/notes/env/args")
+
+  # env: exported only if not already set, so an explicit `VAR=x python train_newton.py` on the
+  # command line still overrides the file the same way an explicit flag does.
+  _env_blk = _cfg.get("env") or {}
+  _env_set, _env_kept = [], []
+  for _k, _v in _env_blk.items():
+    if _v is None:
+      continue
+    _sv = ("1" if _v is True else "0" if _v is False else str(_v))
+    if os.environ.get(_k) not in (None, ""):
+      _env_kept.append(f"{_k}={os.environ[_k]}")
+    else:
+      os.environ[_k] = _sv
+      _env_set.append(f"{_k}={_sv}")
+
+  # args: applied only to flags absent from argv, so the command line always wins.
+  _arg_blk = _cfg.get("args") or {}
+  _known = {a.dest for a in ap._actions}
+  _bad = set(_arg_blk) - _known
+  if _bad:
+    raise SystemExit(f"--config {_cfg_path}: unknown args key(s) {sorted(_bad)}; "
+                     f"valid keys are the flag names with dashes turned into underscores")
+  _arg_set, _arg_kept = [], []
+  for _k, _v in _arg_blk.items():
+    if f"--{_k.replace('_', '-')}" in sys.argv or f"--{_k}" in sys.argv:
+      _arg_kept.append(_k)
+      continue
+    # solver_kwargs is a JSON string downstream; let the config spell it as a real mapping.
+    if _k == "solver_kwargs" and isinstance(_v, dict):
+      _v = _json.dumps(_v)
+    # The dataset, the object mesh and the resume checkpoint live outside the repo and land on a
+    # different absolute path on every box (/workspace on vast, /home/jrxu on the H200). Expanding
+    # ${VAR} and ~ here keeps ONE config portable instead of one fork per machine; an unset
+    # variable would otherwise pass through as the literal "${SEED_CUBE}/..." and fail much later
+    # with a confusing missing-file error, so refuse it up front.
+    if isinstance(_v, str) and ("$" in _v or _v.startswith("~")):
+      _exp = os.path.expandvars(os.path.expanduser(_v))
+      if "$" in _exp:
+        raise SystemExit(f"--config {_cfg_path}: args.{_k} = {_v!r} references an environment "
+                         f"variable that is not set (expanded to {_exp!r})")
+      _v = _exp
+    setattr(A, _k, _v)
+    _arg_set.append(f"{_k}={_v}")
+  print(f"[config] {_cfg_path} :: {_cfg.get('name', '(unnamed)')}", flush=True)
+  print(f"[config]   env  : {len(_env_set)} set" +
+        (f"; {len(_env_kept)} left as already-exported ({', '.join(_env_kept)})" if _env_kept
+         else ""), flush=True)
+  print(f"[config]   args : {len(_arg_set)} set" +
+        (f"; {len(_arg_kept)} left to the command line ({', '.join(_arg_kept)})" if _arg_kept
+         else ""), flush=True)
+
+MIX_PKLS: list[str] = []
+MIX_STLS: list[str] = []
+if A.reference_pkls:
+  import pickle as _pickle
+  MIX_PKLS = [x.strip() for x in A.reference_pkls.split(",") if x.strip()]
+  MIX_STLS = [x.strip() for x in (A.sdf_objects or "").split(",") if x.strip()]
+  if len(MIX_PKLS) < 2:
+    raise SystemExit("--reference-pkls needs at least two clips; use --reference-pkl for one")
+  if len(MIX_STLS) != len(MIX_PKLS):
+    raise SystemExit(f"--sdf-objects has {len(MIX_STLS)} entries for {len(MIX_PKLS)} clip(s)")
+  # Pairing the wrong mesh with a clip does not crash -- the robot just reaches for a shape that is
+  # not there, and the clip never learns. Each pkl records its own object, so check rather than
+  # trust the order the caller typed.
+  for _pkl, _stl in zip(MIX_PKLS, MIX_STLS):
+    with open(_pkl, "rb") as _f:
+      _want = str(_pickle.load(_f).get("obj_name", "")).strip().lower()
+    _got = os.path.splitext(os.path.basename(_stl))[0].strip().lower()
+    if _want and _got != _want:
+      raise SystemExit(f"clip {os.path.basename(_pkl)} is about {_want!r} but was paired with "
+                       f"{os.path.basename(_stl)!r}; --reference-pkls and --sdf-objects must line up")
+  os.environ["APPLE_EAT_PKL_MIX"] = ",".join(MIX_PKLS)
+  # Several mjlab code paths still read the singular variable; point it at the first clip so they
+  # resolve to a real file rather than whatever was left in the environment.
+  os.environ["APPLE_EAT_PKL"] = MIX_PKLS[0]
+  # This port groups environments by object and replicates each group, so an environment carries
+  # exactly one object -- its own. Declare that layout so the scene config authors ONE object
+  # entity and one sensor set instead of one per clip; mjlab's default fan-out assumes every
+  # environment holds every object and parks the unused ones, which this scene has no room for.
+  # Only scene authoring changes: mix_clip_count() still reports the real clip count, so the clip
+  # map, the per-clip gates and the terminations are untouched.
+  os.environ["APPLE_OBJECT_PER_WORLD"] = "1"
+  print(f"[train] MIX: {len(MIX_PKLS)} clips " +
+        ", ".join(f"{os.path.basename(p)}->{os.path.basename(t)}"
+                  for p, t in zip(MIX_PKLS, MIX_STLS)))
+elif A.reference_pkl:
+  # Has to be set before mjlab's task modules import: the clip path is read at module level.
+  os.environ["APPLE_EAT_PKL"] = A.reference_pkl
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "src"))
+import mjw_compat
+_p = mjw_compat.apply()
+if _p:
+  print(f"[compat] tolerating removed mujoco_warp options: {_p}")
+
+import mjlab.tasks  # noqa: F401
+from mjlab.rl import RslRlVecEnvWrapper, MjlabOnPolicyRunner
+from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
+from mjlab.scripts.play import _apply_cfg_mapping
+from newton_vec_env import NewtonVecEnv
+from reward_cfg_from_checkpoint import reward_weights_from_env_yaml, apply_reward_weights
+
+TASK = "Mjlab-ResidualInteract-G1"
+torch.manual_seed(A.seed)
+np.random.seed(A.seed)
+
+cfg = load_env_cfg(TASK, play=False)
+cfg.scene.num_envs = A.num_envs
+agent_cfg = load_rl_cfg(TASK)
+p = Path(A.agent_cfg_from).parent / "params" / "agent.yaml"
+if not p.exists():
+  raise SystemExit(f"missing {p}: the task default agent config points at another project's tracker")
+_apply_cfg_mapping(agent_cfg, _yaml.unsafe_load(p.open()))
+
+# The agent config is not the whole story: the checkpoint's env.yaml carries the reward weights it
+# trained with, and load_env_cfg returns the task default where only `tracking` has weight. Training
+# against the default is training with no grasping reward at all.
+_env_yaml = (Path(A.reward_cfg) if A.reward_cfg
+             else Path(A.agent_cfg_from).parent / "params" / "env.yaml")
+if A.reward_cfg and not _env_yaml.exists():
+  raise SystemExit(f"--reward-cfg {_env_yaml} does not exist")
+if _env_yaml.exists():
+  _w = reward_weights_from_env_yaml(_env_yaml)
+  # A yaml that parses to nothing is the failure this guard exists for: the flow style
+  # `name: {weight: 1.0}` matches neither regex, so the file reads as empty and training
+  # silently falls back to the task default where only `tracking` carries weight.
+  if not _w:
+    raise SystemExit(f"[reward-cfg] {_env_yaml} parsed to zero reward terms. The block "
+                     f"format is `  <name>:` then `    weight: <float>` on the next line.")
+  print(f"[reward-cfg] source: {_env_yaml}")
+  apply_reward_weights(cfg, _w)
+else:
+  print(f"[reward-cfg] WARNING: no env.yaml beside the checkpoint; training with the task default, "
+        f"where only one reward term carries weight")
+
+# Every candidate trained with the pelvis start-assist disabled; the task default is 1.5 for 120
+# steps, which would prop the robot up with a wrench it never sees at evaluation.
+_s = cfg.actions.get("sonic_action") if isinstance(cfg.actions, dict) else cfg.actions.sonic_action
+_s.tracking_start_assist_gain = 0.0
+_s.tracking_start_assist_steps = 0
+if str(getattr(agent_cfg, "base_tracker_kind", "")).strip().lower() == "astra_onnx":
+  from mjlab.tasks.residual_interact.env_cfgs import set_astra_body_dynamics
+  set_astra_body_dynamics(cfg)
+
+if A.rollout_free_run:
+  from mjlab.tasks.apple_eat import mdp as _fr_mdp
+  _fr_n = int(_fr_mdp._ref("cpu")["n_frames"])
+  # An explicit --rollout-steps wins; the clip-derived length is only the fallback. Every video
+  # being the same length makes them comparable side by side, which is usually what you want.
+  _fr_steps = int(A.rollout_steps) if int(A.rollout_steps) > 0 \
+      else max(1, int(round(_fr_n * float(A.rollout_pad))))
+  A.rollout_steps = _fr_steps
+  A.dump_steps = _fr_steps
+  A.video_steps = _fr_steps
+  # An episode that is never cut short is the whole point; both halves matter, because a time-out
+  # resets just as surely as a termination does.
+  _fr_terms = cfg.terminations if isinstance(cfg.terminations, dict) else vars(cfg.terminations)
+  _fr_dropped = sorted(_fr_terms.keys())
+  if isinstance(cfg.terminations, dict):
+    cfg.terminations = {}
+  else:
+    for _k in _fr_dropped:
+      setattr(cfg.terminations, _k, None)
+  cfg.episode_length_s = 1.0e9
+  print(f"[free-run] clip is {_fr_n} frames -> {_fr_steps} steps; "
+        f"terminations disabled: {_fr_dropped}", flush=True)
+
+print(f"building {A.num_envs} Newton worlds ...")
+env = NewtonVecEnv(cfg, A.xml, num_envs=A.num_envs, device="cuda:0",
+                   sdf_object_stl=A.sdf_object, sdf_resolution=A.sdf_resolution,
+                   sdf_object_stls=(MIX_STLS or None),
+                   clip_env_counts=([int(x) for x in A.clip_env_counts.split(",")]
+                                    if A.clip_env_counts else None),
+                   native_contacts=A.native_contacts,
+                   hydro_object_table=not A.rigid_object_table,
+                   table_sdf_resolution=A.table_sdf_resolution,
+                   viser_port=A.viser_port, render_every=A.render_every,
+                   cuda_graph=A.cuda_graph,
+                   effortless_action=A.effortless_action,
+                   table_under_object=A.table_under_object,
+                   object_solref=A.object_solref,
+                   dump_qpos=A.dump_qpos, dump_steps=A.dump_steps,
+                   newton_video=A.newton_video, video_size=A.video_size,
+                   video_steps=A.video_steps, video_cam=A.video_cam,
+                   solver_kwargs=(_json.loads(A.solver_kwargs) if A.solver_kwargs else None))
+
+if os.environ.get("HULL_PROBE"):
+  import numpy as _np, mujoco as _mj
+  _m = env.solver.mj_model
+  _g = [g for g in range(_m.ngeom)
+        if "apple" in (_mj.mj_id2name(_m, _mj.mjtObj.mjOBJ_GEOM, g) or "")][0]
+  _did = int(_m.geom_dataid[_g])
+  _va, _vn = int(_m.mesh_vertadr[_did]), int(_m.mesh_vertnum[_did])
+  _V = _m.mesh_vert[_va:_va + _vn].reshape(-1, 3).astype(_np.float64)
+  print("HULL full mesh verts=%d  z=[%.5f, %.5f]" % (_vn, _V[:, 2].min(), _V[:, 2].max()))
+  _ga = int(_m.mesh_graphadr[_did])
+  if _ga >= 0:
+    _g_ = _m.mesh_graph
+    _numvert = int(_g_[_ga]); _numface = int(_g_[_ga + 1])
+    print("HULL convex hull verts=%d faces=%d" % (_numvert, _numface))
+    # hull vertex indices follow the two counts, after the edge tables
+    _idx = _g_[_ga + 2 + _numvert:_ga + 2 + _numvert + _numvert]
+    _idx = _np.asarray(_idx, dtype=_np.int64)
+    _idx = _idx[(_idx >= 0) & (_idx < _vn)]
+    if len(_idx):
+      _H = _V[_idx]
+      print("HULL hull z=[%.5f, %.5f]  lowest is %.2f mm ABOVE the true mesh bottom"
+            % (_H[:, 2].min(), _H[:, 2].max(), 1000.0 * (_H[:, 2].min() - _V[:, 2].min())))
+  else:
+    print("HULL no convex graph on this mesh")
+  raise SystemExit(0)
+
+if os.environ.get("NCON_PROBE"):
+  import numpy as _np, torch as _t, warp as _wp, mujoco as _mj
+  _m = env.solver.mj_model
+  _oid = [g for g in range(_m.ngeom)
+          if "apple" in (_mj.mj_id2name(_m, _mj.mjtObj.mjOBJ_GEOM, g) or "")]
+  _tid = [g for g in range(_m.ngeom)
+          if "table" in (_mj.mj_id2name(_m, _mj.mjtObj.mjOBJ_GEOM, g) or "")]
+  print("NCON object geoms=%s table geoms=%s" % (_oid, _tid))
+  env.reset()
+  _act = _t.zeros(env.num_envs, env.action_manager.total_action_dim, device="cuda:0")
+  for _k in range(1, 201):
+    env.step(_act)
+    if _k not in (1, 5, 20, 60, 150, 200): continue
+    _d = env.solver.mjw_data
+    _n = int(_wp.to_torch(_d.ncon)[0]) if hasattr(_d, "ncon") else -1
+    _g1 = _wp.to_torch(_d.contact.geom)[:, 0].cpu().numpy() if hasattr(_d.contact, "geom") else None
+    _pairs = 0
+    _depth = []
+    if _g1 is not None:
+      _gg = _wp.to_torch(_d.contact.geom).cpu().numpy()
+      _dist = _wp.to_torch(_d.contact.dist).cpu().numpy()
+      for _i in range(min(_n if _n > 0 else len(_gg), len(_gg))):
+        _a, _b = int(_gg[_i][0]), int(_gg[_i][1])
+        if (_a in _oid and _b in _tid) or (_b in _oid and _a in _tid):
+          _pairs += 1
+          _depth.append(float(_dist[_i]))
+    print("NCON step=%-4d total_con=%-4d object_table_contacts=%d depths_mm=%s"
+          % (_k, _n, _pairs, [round(1000*x, 2) for x in sorted(_depth)[:6]]))
+  raise SystemExit(0)
+
+if os.environ.get("SDF_CHECK"):
+  import mujoco as _mj, numpy as _np, warp as _wp
+  _m = env.solver.mj_model
+  print("SDF nplugin=%d" % getattr(_m, "nplugin", -1))
+  for _g in range(_m.ngeom):
+    _n = _mj.mj_id2name(_m, _mj.mjtObj.mjOBJ_GEOM, _g) or ""
+    if "apple" not in _n: continue
+    _did = int(_m.geom_dataid[_g])
+    print("SDF geom %s type=%d dataid=%d" % (_n, _m.geom_type[_g], _did))
+    if hasattr(_m, "geom_plugin"):
+      print("SDF   geom_plugin=%d" % int(_m.geom_plugin[_g]))
+    if _did >= 0:
+      print("SDF   mesh verts=%d faces=%d graphadr=%d"
+            % (int(_m.mesh_vertnum[_did]), int(_m.mesh_facenum[_did]),
+               int(_m.mesh_graphadr[_did]) if hasattr(_m, "mesh_graphadr") else -1))
+  _w = env.solver.mjw_model
+  for _a in ("nsdf", "sdf_geom", "geom_sdf", "mesh_sdf", "nmeshsdf"):
+    if hasattr(_w, _a):
+      _v = getattr(_w, _a)
+      print("SDF mjw_model.%s = %s" % (_a, getattr(_v, "shape", _v)))
+  print("SDF newton shapes with sdf:",
+        [i for i, s_ in enumerate(env.nmodel.shape_source) if s_ is not None
+         and getattr(s_, "has_sdf", None)][:5] if hasattr(env.nmodel, "shape_source") else "n/a")
+  raise SystemExit(0)
+
+if os.environ.get("CPARAM_PROBE"):
+  import mujoco as _mj, numpy as _np
+  _m = env.solver.mj_model
+  def _bodyid(sfx):
+    for b in range(_m.nbody):
+      n = (_mj.mj_id2name(_m, _mj.mjtObj.mjOBJ_BODY, b) or "").replace("/", "_")
+      if n.endswith(sfx): return b
+    return -1
+  for _label, _sfx in (("object", "apple_apple"), ("table", "table_table")):
+    _b = _bodyid(_sfx)
+    print("CP %s body=%d name=%s" % (_label, _b, _mj.mj_id2name(_m, _mj.mjtObj.mjOBJ_BODY, _b)))
+    print("CP    mass=%.4f" % float(_m.body_mass[_b]))
+    for _g in range(_m.ngeom):
+      if _m.geom_bodyid[_g] != _b: continue
+      print("CP    geom%-4d type=%d contype=%d conaffinity=%d condim=%d priority=%d"
+            % (_g, _m.geom_type[_g], _m.geom_contype[_g], _m.geom_conaffinity[_g],
+               _m.geom_condim[_g], _m.geom_priority[_g]))
+      print("CP      solref=%s solimp=%s" % (_np.round(_m.geom_solref[_g], 6).tolist(),
+                                             _np.round(_m.geom_solimp[_g], 4).tolist()))
+      print("CP      margin=%.5f gap=%.5f friction=%s"
+            % (_m.geom_margin[_g], _m.geom_gap[_g], _np.round(_m.geom_friction[_g], 4).tolist()))
+  print("CP timestep=%.5f  o_solref=%s o_solimp=%s"
+        % (_m.opt.timestep, _np.round(_m.opt.o_solref, 6).tolist(),
+           _np.round(_m.opt.o_solimp, 4).tolist()))
+  print("CP gravity=%s  impratio=%.3f" % (_np.round(_m.opt.gravity, 3).tolist(), _m.opt.impratio))
+  raise SystemExit(0)
+
+
+
+if A.state_digest:
+  import torch as _t, warp as _wp
+  _e = env
+  _e.reset()
+  _act = _t.zeros(_e.num_envs, _e.action_manager.total_action_dim, device="cuda:0")
+  for _k in range(int(A.state_digest)):
+    _obs, _rew, *_ = _e.step(_act)
+  _qp = _wp.to_torch(_e.solver.mjw_data.qpos).double()
+  _qv = _wp.to_torch(_e.solver.mjw_data.qvel).double()
+  print("DIGEST steps=%d graph=%s" % (A.state_digest, bool(A.cuda_graph)))
+  for _n, _x in (("qpos", _qp), ("qvel", _qv), ("reward", _rew.double())):
+    print("DIGEST   %-7s sum=%+.12e  absmax=%.12e  mean=%+.12e"
+          % (_n, float(_x.sum()), float(_x.abs().max()), float(_x.mean())))
+  raise SystemExit(0)
+
+if A.profile_step:
+  import time as _time, torch as _t
+  _e = env
+  _e.reset()
+  _act = _t.zeros(_e.num_envs, _e.action_manager.total_action_dim, device="cuda:0")
+  _acc = {}
+
+  def _tick(_key, _fn):
+    _t.cuda.synchronize(); _t0 = _time.perf_counter()
+    _r = _fn()
+    _t.cuda.synchronize()
+    _acc[_key] = _acc.get(_key, 0.0) + (_time.perf_counter() - _t0)
+    return _r
+
+  for _ in range(10):        # warm up kernels and any lazy compilation
+    _e.step(_act)
+
+  _N = int(A.profile_step)
+  for _ in range(_N):
+    _tick("action_manager.advance", lambda: _e.action_manager.advance(_act))
+    _tick("action_term.process", lambda: _e.action_term.process_actions(_act))
+    # `contacts=None` is only valid when MuJoCo owns collision. On the native path the contacts
+    # come from Newton's CollisionPipeline, and passing None here raised
+    # `NoneType has no attribute rigid_contact_max` from inside solver.step -- the fifth
+    # `solver.step` call site, and the one `_physics_step`'s docstring warns about.
+    #
+    # Splitting collide from step is the point of profiling this at all: the two answer different
+    # questions. Collision cost scales with object triangles and env count; solver cost scales with
+    # the constraint count the contacts produce. Which one dominates decides whether decimating
+    # meshes further is worth anything.
+    _pipe = getattr(_e, "collision_pipeline", None)
+
+    def _phys():
+      for _ in range(_e.decimation):
+        _e.action_term.apply_actions()
+        if _pipe is not None:
+          _e._sync_body_q_from_mujoco()
+          _pipe.collide(_e.state_in, _e.contacts)
+        _e.solver.step(_e.state_in, _e.state_out, _e.control,
+                       _e.contacts if _pipe is not None else None, _e.physics_dt)
+        _e.state_in, _e.state_out = _e.state_out, _e.state_in
+    _tick("physics (decimation loop)", _phys)
+
+    if _pipe is not None:
+      def _phys_collide():
+        for _ in range(_e.decimation):
+          _e._sync_body_q_from_mujoco()
+          _pipe.collide(_e.state_in, _e.contacts)
+      _tick("  of which collide()", _phys_collide)
+    def _phys_apply():
+      for _ in range(_e.decimation):
+        _e.action_term.apply_actions()
+    _tick("  of which apply_actions", _phys_apply)
+    _tick("observation_manager", lambda: _e.observation_manager.compute())
+    _e._env.reward_buf = _tick("reward_manager", lambda: _e.reward_manager.compute(dt=_e.step_dt))
+    _tick("termination_manager", lambda: _e.termination_manager.compute())
+    _tick("metrics_manager", lambda: _e.metrics_manager.compute()
+          if hasattr(_e.metrics_manager, "compute") else None)
+
+  _total = sum(v for k, v in _acc.items() if not k.startswith("  "))
+  print("PROF envs=%d decimation=%d steps=%d" % (_e.num_envs, _e.decimation, _N))
+  for _k, _v in sorted(_acc.items(), key=lambda kv: -kv[1]):
+    _pct = 100.0 * _v / _total if not _k.startswith("  ") else float("nan")
+    print("PROF   %-30s %8.2f ms/step  %s" % (
+      _k, 1000.0 * _v / _N, ("%5.1f%%" % _pct) if _pct == _pct else "(subset)"))
+  print("PROF   %-30s %8.2f ms/step" % ("TOTAL (accounted)", 1000.0 * _total / _N))
+  raise SystemExit(0)
+
+if A.sensor_probe:
+  import numpy as _np, torch as _t, warp as _wp
+  _m = env.solver.mjw_model
+  env.reset()
+  _peak = _np.zeros(int(_m.nsensordata))
+  for _ in range(A.sensor_probe):
+    env.step(_t.zeros(env.num_envs, env.action_manager.total_action_dim, device="cuda:0"))
+    _sd = _wp.to_torch(env.solver.mjw_data.sensordata).detach().cpu().numpy()
+    _peak = _np.maximum(_peak, _np.abs(_sd).max(axis=0))
+  _nz = int((_peak > 1e-9).sum())
+  _ty = _wp.to_torch(env.solver.mjw_model.sensor_type).cpu().numpy()
+  _ad = _wp.to_torch(env.solver.mjw_model.sensor_adr).cpu().numpy()
+  _dm = _wp.to_torch(env.solver.mjw_model.sensor_dim).cpu().numpy()
+  _cmask = _np.zeros(len(_peak), bool)
+  for _t_, _a_, _d_ in zip(_ty, _ad, _dm):
+    if int(_t_) == 42:
+      _cmask[int(_a_):int(_a_) + int(_d_)] = True
+  _cp = _peak[_cmask]
+  print(f"PROBE_CONTACT slots={_cmask.sum()} nonzero={int((_cp>1e-9).sum())} max={_cp.max():.4f}")
+  print(f"PROBE steps={A.sensor_probe} nonzero_slots={_nz}/{len(_peak)} max={_peak.max():.4f}")
+  raise SystemExit(0)
+print(f"  reward terms={len(env.reward_manager.active_terms)} "
+      f"termination terms={len(env.termination_manager.active_terms)} "
+      f"max_episode_length={env.max_episode_length}")
+
+wrapped = RslRlVecEnvWrapper(env)
+if os.environ.get("ZSPACE_SAMPLE_Z", "").strip() == "1":
+  # PULSE-style latent-space policy: PPO acts in z (latent_dim-D); this wrapper decodes each z
+  # residual to the 69-D joint action through the actor's frozen decoder before stepping the env.
+  # num_actions must be set BEFORE the runner is built (rsl_rl sizes actor/storage from it).
+  from mjlab.tasks.residual_interact import zspace as _zs
+  _student_ckpt = os.environ["ZSPACE_STUDENT"]
+  _zs_model, _ = _zs.load_student(_student_ckpt, "cpu")
+  wrapped.num_actions = int(_zs_model.cfg.latent_dim)
+  wrapped._modify_action_space()
+  wrapped._zspace_decode = None
+  _wrapped_step = wrapped.step
+  def _zspace_step(z):
+    if wrapped._zspace_decode is None:
+      raise RuntimeError("ZSPACE_SAMPLE_Z: wrapper has no decoder yet (runner not built)")
+    return _wrapped_step(wrapped._zspace_decode(z))
+  wrapped.step = _zspace_step
+  print(f"[zspace] ZSPACE_SAMPLE_Z: env action space is z ({wrapped.num_actions}-D); decode in the wrapper", flush=True)
+  del _zs_model
+log_dir = Path(A.log_root) / "g1_residual_interact" / A.run_name
+log_dir.mkdir(parents=True, exist_ok=True)
+runner_cls = load_runner_cls(TASK) or MjlabOnPolicyRunner
+runner = runner_cls(wrapped, asdict(agent_cfg), log_dir=str(log_dir), device="cuda:0")
+if os.environ.get("ZSPACE_SAMPLE_Z", "").strip() == "1":
+  wrapped._zspace_decode = runner.alg.actor.decode_z
+if A.resume:
+  runner.load(A.resume)
+  print(f"warm-started from {A.resume}")
+
+# --- frozen-pose press test -----------------------------------------------------------------
+# The airtight version of "does this contact setting resist penetration". Every observational
+# comparison of two rollouts is confounded: the physics changes the trajectory, so a setting can
+# score a shallower overlap merely by keeping the hand further away or by squeezing less. Here the
+# geometry AND the load are imposed:
+#
+#   * the robot's joints are pinned to one recorded pose and re-pinned every control step, so the
+#     hand is an immovable obstacle in exactly the same place under every setting;
+#   * the object is pushed into that hand by a known external force in NEWTONS, swept over a range;
+#   * the settled overlap is read off.
+#
+# The output is a penetration-vs-force curve whose x axis is real units and whose geometry is
+# identical across settings, so both questions are answerable: is this setting stiffer, and what
+# would a retrained policy that presses N times harder actually get.
+if os.environ.get("PRESS_TEST"):
+  import numpy as _pnp, torch as _pt, warp as _pwp, mujoco as _pmj
+  _out = os.environ["PRESS_TEST"]
+  _npz = _pnp.load(os.environ["PRESS_QPOS"], allow_pickle=True)
+  _qall = _npz["qpos"]
+  _frame = int(os.environ.get("PRESS_FRAME", "-1")) % len(_qall)
+  _forces = [float(x) for x in os.environ.get("PRESS_FORCES", "1,2,5,10,20,50,100").split(",")]
+  _settle = int(os.environ.get("PRESS_SETTLE", "60"))
+
+  _m = env.solver.mj_model
+  _d = env.solver.mjw_data
+  _objb = next(i for i in range(_m.nbody)
+               if "apple" in (_pmj.mj_id2name(_m, _pmj.mjtObj.mjOBJ_BODY, i) or "")
+               and "robot" not in (_pmj.mj_id2name(_m, _pmj.mjtObj.mjOBJ_BODY, i) or ""))
+  _palmb = next(i for i in range(_m.nbody)
+                if (_pmj.mj_id2name(_m, _pmj.mjtObj.mjOBJ_BODY, i) or "").endswith("right_palm_link"))
+  _free = next(j for j in range(_m.njnt) if _m.jnt_type[j] == _pmj.mjtJoint.mjJNT_FREE
+               and "apple" in (_pmj.mj_id2name(_m, _pmj.mjtObj.mjOBJ_JOINT, j) or ""))
+  _oq = int(_m.jnt_qposadr[_free])
+
+  _rob = _pnp.array([bool("robot" in (_pmj.mj_id2name(_m, _pmj.mjtObj.mjOBJ_BODY,
+                                                      int(_m.geom_bodyid[g])) or ""))
+                     for g in range(_m.ngeom)])
+  _obg = _pnp.array([int(_m.geom_bodyid[g]) == _objb for g in range(_m.ngeom)])
+
+  _qpos_t = _pwp.to_torch(_d.qpos)
+  _qvel_t = _pwp.to_torch(_d.qvel)
+  _xfrc = _pwp.to_torch(_d.xfrc_applied) if hasattr(_d, "xfrc_applied") else None
+  if _xfrc is None:
+    raise SystemExit("mjw_data has no xfrc_applied; press test cannot apply a known load")
+  _frozen = _pt.tensor(_qall[_frame], dtype=_qpos_t.dtype, device=_qpos_t.device)
+  import torch as _rt
+  # NewtonVecEnv exposes no num_actions; the action width lives on the wrapped manager.
+  _nact = int(getattr(getattr(env, "_env", env).action_manager, "total_action_dim", 0)) or \
+      int(_pwp.to_torch(env.solver.mjw_data.ctrl).shape[-1])
+  _zero_act = _rt.zeros((env.num_envs, _nact), device="cuda:0")
+
+  def _overlap_mm():
+    """Deepest hand-object overlap in mm, and how many such contacts exist.
+
+    Returned together on purpose: an overlap with zero contacts behind it is not a measurement,
+    and reading the two from separate expressions is how the first version reported 0 contacts
+    alongside non-zero overlaps.
+    """
+    _c = _d.contact
+    _g = _pwp.to_torch(_c.geom).detach().cpu().numpy()
+    _w = _pwp.to_torch(_c.worldid).detach().cpu().numpy()
+    _s = _pwp.to_torch(_c.dist).detach().cpu().numpy()
+    _best, _cnt = 0.0, 0
+    for _i in range(_g.shape[0]):
+      if int(_w[_i]) != 0:
+        continue
+      _a, _b = int(_g[_i, 0]), int(_g[_i, 1])
+      if _a < 0 or _b < 0:
+        continue
+      if (_rob[_a] and _obg[_b]) or (_rob[_b] and _obg[_a]):
+        _best = min(_best, float(_s[_i]))
+        _cnt += 1
+    return -_best * 1000.0, _cnt
+
+  print(f"[press] frame {_frame} of {len(_qall)}; forces {_forces} N; {_settle} settle steps each",
+        flush=True)
+  with open(_out, "w") as _fh:
+    _fh.write("force_N,overlap_mm,contacts\n")
+    # Back the object OFF along the press axis before each level. Initialising it at the recorded
+    # pose starts it already ~9 mm inside a pinned, closed hand with no escape direction, and the
+    # number that comes back is "how much of that initial overlap failed to resolve" -- flat and
+    # non-monotonic in force, which is what the first version of this test measured.
+    _backoff = float(os.environ.get("PRESS_BACKOFF", "0.02"))
+    _objm = float(_m.body_mass[_objb])
+    for _F in _forces:
+      _qpos_t[0, :] = _frozen
+      _qvel_t[0, :] = 0.0
+      _xfrc[0, :, :] = 0.0
+      _op0 = _pwp.to_torch(_d.xpos)[0, _objb].detach().clone()
+      _pp0 = _pwp.to_torch(_d.xpos)[0, _palmb].detach().clone()
+      _ax = (_pp0 - _op0)
+      _ax = _ax / _ax.norm().clamp_min(1e-9)
+      _qpos_t[0, _oq:_oq + 3] -= _ax * _backoff
+      for _k in range(_settle):
+        with _rt.inference_mode():
+          env.step(_zero_act)
+        # Re-pin the robot every control step. The object's own free joint (from _oq on) is left
+        # alone -- it is the only thing allowed to move, which is what makes the load meaningful.
+        _qpos_t[0, :_oq] = _frozen[:_oq]
+        _qvel_t[0, :_oq - 1] = 0.0
+        # Press along the fixed axis, and cancel the object's own weight: at 0.36 kg gravity is
+        # 3.5 N, which would otherwise swamp every test force below ~10 N and make the curve read
+        # the floor rather than the grip.
+        _xfrc[0, _objb, :3] = _ax * _F
+        _xfrc[0, _objb, 2] += _objm * 9.81
+      _ov, _nc = _overlap_mm()
+      print(f"[press] {_F:8.2f} N -> overlap {_ov:7.3f} mm  ({_nc} contacts)", flush=True)
+      _fh.write(f"{_F},{_ov},{_nc}\n")
+  print(f"[press] wrote {_out}", flush=True)
+  raise SystemExit(0)
+
+if os.environ.get("CONTACT_CENSUS"):
+  # Which of the two ways a 16 mm overlap can survive is actually happening?
+  #
+  #   (a) the contacts exist but are discarded because the world is over its nconmax budget, or
+  #   (b) the contacts are never generated at all, because a collider that lies wholly inside an
+  #       SDF has no surface for the narrow phase to find.
+  #
+  # These call for opposite fixes, and one census tells them apart. The whole recorded qpos is
+  # pinned -- robot AND object -- so the contacts reported belong to exactly the configuration
+  # tools/probes/overlap_geometry.py measured the geometry of, with nothing re-simulated.
+  import numpy as _cnp, torch as _ct, warp as _cwp, mujoco as _cmj
+  _m = env.solver.mj_model                     # CPU model: names, masks, indices
+  _m_w = getattr(env.solver, "mjw_model", None)  # warp model: what the kernels run against
+  if _m_w is None:
+    raise SystemExit("solver exposes no mjw_model; census cannot run collision directly")
+  _d = env.solver.mjw_data
+  _qall = _cnp.load(os.environ["CENSUS_QPOS"], allow_pickle=True)["qpos"]
+  _frames = [int(x) % len(_qall) for x in
+             os.environ.get("CENSUS_FRAMES", "200,285,300,350").split(",")]
+
+  # Name geoms by their OWN name first. Going through geom_bodyid collapsed 96% of the buffer to
+  # "world <-> world" on the first run: mjlab flattens the body path into one enormous name, and
+  # the SDF replacement colliders hang off the worldbody, so a body-name lookup cannot see the
+  # object at all -- which read out as "no object contact" when the classifier was simply blind.
+  def _nm(g):
+    _gn = _cmj.mj_id2name(_m, _cmj.mjtObj.mjOBJ_GEOM, g)
+    if _gn:
+      return _gn.replace("robot/", "").split("/")[-1]
+    _bn = (_cmj.mj_id2name(_m, _cmj.mjtObj.mjOBJ_BODY, int(_m.geom_bodyid[g])) or "?")
+    return _bn.split("_robot_")[-1] if "_robot_" in _bn else _bn.replace("robot/", "")
+  _bname = [_nm(g) for g in range(_m.ngeom)]
+  _isobj = [("apple" in _bname[g] or "object" in _bname[g]) for g in range(_m.ngeom)]
+  print("[census] object geom(s):", [(g, _bname[g], int(_m.geom_type[g]))
+                                     for g in range(_m.ngeom) if _isobj[g]], flush=True)
+
+  # What authority does the hand actually get, as compiled? An effort limit that never reaches
+  # physics has bitten this repo before, so read it off the model rather than trusting the cfg.
+  _ja = lambda _a: (_cmj.mj_id2name(_m, _cmj.mjtObj.mjOBJ_JOINT, int(_m.actuator_trnid[_a, 0]))
+                    or "").lower()
+  _ha = [_a for _a in range(_m.nu) if "finger" in _ja(_a)]
+  _hk = sorted({(round(float(_m.actuator_gainprm[_a, 0]), 4),
+                 round(float(_m.actuator_forcerange[_a, 1]), 4)) for _a in _ha})
+  print("[census] hand actuators: %d, distinct (kp, effort N*m) as compiled: %s"
+        % (len(_ha), _hk), flush=True)
+
+  _qpos_t = _cwp.to_torch(_d.qpos)
+  _qvel_t = _cwp.to_torch(_d.qvel)
+  _cg = _cwp.to_torch(_d.contact.geom)
+  _cw = _cwp.to_torch(_d.contact.worldid)
+  _cd = _cwp.to_torch(_d.contact.dist)
+  _cap = int(_cg.shape[0])
+  _nact = int(getattr(getattr(env, "_env", env).action_manager, "total_action_dim", 0)) or \
+      int(_cwp.to_torch(_d.ctrl).shape[-1])
+  _zero = _ct.zeros((env.num_envs, _nact), device="cuda:0")
+  _percap = _cap // max(1, env.num_envs)
+  print(f"[census] contact array capacity {_cap} across {env.num_envs} world(s) "
+        f"= {_percap}/world; num_envs={env.num_envs}", flush=True)
+
+  for _f in _frames:
+    _frozen = _ct.tensor(_qall[_f], dtype=_qpos_t.dtype, device=_qpos_t.device)
+    _qpos_t[0, :] = _frozen
+    _qvel_t[0, :] = 0.0
+    # Kinematics and collision ONLY -- no dynamics. Stepping the env instead put the arm 105 mm
+    # from the object when the recorded pose has it at 22 mm: env.step runs ten physics substeps
+    # of PD control toward the policy's target, so pinning qpos before the call does not hold the
+    # robot during it, and the contacts read back belong to a pose the trace never contained.
+    import mujoco_warp as _mjw
+    # Optionally settle first. A frozen pose says what force the contact carries THERE; it cannot
+    # say where the finger would come to rest. Driving every actuator to its recorded joint target
+    # and integrating does, and it is still confound-free: the target is fixed, so a setting that
+    # changes the resting depth changed the physics, not the policy's behaviour.
+    _settle = int(os.environ.get("CENSUS_SETTLE", "0"))
+    if _settle:
+      # Identify actuators by the JOINT they drive. Matching on actuator names found nothing:
+      # mjlab's compiled model leaves them unnamed, so the filter silently swept zero of them and
+      # every effort level produced the same number.
+      def _jname(_a):
+        return (_cmj.mj_id2name(_m, _cmj.mjtObj.mjOBJ_JOINT, int(_m.actuator_trnid[_a, 0]))
+                or "").lower()
+      _hand_act = [_a for _a in range(_m.nu) if "finger" in _jname(_a)]
+      _hand_q = sorted({int(_m.jnt_qposadr[int(_m.actuator_trnid[_a, 0])]) for _a in _hand_act})
+      _free_q = _cnp.zeros(_m.nq, dtype=bool)
+      _free_q[_hand_q] = True
+      _oj0 = next(_j for _j in range(_m.njnt) if _m.jnt_type[_j] == _cmj.mjtJoint.mjJNT_FREE
+                  and "apple" in (_cmj.mj_id2name(_m, _cmj.mjtObj.mjOBJ_JOINT, _j) or ""))
+      _free_q[int(_m.jnt_qposadr[_oj0]):int(_m.jnt_qposadr[_oj0]) + 7] = True
+      _pin_q = _ct.tensor(_cnp.nonzero(~_free_q)[0], device=_qpos_t.device, dtype=_ct.long)
+      # A velocity mask too, and NOT the qpos one. Zeroing every qvel each step froze the fingers
+      # solid: the sweep then reported the same penetration to three decimals across a 50x change
+      # in effort, and the fingertip did not move by so much as a micron.
+      _free_v = _cnp.zeros(_m.nv, dtype=bool)
+      for _j in range(_m.njnt):
+        _jn = (_cmj.mj_id2name(_m, _cmj.mjtObj.mjOBJ_JOINT, _j) or "").lower()
+        if "finger" not in _jn and "apple" not in _jn:
+          continue
+        _nd = {_cmj.mjtJoint.mjJNT_FREE: 6, _cmj.mjtJoint.mjJNT_BALL: 3}.get(
+            int(_m.jnt_type[_j]), 1)
+        _free_v[int(_m.jnt_dofadr[_j]):int(_m.jnt_dofadr[_j]) + _nd] = True
+      _pin_v = _ct.tensor(_cnp.nonzero(~_free_v)[0], device=_qvel_t.device, dtype=_ct.long)
+      _eff = os.environ.get("CENSUS_HAND_EFFORT", "").strip()
+      if _eff:
+        _fr = _cwp.to_torch(_m_w.actuator_forcerange)
+        _fr[..., _hand_act, 0] = -float(_eff)
+        _fr[..., _hand_act, 1] = float(_eff)
+      print("[census] settle %d steps; %d hand actuator(s), %d hand qpos, %d free dof, "
+            "effort %s N*m" % (_settle, len(_hand_act), len(_hand_q), int(_free_v.sum()),
+                               _eff or "unchanged"), flush=True)
+      _ctrl_t = _cwp.to_torch(_d.ctrl)
+      _adr = _cnp.array([int(_m.jnt_qposadr[int(_m.actuator_trnid[_a, 0])])
+                         for _a in range(_m.nu)])
+      _ctrl_t[0, :] = _ct.tensor(_qall[_f][_adr], dtype=_ctrl_t.dtype, device=_ctrl_t.device)
+      _xf = _cwp.to_torch(_d.xfrc_applied)
+      _oid0 = next(_i for _i in range(_m.nbody)
+                   if "apple" in (_cmj.mj_id2name(_m, _cmj.mjtObj.mjOBJ_BODY, _i) or "")
+                   and "robot" not in (_cmj.mj_id2name(_m, _cmj.mjtObj.mjOBJ_BODY, _i) or ""))
+      _q0 = _qpos_t[0].detach().clone()
+      for _k in range(_settle):
+        # Everything but the fingers and the object is held at the recorded pose. Letting the
+        # whole robot integrate freely for 0.6 s put it on the floor: 396 contacts, none of them
+        # on the object, which measures a fall rather than a grasp.
+        _qpos_t[0, _pin_q] = _frozen[_pin_q]
+        _qvel_t[0, _pin_v] = 0.0
+        _xf[0, _oid0, 2] = float(_m.body_mass[_oid0]) * 9.81
+        _mjw.step(_m_w, _d)
+      # Did anything actually integrate? Two settle designs in a row reported penetrations
+      # identical to three decimals with the fingertip not moving a micron, which is the
+      # signature of a settle that never ran -- not of a physical result.
+      _qv = _qvel_t[0].detach().cpu().numpy()
+      _od = int(_m.jnt_dofadr[_oj0])
+      print("[census]   object: mass %.4f kg  free dofs at %d  qvel after settle %s  neq %d" % (
+          float(_m.body_mass[_oid0]), _od, _cnp.round(_qv[_od:_od + 6], 5).tolist(), int(_m.neq)),
+          flush=True)
+      _dq = (_qpos_t[0] - _q0).abs()
+      _fq = _ct.tensor(_hand_q, device=_dq.device, dtype=_ct.long)
+      _oa0 = int(_m.jnt_qposadr[_oj0])
+      print("[census]   settle moved: all qpos max %.6g | finger max %.6g rad | object max %.6g m"
+            % (float(_dq.max()), float(_dq[_fq].max()), float(_dq[_oa0:_oa0 + 3].max())),
+            flush=True)
+    else:
+      _qpos_t[0, :] = _frozen
+      _qvel_t[0, :] = 0.0
+    _mjw.kinematics(_m_w, _d)
+    _mjw.collision(_m_w, _d)
+    # Detection is only half the question. A contact the narrow phase reports but the solver never
+    # turns into force explains a penetration that no stiffness setting can budge, so run the full
+    # pipeline as well and read what force each object contact actually carries.
+    _cf = {}
+    try:
+      _mjw.forward(_m_w, _d)
+      _ef = _cwp.to_torch(_d.efc.force).detach().cpu().numpy().reshape(-1)
+      _ea = _cwp.to_torch(_d.contact.efc_address).detach().cpu().numpy()
+      _cf = {"efc": (_ef, _ea)}
+    except Exception as _e:
+      print("[census] could not read constraint force: %r" % (_e,), flush=True)
+      print("[census]   d attrs: %s" % [_a for _a in dir(_d) if not _a.startswith("_")][:40],
+            flush=True)
+
+    # Does the pose the collider sees match the pose that was written? mjlab's state lives in
+    # Newton and mjw_data is a mirror it re-syncs, so a direct qpos write can be discarded before
+    # the narrow phase runs -- in which case the census describes the reset pose, where the hand
+    # is nowhere near the object, and every number below is about the wrong configuration.
+    _xp = _cwp.to_torch(_d.xpos)[0].detach().cpu().numpy()
+    _oid = next(_i for _i in range(_m.nbody)
+                if "apple" in (_cmj.mj_id2name(_m, _cmj.mjtObj.mjOBJ_BODY, _i) or "")
+                and "robot" not in (_cmj.mj_id2name(_m, _cmj.mjtObj.mjOBJ_BODY, _i) or ""))
+    _tid = next(_i for _i in range(_m.nbody)
+                if (_cmj.mj_id2name(_m, _cmj.mjtObj.mjOBJ_BODY, _i) or "")
+                .endswith("right_finger2_link4"))
+    _oj = next(_j for _j in range(_m.njnt) if _m.jnt_type[_j] == _cmj.mjtJoint.mjJNT_FREE
+               and "apple" in (_cmj.mj_id2name(_m, _cmj.mjtObj.mjOBJ_JOINT, _j) or ""))
+    _wrote = _qall[_f][int(_m.jnt_qposadr[_oj]):int(_m.jnt_qposadr[_oj]) + 3]
+    _sep = float(_cnp.linalg.norm(_xp[_oid] - _xp[_tid]))
+    print("[census] object xpos in sim %s vs qpos written %s  (delta %.4f m)" % (
+        _cnp.round(_xp[_oid], 4), _cnp.round(_wrote, 4),
+        float(_cnp.linalg.norm(_xp[_oid] - _wrote))), flush=True)
+    print("[census] fingertip xpos %s   tip-to-object separation %.4f m" % (
+        _cnp.round(_xp[_tid], 4), _sep), flush=True)
+    _og = next(_i for _i in range(_m.ngeom) if _isobj[_i])
+    _fg = [_i for _i in range(_m.ngeom) if "finger2_link4" in _bname[_i]]
+    print("[census] masks: object contype=%d conaffinity=%d | fingertip %s" % (
+        int(_m.geom_contype[_og]), int(_m.geom_conaffinity[_og]),
+        [(int(_m.geom_contype[_i]), int(_m.geom_conaffinity[_i])) for _i in _fg]), flush=True)
+
+    _g = _cg.detach().cpu().numpy()
+    _w = _cw.detach().cpu().numpy()
+    _s = _cd.detach().cpu().numpy()
+    _live = (_g[:, 0] >= 0) & (_g[:, 1] >= 0) & (_w == 0)
+    _tot = int(_live.sum())
+    # "floor <-> floor" held 96% of the buffer on the previous run, which is not a contact any
+    # scene can have. Before believing the budget is full, check whether those rows are real:
+    # an unused slot is padding, and padding is recognisable by a solver counter that disagrees
+    # with the row count, or by every row carrying the same sentinel distance.
+    _ncon = None
+    for _attr in ("ncon", "ncon_hfield", "collision_pair_count"):
+      if hasattr(_d, _attr):
+        try:
+          _ncon = _cwp.to_torch(getattr(_d, _attr)).detach().cpu().numpy().reshape(-1)[:4]
+        except Exception:
+          _ncon = getattr(_d, _attr)
+        break
+    _self = (_g[:, 0] == _g[:, 1]) & _live
+    print(f"[census] solver ncon={_ncon}; rows with geom1==geom2: {int(_self.sum())}", flush=True)
+    if _self.any():
+      _sd = _s[_self]
+      print("[census]   their dist: min %.6g max %.6g  unique %d  -> %s" % (
+          _sd.min(), _sd.max(), len(_cnp.unique(_cnp.round(_sd, 9))),
+          "PADDING, not contacts" if len(_cnp.unique(_cnp.round(_sd, 9))) <= 2
+          else "genuinely varied"), flush=True)
+    _live = _live & ~_self
+    _tot = int(_live.sum())
+    _pairs = {}
+    for _i in _cnp.nonzero(_live)[0]:
+      _a, _b = int(_g[_i, 0]), int(_g[_i, 1])
+      if not (_isobj[_a] or _isobj[_b]):
+        continue
+      _hand = _bname[_b] if _isobj[_a] else _bname[_a]
+      _p = _pairs.setdefault(_hand, [0, 0.0])
+      _p[0] += 1
+      _p[1] = min(_p[1], float(_s[_i]))
+    _nobj = sum(v[0] for v in _pairs.values())
+    _flag = "  <-- AT CAPACITY" if _tot >= _percap else ""
+    print(f"\n[census] frame {_f}: {_tot} contact(s) in world 0 of {_percap} slots{_flag}; "
+          f"{_nobj} of them touch the object", flush=True)
+    # When the budget is full, WHO is holding it decides the fix, so break the whole buffer down
+    # by body pair -- not just the object's share, which is the thing being starved.
+    _all = {}
+    for _i in _cnp.nonzero(_live)[0]:
+      _k = tuple(sorted((_bname[int(_g[_i, 0])], _bname[int(_g[_i, 1])])))
+      _all[_k] = _all.get(_k, 0) + 1
+    # Who is consuming the budget? Contacts past nconmax are dropped silently, so a scene that
+    # spends its slots on collisions irrelevant to the task starves the ones that matter.
+    def _cat(n):
+      if "apple" in n:
+        return "object"
+      if "table" in n:
+        return "table"
+      if "floor" in n or "terrain" in n:
+        return "ground"
+      if "left_" in n:
+        return "left side"
+      if "right_finger" in n or "right_palm" in n or "right_wrist" in n:
+        return "right hand"
+      return "right arm/body"
+    _cats = {}
+    for _i in _cnp.nonzero(_live)[0]:
+      _k = tuple(sorted((_cat(_bname[int(_g[_i, 0])]), _cat(_bname[int(_g[_i, 1])]))))
+      _cats[_k] = _cats.get(_k, 0) + 1
+    print("         WHAT IS IN THE BUFFER, by category:", flush=True)
+    for _k, _n in sorted(_cats.items(), key=lambda kv: -kv[1]):
+      _tag = "  <-- the only ones this task is about" if "object" in _k and "right hand" in _k else ""
+      print("           %5d  %6.1f%%  %s <-> %s%s" % (_n, 100.0 * _n / _tot, _k[0], _k[1], _tag),
+            flush=True)
+    print("         top pairs holding the buffer:", flush=True)
+    for _k, _n in sorted(_all.items(), key=lambda kv: -kv[1])[:12]:
+      print("           %5d  %s <-> %s  (%.0f%%)" % (_n, _k[0], _k[1], 100.0 * _n / _tot),
+            flush=True)
+    if not _pairs:
+      print("         NO contact against the object at all -- the narrow phase found none.",
+            flush=True)
+    for _k, _v in sorted(_pairs.items(), key=lambda kv: kv[1][1]):
+      print("         %-26s %3d contact(s)  deepest dist %8.3f mm" % (_k, _v[0], _v[1] * 1000.0),
+            flush=True)
+    if _cf:
+      _ef, _ea = _cf["efc"]
+      # CALIBRATION, on the one quantity with a known answer: a block resting on a table pushes
+      # back with exactly its own weight. If summing the pyramid rows returns that, the method is
+      # sound on this path; if it returns hundreds of newtons, every force number this run has
+      # produced is an artifact. The row-sum was only ever checked against `mj_contactForce` on CPU
+      # MuJoCo -- training runs use_mujoco_contacts=False, where Newton generates the contacts and
+      # the efc layout was never independently verified.
+      _wt = float(_m.body_mass[_oid]) * 9.81
+      _tot = {"table": 0.0, "hand": 0.0}
+      for _i in _cnp.nonzero(_live)[0]:
+        _a, _b = int(_g[_i, 0]), int(_g[_i, 1])
+        if not (_isobj[_a] or _isobj[_b]):
+          continue
+        _other = _bname[_b] if _isobj[_a] else _bname[_a]
+        _adr = _cnp.atleast_1d(_ea[_i])
+        _adr = _adr[(_adr >= 0) & (_adr < len(_ef))]
+        _f = float(_ef[_adr].sum()) if _adr.size else 0.0
+        _tot["table" if "table" in _other or "floor" in _other else "hand"] += _f
+      _qc = _cwp.to_torch(_d.qfrc_constraint)[0].detach().cpu().numpy()
+      _od = int(_m.jnt_dofadr[_oj])
+      print("[census] CALIBRATION  object weight %.3f N | table contacts sum %.3f N | "
+            "hand contacts sum %.3f N" % (_wt, _tot["table"], _tot["hand"]), flush=True)
+      print("[census]   object qfrc_constraint xyz %s  (|Fz| should equal the weight when it "
+            "rests untouched)" % _cnp.round(_qc[_od:_od + 3], 3).tolist(), flush=True)
+      _r = _tot["table"] / _wt if _wt > 1e-9 else float("nan")
+      print("[census]   table-sum / weight = %.2f  -> the row-sum is %s" % (
+          _r, "TRUSTWORTHY" if 0.5 < _r < 2.0 else "WRONG BY THAT FACTOR"), flush=True)
+      print("         constraint force on each object contact:", flush=True)
+      for _i in _cnp.nonzero(_live)[0]:
+        _a, _b = int(_g[_i, 0]), int(_g[_i, 1])
+        if not (_isobj[_a] or _isobj[_b]):
+          continue
+        _adr = _ea[_i]
+        _adr = int(_adr.reshape(-1)[0]) if hasattr(_adr, "reshape") else int(_adr)
+        _fn = float(_ef[_adr]) if 0 <= _adr < len(_ef) else float("nan")
+        print("           %-30s dist %8.3f mm  efc_adr %6d  normal force %10.4f N" % (
+            _bname[_b] if _isobj[_a] else _bname[_a], _s[_i] * 1000.0, _adr, _fn), flush=True)
+  raise SystemExit(0)
+
+if A.rollout_steps:
+  # Deterministic inference, not the stochastic rollout `learn` would collect: the point is to see
+  # what the policy does, not what it explores.
+  import torch as _rt
+  from mjlab.scripts.play import _maybe_wrap_residual_action_stats_policy as _wrap_stats
+  if not A.resume:
+    raise SystemExit("--rollout-steps needs --resume; there is nothing to roll out otherwise")
+  _pol = runner.get_inference_policy(device="cuda:0")
+  # Without this wrapper a working checkpoint silently produces a policy that does nothing --
+  # the residual action statistics live outside the actor and have to be reattached.
+  _pol = _wrap_stats(TASK, runner, _pol)
+  if os.environ.get("ROLLOUT_STOCHASTIC", "").strip() == "1":
+    # Sample actions exactly as training does (actor.forward(stochastic_output=True)) instead of the
+    # mean: tells whether a training-time metric was earned by the sampled policy only.
+    _actor_s = runner.alg.actor
+    _actor_s.eval()
+    def _pol_stoch(obs):
+      with _rt.no_grad():
+        a = _actor_s(obs, stochastic_output=True)
+      runner._set_residual_action_stats(_actor_s, a)
+      return a
+    _pol = _pol_stoch
+    print("[rollout] ROLLOUT_STOCHASTIC=1: sampling actions from the policy distribution", flush=True)
+  # Judge every checkpoint from the same place: the reference start. The RSI window would
+  # otherwise drop each rollout at a random frame and the clips would not be comparable.
+  #
+  # ROLLOUT_START_FRAME overrides that for the case where comparability is NOT the point: a policy
+  # trained with RSI_ANCHOR_CF never sees frames 0..cf-20, so a frame-0 rollout scores it out of its
+  # own distribution. Set "rsi" to let the trained window pick the start, or an integer to pin one.
+  _rsf = os.environ.get("ROLLOUT_START_FRAME", "").strip().lower()
+  if _rsf in ("rsi", "trained"):
+    print("[rollout] start frame left to the trained RSI window", flush=True)
+  else:
+    env._env._force_reference_start_frame = int(_rsf) if _rsf else 0
+  # ROLLOUT_NO_TERM: for a VIDEO, not a measurement. og_object_far fires ~1 s after the grasp
+  # because the reference keeps moving while the policy holds still, so every successful clip is
+  # cut exactly when it starts working. Disabling the non-timeout terminations changes no physics
+  # -- only whether the episode is reset -- so the video shows the full carry. Never set this for
+  # a run whose numbers are being compared to training.
+  if os.environ.get("ROLLOUT_NO_TERM"):
+    import torch as _nt_t
+    class _NeverFires:
+      # Some termination terms are ManagerTermBase INSTANCES (NoProgressTermination), and the
+      # manager calls .reset() on them -- a bare lambda has no .reset and kills the rollout.
+      # Proxy every other attribute through to the original and only override the call.
+      def __init__(self, inner): self._inner = inner
+      def __getattr__(self, k): return getattr(self._inner, k)
+      def __call__(self, env, *a, **k):
+        return _nt_t.zeros(env.num_envs, dtype=_nt_t.bool, device=env.device)
+    _ntm = env.termination_manager
+    _kept = []
+    for _ni, _nn in enumerate(_ntm._term_names):
+      if _nn == "time_out":
+        continue
+      _ntm._term_cfgs[_ni].func = _NeverFires(_ntm._term_cfgs[_ni].func)
+      _kept.append(_nn)
+    print(f"[rollout] ROLLOUT_NO_TERM: disabled {len(_kept)} terminations "
+          f"({', '.join(_kept)}); only time_out remains", flush=True)
+  env.reset()
+  _obs = env.get_observations()
+  print(f"[rollout] {A.rollout_steps} deterministic steps from reference frame 0")
+  # Calibration, not decoration: a rollout that merely *looks* wrong is an opinion, but a rollout
+  # whose contact/lift/stand disagree with the run's own training row is a measurement. Without
+  # this the first eval harness shipped a scene the policy never saw and nobody could tell.
+  # --- grasp force probe -----------------------------------------------------------------------
+  # GRASP_FORCE_PROBE=<csv> logs, per control step, what is actually holding the object up.
+  # Calibrated, not guessed: while the object still rests on the table the vertical constraint
+  # force must equal its own weight. Anything that does not reproduce that is not the contact
+  # force -- see the four ways this was read wrong before (efc_address is pyramid edges, not xyz;
+  # efc.force is per world; body names are full paths; blacklists match everything).
+  _gfp = os.environ.get("GRASP_FORCE_PROBE", "").strip()
+  _gf = None
+  if _gfp:
+    import warp as _wp, numpy as _gnp, mujoco as _gmj
+    _gm = env.solver.mj_model
+    _gobj_b = next(i for i in range(_gm.nbody)
+                   if "apple" in (_gmj.mj_id2name(_gm, _gmj.mjtObj.mjOBJ_BODY, i) or "")
+                   and "robot" not in (_gmj.mj_id2name(_gm, _gmj.mjtObj.mjOBJ_BODY, i) or ""))
+    _gdof = int(_gm.body_dofadr[_gobj_b])
+    _gmass = float(_gm.body_mass[_gobj_b])
+    _gw = _gmass * 9.81
+    # Whitelist on "robot": a blacklist on "world" matches every compiled body name, which is how
+    # an earlier probe silently sampled nothing at all.
+    _grobot_g = _gnp.array([bool("robot" in (_gmj.mj_id2name(_gm, _gmj.mjtObj.mjOBJ_BODY,
+                                                            int(_gm.geom_bodyid[g])) or ""))
+                            for g in range(_gm.ngeom)])
+    _gobj_g = _gnp.array([int(_gm.geom_bodyid[g]) == _gobj_b for g in range(_gm.ngeom)])
+    _gf = open(_gpath := _gfp, "w")
+    _gf.write("step,obj_z,Fz_constraint,weight,n_hand_contacts,hand_Fn_sum,min_dist_mm,done0,objfar,frame,cf,tipcf_d\n")
+    _gref_n = int(__import__("mjlab.tasks.residual_interact.mdp", fromlist=["x"])._ref(env.device)["n_frames"])
+    print(f"[gfp] object body {_gobj_b} mass {_gmass:.4f} kg weight {_gw:.3f} N -> {_gpath}",
+          flush=True)
+
+  # ROLLOUT_PER_WORLD_LIFT: which WORLD to film. VIDEO_CLIP can only take the first world running
+  # clip k, so on a clip whose lift_success is 0.06 the filmed world almost never succeeds and the
+  # video libels a policy that does work. Track each world's object height above its own start and
+  # print the ranking, so a second pass can film a world that actually lifted (VIDEO_ENV=<w>).
+  # Rendering consumes no RNG, so the same --seed reproduces the same trajectory in that pass.
+  _pwl = os.environ.get("ROLLOUT_PER_WORLD_LIFT")
+  _pw_obj = _pw_z0 = _pw_max = None
+  if _pwl:
+    from mjlab.tasks.apple_eat import object_pool as _pw_op
+    _pw_obj = _pw_op.active(env._env)
+    _pw_z0 = _pw_obj.data.root_link_pos_w[:, 2].clone()
+    _pw_max = _rt.zeros_like(_pw_z0)
+  _acc, _nacc, _dones = {}, 0, 0
+  for _k in range(int(A.rollout_steps)):
+    with _rt.inference_mode():
+      _act = _pol(_obs)
+    # ROLLOUT_TIMELINE=<csv>: per-step means across worlds of the tracking/approach state, from the
+    # observation the policy acted on. Answers "when in the episode does the policy come off the
+    # reference" -- the summary metrics average from step 0 (36 held steps included) and cannot.
+    _tl = os.environ.get("ROLLOUT_TIMELINE", "").strip()
+    if _tl:
+      _te = _obs["tracking_error"].reshape(_obs["tracking_error"].shape[0], -1).float()
+      _hg = _obs["hand_object_geometry"].reshape(_obs["hand_object_geometry"].shape[0], -1).float()
+      _rz = env._env.scene["robot"].data.root_link_pose_w[:, 2].float()
+      if _k == 0:
+        _tlf = open(_tl, "w"); _tlf.write("step,root_err_m,q_err_rad,tip_obj_min_m,tip_under_5cm,root_z_m,fallen_frac,tok_norm,dec_delta_norm,gate,ref_frame\n")
+      _ac = runner.alg.actor
+      _tok = getattr(_ac, "last_token_residual", None); _dd = getattr(_ac, "last_decoder_body_delta", None); _gt = getattr(_ac, "last_hand_control_gate", None)
+      _tokn = float(_tok.float().norm(dim=-1).mean()) if isinstance(_tok, _rt.Tensor) and _tok.shape[0] == _te.shape[0] else float("nan")
+      _ddn = float(_dd.float().norm(dim=-1).mean()) if isinstance(_dd, _rt.Tensor) and _dd.shape[0] == _te.shape[0] else float("nan")
+      _gtm = float(_gt.float().mean()) if isinstance(_gt, _rt.Tensor) else float("nan")
+      _rf = float(_obs["reference_phase"].reshape(_obs["reference_phase"].shape[0], -1)[:, 0].float().mean()) if "reference_phase" in _obs.keys() else float("nan")
+      _tlf.write(f"{_k},{_te[:, :3].norm(dim=-1).mean():.4f},{_te[:, 9:9 + 29].abs().mean():.4f},"
+                 f"{_hg[:, 40].mean():.4f},{(_hg[:, 40] < 0.05).float().mean():.3f},{_rz.mean():.3f},{(_rz < 0.5).float().mean():.3f},"
+                 f"{_tokn:.4f},{_ddn:.4f},{_gtm:.3f},{_rf:.3f}\n")
+      if _k == int(A.rollout_steps) - 1:
+        _tlf.close()
+    if os.environ.get("ZSPACE_SAMPLE_Z", "").strip() == "1" and _act.shape[-1] != env.action_manager.total_action_dim:
+      _act = runner.alg.actor.decode_z(_act)  # rollout steps the raw env, not the decoding wrapper
+    _obs, _rw, _tm, _to, _ex = env.step(_act)
+    _dones += int((_tm | _to).sum())
+    if _k in (0, 1, 5, 50, 200):
+      _a = _act.detach().float()
+      print(f"[rollout] action step={_k} shape={tuple(_a.shape)} "
+            f"absmean={_a.abs().mean().item():.5f} absmax={_a.abs().max().item():.5f} "
+            f"nonzero={(_a.abs() > 1e-8).float().mean().item():.3f}", flush=True)
+    if _pw_max is not None:
+      _pw_max = _rt.maximum(_pw_max, _pw_obj.data.root_link_pos_w[:, 2] - _pw_z0)
+    _lg = (env.extras.get("log") or {})
+    for _kk, _vv in _lg.items():
+      try:
+        _acc[_kk] = _acc.get(_kk, 0.0) + float(_vv)
+      except (TypeError, ValueError):
+        continue
+    _nacc += 1
+    if _gf is not None:
+      _gd = env.solver.mjw_data
+      _gq = _wp.to_torch(_gd.qfrc_constraint)[0].detach().cpu().numpy()
+      _gFz = float(_gq[_gdof + 2])
+      _gz = float(_wp.to_torch(_gd.xpos)[0, _gobj_b, 2].item())
+      _gc = _gd.contact
+      _gg = _wp.to_torch(_gc.geom).detach().cpu().numpy()
+      _gwid = _wp.to_torch(_gc.worldid).detach().cpu().numpy()
+      _gadr = _wp.to_torch(_gc.efc_address).detach().cpu().numpy()
+      _gdist = _wp.to_torch(_gc.dist).detach().cpu().numpy()
+      _gef = _wp.to_torch(_gd.efc.force).detach().cpu().numpy()
+      _gn, _gsum, _gmind = 0, 0.0, 1e9
+      for _ci in range(_gg.shape[0]):
+        if int(_gwid[_ci]) != 0:
+          continue
+        _ga, _gb2 = int(_gg[_ci, 0]), int(_gg[_ci, 1])
+        if _ga < 0 or _gb2 < 0:
+          continue
+        _hand = (_grobot_g[_ga] and _gobj_g[_gb2]) or (_grobot_g[_gb2] and _gobj_g[_ga])
+        if not _hand:
+          continue
+        _gn += 1
+        _gmind = min(_gmind, float(_gdist[_ci]))
+        # The normal force is the SUM over the friction-cone pyramid edges, not any one column.
+        for _e in range(_gadr.shape[1]):
+          _ai = int(_gadr[_ci, _e])
+          if _ai >= 0:
+            _gsum += float(_gef[0, _ai])
+      # A z that jumps back to the spawn height is a RESET, not a drop. Without the done flag the
+      # two are indistinguishable in this file, and reading one as the other inverts the diagnosis.
+      _gdone = int(bool(_tm[0].item()) or bool(_to[0].item()))
+      _gof = float((env.extras.get("log") or {}).get("Episode_Termination/og_object_far", float("nan")))
+      # Is the hand AT the reference grasp pose by the time the clip says contact happens? Same
+      # function the approach reward and the cf-miss termination use, so the number is the one the
+      # training actually saw -- not a second definition of "arrived".
+      from mjlab.tasks.residual_interact import staged_mdp as _gsm
+      from mjlab.tasks.apple_eat import mdp as _gam
+      _gnf = max(int(_gref_n), 1)
+      _gfr = float(_gam.local_tracking_frame(env, _gnf)[0].item())
+      _gcf = float(_gsm.cf_local(env)[0].item())
+      _gtd = float(_gsm._tip_cf_distance(env, near_threshold=0.10)[0][0].item())
+      _gf.write(f"{_k},{_gz:.5f},{_gFz:.4f},{_gw:.4f},{_gn},{_gsum:.4f},"
+                f"{(_gmind * 1000.0 if _gmind < 1e8 else float('nan')):.4f},{_gdone},{_gof:.4f},"
+                f"{_gfr:.2f},{_gcf:.1f},{_gtd:.5f}\n")
+      if _k % 20 == 0:
+        _gf.flush()
+    if _k % 100 == 0:
+      print(f"[rollout] step {_k}", flush=True)
+  print(f"[rollout] metrics over {_nacc} steps, {_dones} episode ends:", flush=True)
+  for _kk in sorted(_acc):
+    if any(_t in _kk for _t in ("physical_contact", "lift_success", "stable_not_fallen",
+                                "sequence_success", "Termination", "ep_len", "object_mpjpe")):
+      print(f"[rollout]   {_kk} = {_acc[_kk] / max(_nacc, 1):.4f}", flush=True)
+  if _gf is not None:
+    _gf.close()
+    print(f"[gfp] wrote {_gpath}", flush=True)
+  if _pw_max is not None:
+    _pw_cid = env.clip_id.detach().cpu().numpy()
+    _pw_v = _pw_max.detach().cpu().numpy()
+    for _c in sorted(set(int(x) for x in _pw_cid)):
+      _ws = [w for w in range(len(_pw_cid)) if int(_pw_cid[w]) == _c]
+      _ws.sort(key=lambda w: -float(_pw_v[w]))
+      print("[perworld] clip%d " % _c + "  ".join(
+          "w%d=%.3f" % (w, float(_pw_v[w])) for w in _ws), flush=True)
+  print("[rollout] done")
+  raise SystemExit(0)
+
+print(f"training for {A.iterations} iterations -> {log_dir}")
+
+if os.environ.get("MIX_VERIFY"):
+  import torch as _t, numpy as _np
+  import mujoco as _mj
+  from mjlab.tasks.apple_eat import mdp as _am, object_pool as _op
+  _e = env._env
+  _ref = _am._ref(str(_e.device))
+  _n = int(_ref["n_frames"])
+  _cid = env.clip_id
+  print("\n[V] ===================== mixed-env verification =====================")
+
+  # (4) RSI: does each env start at a DIFFERENT frame of its own clip, or all at frame 0?
+  _sf = _am._reference_start_frame(_e, _n)
+  _lo, _hi = _am._clip_bounds(_e, _n)
+  _local = (_sf - _lo)
+  print(f"[V] start frame, local to each clip: {[int(x) for x in _local[:8]]}")
+  print(f"[V]   distinct local start frames  : {sorted(set(int(x) for x in _local))[:12]}")
+  print(f"[V]   per-clip band [lo,hi]        : {[(int(a),int(b)) for a,b in zip(_lo[:4],_hi[:4])]}")
+
+  # (5) object mass per world: does each clip's object carry its own mass?
+  _mm = env.solver.mj_model
+  _oid = [g for g in range(_mm.nbody)
+          if "apple" in (_mj.mj_id2name(_mm, _mj.mjtObj.mjOBJ_BODY, g) or "")]
+  print(f"[V] object bodies in mj_model: {[_mj.mj_id2name(_mm,_mj.mjtObj.mjOBJ_BODY,g) for g in _oid]}")
+  for _b in _oid:
+    print(f"[V]   body {_b} mass={float(_mm.body_mass[_b]):.5f} kg "
+          f"inertia={[round(float(x),6) for x in _mm.body_inertia[_b]]}")
+  try:
+    import warp as _wp
+    _bm = _wp.to_torch(env.solver.mjw_model.body_mass)
+    print(f"[V] mjw_model.body_mass shape {tuple(_bm.shape)}")
+    if _bm.ndim == 2:
+      for _b in _oid:
+        _col = _bm[:, _b]
+        print(f"[V]   per-world mass of body {_b}: first8={[round(float(x),5) for x in _col[:8]]} "
+              f"distinct={sorted(set(round(float(x),5) for x in _col))[:6]}")
+    else:
+      print(f"[V]   body_mass is shared across worlds (ndim={_bm.ndim}) -> every clip uses the same mass")
+  except Exception as _ex:
+    print(f"[V]   mjw body_mass read failed: {type(_ex).__name__}: {_ex}")
+
+  # object collider extent per world, as an independent check that the MESH really differs
+  try:
+    _gid = [g for g in range(_mm.ngeom)
+            if "apple" in (_mj.mj_id2name(_mm, _mj.mjtObj.mjOBJ_GEOM, g) or "")]
+    for _g in _gid:
+      print(f"[V] geom {_mj.mj_id2name(_mm,_mj.mjtObj.mjOBJ_GEOM,_g)} type={int(_mm.geom_type[_g])} "
+            f"size={[round(float(x),4) for x in _mm.geom_size[_g]]} "
+            f"rbound={float(_mm.geom_rbound[_g]):.4f}")
+  except Exception as _ex:
+    print(f"[V]   geom read failed: {type(_ex).__name__}")
+  raise SystemExit(0)
+if os.environ.get("MIX_FAR_STATS"):
+  import torch as _st
+  from mjlab.tasks.residual_interact import omnigrasp_faithful_mdp as _ofm
+  from mjlab.tasks.apple_eat import mdp as _sam, object_pool as _sop
+  from mjlab.tasks.residual_interact import mdp as _srm
+  _orig_far = _ofm.og_object_far_termination
+  _st_state = {"n": 0}
+  def _far_stats(env, *a, **kw):
+    out = _orig_far(env, *a, **kw)
+    try:
+      _st_state["n"] += 1
+      if _st_state["n"] % 200 == 0:
+        ref = _sam._ref(str(env.device))
+        cid = _sam._clip_id(env)
+        obj = _sop.active(env)
+        fr = _sam._tracking_frame(env, ref["n_frames"])
+        rp = _srm._reference_object_pos_w(env, ref, fr)
+        d = (obj.data.root_link_pos_w - rp).norm(dim=-1)
+        nc = int(cid.max().item()) + 1
+        lines = []
+        for c in range(nc):
+          m = cid == c
+          if not bool(m.any()): continue
+          fires = out[m]
+          lines.append("c%d fire=%.4f d_mean=%.3f d_p95=%.3f d_max=%.3f elb=%.1f" % (
+            c, fires.float().mean().item(), d[m].mean().item(),
+            d[m].quantile(0.95).item(), d[m].max().item(),
+            env.episode_length_buf[m].float().mean().item()))
+        print("[FARSTAT %d] " % _st_state["n"] + " | ".join(lines), flush=True)
+        if _st_state["n"] == 200:
+          try:
+            _m = getattr(obj.data, "default_mass", None)
+            print("[FARSTAT mass] shape=%s" % (None if _m is None else tuple(_m.shape),), flush=True)
+            if _m is not None and _m.ndim >= 2:
+              _pm = _m.flatten(1).sum(dim=-1)
+              for c in range(nc):
+                mm = cid == c
+                vv = sorted(set(round(float(x), 5) for x in _pm[mm].tolist()))
+                print("[FARSTAT mass] clip %d n=%d distinct=%s" % (c, int(mm.sum()), vv[:5]), flush=True)
+          except Exception as _e2:
+            print("[FARSTAT mass] failed %s: %s" % (type(_e2).__name__, _e2), flush=True)
+          try:
+            base = env._reference_start_frame
+            for c in range(nc):
+              mm = cid == c
+              vv = sorted(set(int(x) for x in base[mm].tolist()))
+              print("[FARSTAT rsi] clip %d n=%d ndistinct=%d %s" % (c, int(mm.sum()), len(vv), vv[:8]), flush=True)
+          except Exception as _e3:
+            print("[FARSTAT rsi] failed %s: %s" % (type(_e3).__name__, _e3), flush=True)
+          try:
+            for c in range(nc):
+              mm = cid == c
+              vv = sorted(set(round(float(x), 4) for x in d[mm].tolist()))
+              print("[FARSTAT dist] clip %d n=%d ndistinct=%d top=%s" % (c, int(mm.sum()), len(vv), vv[-6:]), flush=True)
+          except Exception as _e4:
+            print("[FARSTAT dist] failed %s: %s" % (type(_e4).__name__, _e4), flush=True)
+          try:
+            import torch as _T
+            hit = (d - 0.1216).abs() < 2e-4
+            print("[FARSTAT hit] n=%d of %d, clips=%s" % (
+              int(hit.sum()), d.numel(),
+              sorted(set(int(x) for x in cid[hit].tolist()))), flush=True)
+            _op_ = obj.data.root_link_pos_w
+            _eo = env.scene.env_origins
+            idx = _T.nonzero(hit).flatten()[:6]
+            for k in idx.tolist():
+              print("[FARSTAT hit] env=%d clip=%d frame=%d obj=%s ref=%s delta=%s origin=%s elb=%d" % (
+                k, int(cid[k]), int(fr[k]),
+                [round(float(x),4) for x in _op_[k].tolist()],
+                [round(float(x),4) for x in rp[k].tolist()],
+                [round(float(x),4) for x in (_op_[k]-rp[k]).tolist()],
+                [round(float(x),3) for x in _eo[k].tolist()],
+                int(env.episode_length_buf[k])), flush=True)
+            miss = ~hit
+            idx2 = _T.nonzero(miss).flatten()[:4]
+            for k in idx2.tolist():
+              print("[FARSTAT ok ] env=%d clip=%d frame=%d obj=%s ref=%s delta=%s origin=%s elb=%d" % (
+                k, int(cid[k]), int(fr[k]),
+                [round(float(x),4) for x in _op_[k].tolist()],
+                [round(float(x),4) for x in rp[k].tolist()],
+                [round(float(x),4) for x in (_op_[k]-rp[k]).tolist()],
+                [round(float(x),3) for x in _eo[k].tolist()],
+                int(env.episode_length_buf[k])), flush=True)
+          except Exception as _e5:
+            print("[FARSTAT hit] failed %s: %s" % (type(_e5).__name__, _e5), flush=True)
+          try:
+            import torch as _T
+            tb = env.scene["table"]
+            tz = tb.data.root_link_pos_w[:, 2]
+            hit = (d - 0.1216).abs() < 2e-4
+            for c in range(nc):
+              mm = cid == c
+              vv = sorted(set(round(float(x), 4) for x in tz[mm].tolist()))
+              nh = int((mm & hit).sum())
+              print("[FARSTAT table] clip %d n=%d nhit=%d distinct_tablez=%d %s" % (
+                c, int(mm.sum()), nh, len(vv), vv[:6]), flush=True)
+            print("[FARSTAT table] hit tablez mean=%.4f  ok tablez mean=%.4f" % (
+              float(tz[hit].mean()), float(tz[~hit].mean())), flush=True)
+            vz = obj.data.root_link_lin_vel_w[:, 2] if hasattr(obj.data, "root_link_lin_vel_w") else None
+            if vz is not None:
+              print("[FARSTAT table] hit objvz mean=%.3f  ok objvz mean=%.3f" % (
+                float(vz[hit].mean()), float(vz[~hit].mean())), flush=True)
+          except Exception as _e6:
+            print("[FARSTAT table] failed %s: %s" % (type(_e6).__name__, _e6), flush=True)
+    except Exception as _e:
+      print("[FARSTAT] failed: %s: %s" % (type(_e).__name__, _e), flush=True)
+    return out
+  _tm = env.termination_manager
+  _i = _tm._term_names.index("og_object_far")
+  _orig_far = _tm._term_cfgs[_i].func
+  _tm._term_cfgs[_i].func = _far_stats
+  print("[FARSTAT] installed on the live termination manager", flush=True)
+if os.environ.get("MIX_FAR_PROBE"):
+  import torch as _t
+  import mujoco as _mj
+  from mjlab.tasks.apple_eat import mdp as _am, object_pool as _op
+  from mjlab.tasks.residual_interact import mdp as _rmdp
+  _e = env._env
+  _ref = _am._ref(str(_e.device))
+  _n = int(_ref["n_frames"])
+  _cid = env.clip_id
+  _obj = _op.active(_e)
+  _names = [os.path.basename(p) for p in os.environ.get("APPLE_EAT_PKL_MIX", "").split(",")]
+  _act = _t.zeros((_e.num_envs, env.action_manager.total_action_dim), device=_e.device)
+  print("\n[FAR] step | clip | localframe | objz | refz | dist(mm) | elb")
+  for _k in range(24):
+    _fr = _am._tracking_frame(_e, _n)
+    _lf = _am.local_tracking_frame(_e, _n)
+    _rp = _rmdp._reference_object_pos_w(_e, _ref, _fr)
+    _op_w = _obj.data.root_link_pos_w
+    _d = (_op_w - _rp).norm(dim=-1)
+    if _k in (0, 1, 2, 3, 5, 8, 12, 20, 23):
+      for _i in range(_e.num_envs):
+        _c = int(_cid[_i])
+        _flag = "  <-- FAR" if float(_d[_i]) > 0.12 else ""
+        print(f"[FAR] {_k:3d} | {_c} {_names[_c][:22]:<22} | {int(_lf[_i]):5d} | "
+              f"{float(_op_w[_i][2]):.4f} | {float(_rp[_i][2]):.4f} | "
+              f"{float(_d[_i])*1000:8.1f}{_flag}   elb={int(_e.episode_length_buf[_i])}")
+      print()
+    if os.environ.get("ZSPACE_SAMPLE_Z", "").strip() == "1" and _act.shape[-1] != env.action_manager.total_action_dim:
+      _act = runner.alg.actor.decode_z(_act)
+    env.step(_act)
+  raise SystemExit(0)
+runner.learn(num_learning_iterations=A.iterations, init_at_random_ep_len=True)

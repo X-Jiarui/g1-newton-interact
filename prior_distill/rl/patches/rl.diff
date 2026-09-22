@@ -1,0 +1,42 @@
+--- /private/tmp/claude-501/-Users-jerryxu-Documents/268574d7-6fef-4f37-9bd3-2e8b4b763aac/scratchpad/gpu3code/rl.py	2026-09-20 16:44:38
++++ /private/tmp/claude-501/-Users-jerryxu-Documents/268574d7-6fef-4f37-9bd3-2e8b4b763aac/scratchpad/gpu1code/rl.py	2026-09-21 22:28:06
+@@ -811,6 +811,11 @@
+       int(v) for v in train_cfg.pop("frame_hidden_dims", (128, 128))
+     )
+     self._token_residual_clip = float(train_cfg.pop("token_residual_clip", 0.1))
++    if os.environ.get("ZSPACE_STUDENT", "").strip():
++      # zspace arms: the clip is in z units and set by ZSPACE_TOKEN_CLIP (residual_actor.py). The
++      # agent config's 0.1 is the hidden-token clip; letting it through here (and re-applying it
++      # from a checkpoint on load) silently shrank the trained z residual 10x at rollout.
++      self._token_residual_clip = float(os.environ.get("ZSPACE_TOKEN_CLIP", "1.0"))
+     self._token_residual_gain = float(train_cfg.pop("token_residual_gain", 1.0))
+     raw_body_std = train_cfg.pop("body_init_std", None)
+     raw_hand_std = train_cfg.pop("hand_init_std", None)
+@@ -1811,6 +1816,9 @@
+     else:
+       previous_delta = torch.zeros_like(base)
+     final = actions.detach().to(env.device)
++    if final.shape[-1] != base.shape[-1]:
++      # ZSPACE_SAMPLE_Z: `actions` is the z residual; the executed 69-D action is on the actor
++      final = actor.last_final_action.detach().to(env.device)
+     if zero_residual or not hasattr(actor, "last_action_mean"):
+       action_mean = final
+     else:
+@@ -2837,6 +2845,8 @@
+     self._token_residual_clip = float(
+       loaded_dict.get("token_residual_clip", self._token_residual_clip)
+     )
++    if os.environ.get("ZSPACE_STUDENT", "").strip():
++      self._token_residual_clip = float(os.environ.get("ZSPACE_TOKEN_CLIP", "1.0"))
+     self._token_residual_gain = float(
+       loaded_dict.get("token_residual_gain", self._token_residual_gain)
+     )
+@@ -2967,6 +2977,8 @@
+       actor.hand_residual_gain = self._hand_residual_gain
+     _hs = os.environ.get("HAND_INIT_STD", "").strip()
+     if _hs and hasattr(actor, "_set_initial_std"):
++      if actor._action_std().numel() != mdp.ACTION_DIM:
++        return
+       _before = float(actor._action_std()[mdp.NUM_BODY :].mean())
+       actor._set_initial_std(
+         body_init_std=None, hand_init_std=float(_hs), disabled_init_std=None
